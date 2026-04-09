@@ -83,6 +83,35 @@
 npx -y @just-every/code
 ```
 
+### AI Workspace
+
+The repository now includes a dedicated AI tooling area under `tools/ai-workspace` that pairs the local RAG server with the OpenRouter proxy.
+
+From the repo root, you can inspect and launch it with:
+
+```powershell
+coder ai help
+coder ai status
+coder ai smoke
+coder ai dev
+```
+
+`coder ai dev` starts the local AI services and then hands off to the normal Every Code CLI once they are ready.
+That handoff uses a separate AI home directory (`~/.every-code-ai` or `%USERPROFILE%\.every-code-ai`) instead of the normal Codex config folder, so the proxy-backed workflow stays isolated.
+The generated AI-home config points a dedicated proxy provider at the local OpenRouter proxy. The proxy URL and optional API key can live in the separate AI settings file, so this path avoids direct GPT traffic and does not require a separate login flow on launch.
+
+The same commands are also available from the root package scripts:
+
+```powershell
+npm run ai:help
+npm run ai:status
+npm run ai:rag
+npm run ai:proxy
+npm run ai:dev
+npm run ai:check
+npm run ai:smoke
+```
+
 ### Install & Run
 
 ```bash

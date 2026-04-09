@@ -1,4 +1,5 @@
 [target.'cfg(all(windows, target_env = "msvc"))']
+linker = "rust-lld"
 rustflags = ["-C", "link-arg=/STACK:8388608"]
 
 # MSVC emits a warning about code that may trip "Cortex-A53 MPCore processor bug #843419" (see

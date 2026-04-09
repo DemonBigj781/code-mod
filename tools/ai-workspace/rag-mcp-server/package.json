@@ -1,0 +1,41 @@
+{
+  "name": "rag-mcp-server",
+  "version": "1.0.0",
+  "description": "Standalone MCP RAG server for local files, URLs, and source code.",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch --clear-screen=false src/server.ts",
+    "gui": "tsx watch --clear-screen=false src/gui-server.ts",
+    "gui:once": "tsx src/gui-server.ts",
+    "dev:gui": "tsx watch --clear-screen=false src/gui-server.ts",
+    "gui:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-gui.ps1",
+    "gui:backend:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-gui.ps1",
+    "embeddings:optimum": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-optimum-embeddings.ps1",
+    "embeddings:optimum:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-optimum-embeddings.ps1",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-server.ps1",
+    "test": "node --test --import tsx test/rag.test.ts"
+  },
+  "keywords": [
+    "mcp",
+    "rag",
+    "embeddings",
+    "retrieval"
+  ],
+  "author": "Codex",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@xenova/transformers": "^2.17.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

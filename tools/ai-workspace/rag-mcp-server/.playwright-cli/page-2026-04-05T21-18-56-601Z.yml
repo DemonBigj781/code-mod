@@ -1,0 +1,119 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - heading "RAG MCP GUI" [level=1] [ref=e3]
+    - generic [ref=e4]: A local browser console for ingesting files or folders, querying the index, and inspecting retrieved evidence. This talks to the same persistent index used by the MCP server.
+    - generic [ref=e5]:
+      - generic [ref=e119]: "Sources: 2130"
+      - generic [ref=e120]: "Chunks: 20080"
+      - generic [ref=e121]: "Embedding: optimum:sentence-transformers/paraphrase-MiniLM-L3-v2"
+      - generic [ref=e122]: "Updated: 2026-04-05T21:14:14.977Z"
+  - main [ref=e10]:
+    - generic [ref=e11]:
+      - heading "Ingest" [level=2] [ref=e12]
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - heading "Directory ingest" [level=3] [ref=e15]
+          - generic [ref=e16]: "Scanning folder: Scanned dirs: 1, Scanned entries: 1, Discovered files: 1, Current folder: C:\\Users\\user\\Documents\\Ai workspace\\rag-mcp-server\\data\\playwright-crash-test\\note.md Current file: Discovered file"
+          - generic [ref=e17]: "Directory ingest job d0edf0cd-30a7-423c-b40d-32c0ce85c896 Status: scanning Progress: 2/0 Current: C:\\Users\\user\\Documents\\Ai workspace\\rag-mcp-server\\data\\playwright-crash-test\\note.md Detail: Discovered file Updated: 2026-04-05T21:18:54.673Z"
+          - generic [ref=e18]:
+            - generic [ref=e19]:
+              - generic [ref=e20]: Directory path
+              - textbox "Directory path" [ref=e21]:
+                - /placeholder: C:/notes or ./docs
+                - text: C:\Users\user\Documents\Ai workspace\rag-mcp-server\data\playwright-crash-test
+            - generic [ref=e22]:
+              - generic [ref=e23]: Recursive
+              - combobox "Recursive" [ref=e24]:
+                - option "Yes" [selected]
+                - option "No"
+            - generic [ref=e25]:
+              - generic [ref=e26]: Include hidden
+              - combobox "Include hidden" [ref=e27]:
+                - option "No" [selected]
+                - option "Yes"
+          - button "Ingest directory" [active] [ref=e29] [cursor=pointer]
+          - generic [ref=e30]:
+            - heading "Ingest performance" [level=3] [ref=e31]
+            - generic [ref=e32]: No ingest metrics yet.
+            - generic [ref=e33]: Waiting for an ingest run.
+        - generic [ref=e34]:
+          - heading "Queue" [level=3] [ref=e35]
+          - generic [ref=e36]: Queued, scanning, running, interrupted, and completed jobs.
+          - generic [ref=e37]: "- 27a36592-79e5-4885-aabf-eb92fba4f8fd [interrupted] path: C:\\Users\\user\\Documents\\Ai workspace\\RimworldDecompile-main startedAt: 2026-04-02T23:17:37.003Z progress: 338/12981 ETA: 2619h 10m current file: C:\\Users\\user\\Documents\\Ai workspace\\RimworldDecompile-main\\Verse.AI\\Job.cs scan: dirs=0, entries=0, files=12981 detail: Indexed Verse.AI\\JailbreakerMentalStateUtility.cs - 7f4a5a9a-7793-4780-b646-6a3006df229d [complete] target: queue test startedAt: 2026-04-03T13:03:11.009Z progress: 1/1 ETA: 0s current file: queue test sources: 1/1 scan: dirs=0, entries=0, files=1 detail: Queue complete - d0edf0cd-30a7-423c-b40d-32c0ce85c896 [queued] path: C:\\Users\\user\\Documents\\Ai workspace\\rag-mcp-server\\data\\playwright-crash-test startedAt: 2026-04-05T21:18:54.529Z progress: 1/1 ETA: 0s current folder: C:\\Users\\user\\Documents\\Ai workspace\\rag-mcp-server\\data\\playwright-crash-test scan: dirs=1, entries=1, files=1 detail: Discovery complete"
+          - generic [ref=e38]:
+            - button "Refresh queue" [ref=e39] [cursor=pointer]
+            - button "Pause queue" [ref=e40] [cursor=pointer]
+            - button "Clear queue" [ref=e41] [cursor=pointer]
+            - button "Resume queue" [ref=e42] [cursor=pointer]
+        - generic [ref=e43]:
+          - heading "Embedding workers" [level=3] [ref=e44]
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - generic [ref=e47]: Local worker count
+              - spinbutton "Local worker count" [ref=e48]: "6"
+            - generic [ref=e50]: Using 6 workers.
+          - button "Save worker count" [ref=e52] [cursor=pointer]
+        - generic [ref=e53]:
+          - heading "Upload files" [level=3] [ref=e54]
+          - generic [ref=e55]:
+            - generic [ref=e56]:
+              - generic [ref=e57]: Choose files
+              - button "Choose files" [ref=e58]
+            - generic [ref=e59]:
+              - generic [ref=e60]: Choose folder
+              - button "Choose folder" [ref=e61]
+            - generic [ref=e63]: Files are read in the browser and sent as inline content, so this works even when the browser cannot expose a real local path.
+          - generic [ref=e64]:
+            - button "Ingest selected files" [ref=e65] [cursor=pointer]
+            - button "Ingest selected folder" [ref=e66] [cursor=pointer]
+        - generic [ref=e67]: Drop files or folders here to ingest immediately
+        - generic [ref=e68]:
+          - heading "Bulk file ingest" [level=3] [ref=e69]
+          - generic [ref=e70]:
+            - generic [ref=e71]:
+              - generic [ref=e72]: Default kind
+              - combobox "Default kind" [ref=e73]:
+                - option "file" [selected]
+                - option "code"
+                - option "text"
+                - option "url"
+            - generic [ref=e74]:
+              - generic [ref=e75]: Default label prefix
+              - textbox "Default label prefix" [ref=e76]:
+                - /placeholder: Optional
+            - generic [ref=e77]:
+              - generic [ref=e78]: Sources, one per line
+              - textbox "Sources, one per line" [ref=e79]:
+                - /placeholder: "C:/path/to/a.md\nhttps://example.com/docs\nC:/path/to/app.ts"
+          - button "Ingest entries" [ref=e81] [cursor=pointer]
+    - generic [ref=e82]:
+      - heading "Query" [level=2] [ref=e83]
+      - generic [ref=e84]:
+        - generic [ref=e85]:
+          - heading "Search the index" [level=3] [ref=e86]
+          - generic [ref=e87]:
+            - generic [ref=e88]:
+              - generic [ref=e89]: Query
+              - textbox "Query" [ref=e90]:
+                - /placeholder: What do we already know about source code ingestion?
+            - generic [ref=e91]:
+              - generic [ref=e92]: Top K
+              - spinbutton "Top K" [ref=e93]: "5"
+            - generic [ref=e94]:
+              - generic [ref=e95]: Source filter (comma separated ids)
+              - textbox "Source filter (comma separated ids)" [ref=e96]:
+                - /placeholder: Optional
+          - generic [ref=e97]:
+            - button "Query index" [ref=e98] [cursor=pointer]
+            - button "Search sources" [ref=e99] [cursor=pointer]
+          - generic [ref=e101]:
+            - generic [ref=e102]: Source search
+            - textbox "Source search" [ref=e103]:
+              - /placeholder: Search indexed sources by label or path
+        - generic [ref=e104]:
+          - generic [ref=e105]:
+            - heading "Results" [level=3] [ref=e106]
+            - generic [ref=e107]: No search has been run yet.
+          - generic [ref=e108]:
+            - heading "Indexed sources" [level=3] [ref=e109]
+            - generic [ref=e110]: No source inventory loaded yet.
