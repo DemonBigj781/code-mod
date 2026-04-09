@@ -4,7 +4,7 @@
 import path from "path";
 import { fileURLToPath } from "url";
 import { platform as nodePlatform, arch as nodeArch } from "os";
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 import { get as httpsGet } from "https";
 import { runPostinstall } from "../postinstall.js";
 
@@ -13,6 +13,30 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const { platform, arch } = process;
+const cliArgs = process.argv.slice(2);
+const aiHelperPath = path.join(__dirname, "..", "..", "scripts", "ai-workspace.mjs");
+const aiDevHelperPath = path.join(__dirname, "..", "..", "scripts", "ai-workspace-dev.mjs");
+
+if (cliArgs[0] === "ai" && cliArgs[1] !== "dev") {
+  const result = spawnSync(process.execPath, [aiHelperPath, cliArgs[1] ?? "help", ...cliArgs.slice(2)], {
+    stdio: "inherit",
+    env: { ...process.env },
+    shell: false,
+  });
+  if (result.error) {
+    console.error(result.error);
+    process.exit(1);
+  }
+  if (result.signal) {
+    try {
+      process.kill(process.pid, result.signal);
+    } catch {
+      process.exit(1);
+    }
+  } else {
+    process.exit(result.status ?? 0);
+  }
+}
 
 // Important: Never delegate to another system's `code` binary (e.g., VS Code).
 // When users run via `npx @just-every/code`, we must always execute our
@@ -312,7 +336,6 @@ try {
 
 // Check if binary exists and try to fix permissions if needed
 // fs imports are above; keep for readability if tree-shaken by bundlers
-import { spawnSync } from "child_process";
 if (existsSync(binaryPath)) {
   try {
     // Ensure binary is executable on Unix-like systems
@@ -358,6 +381,36 @@ if (!validation.ok) {
     console.error("  npx -y @just-every/code@latest  (inside WSL)");
   }
   process.exit(1);
+}
+
+const runAiHelper = (helperPath, helperArgs = []) => {
+  const result = spawnSync(process.execPath, [helperPath, ...helperArgs], {
+    stdio: "inherit",
+    env: { ...process.env, CODE_BINARY_PATH: binaryPath },
+    shell: false,
+  });
+  if (result.error) {
+    console.error(result.error);
+    process.exit(1);
+  }
+  if (result.signal) {
+    try {
+      process.kill(process.pid, result.signal);
+    } catch {
+      process.exit(1);
+    }
+  } else {
+    process.exit(result.status ?? 0);
+  }
+};
+
+if (cliArgs[0] === "ai") {
+  const aiCommand = cliArgs[1] ?? "help";
+  if (aiCommand === "dev") {
+    runAiHelper(aiDevHelperPath, cliArgs.slice(2));
+  } else {
+    runAiHelper(aiHelperPath, [aiCommand, ...cliArgs.slice(2)]);
+  }
 }
 
 // If running under npx/npm, emit a concise notice about which binary path is used

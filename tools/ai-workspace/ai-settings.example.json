@@ -1,0 +1,9 @@
+{
+  "proxyBaseUrl": "http://127.0.0.1:8080",
+  "proxyPort": 8080,
+  "uiPort": 3000,
+  "ragGuiUrl": "http://127.0.0.1:8787",
+  "codeHome": "%USERPROFILE%\\.every-code-ai",
+  "openrouterApiKey": "sk-REPLACE-ME",
+  "openrouterProxyBaseUrl": "http://127.0.0.1:8080/v1"
+}

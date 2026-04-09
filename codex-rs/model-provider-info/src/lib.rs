@@ -33,6 +33,7 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+pub const LOCAL_PROXY_PROVIDER_ID: &str = "local-proxy";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.\nMore info: https://github.com/openai/codex/discussions/7782";
 pub const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
 pub const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.\nMore info: https://github.com/openai/codex/discussions/7782";
@@ -217,15 +218,25 @@ impl ModelProviderInfo {
     pub fn api_key(&self) -> CodexResult<Option<String>> {
         match &self.env_key {
             Some(env_key) => {
-                let api_key = std::env::var(env_key)
-                    .ok()
-                    .filter(|v| !v.trim().is_empty())
-                    .ok_or_else(|| {
-                        CodexErr::EnvVar(EnvVarError {
-                            var: env_key.clone(),
-                            instructions: self.env_key_instructions.clone(),
-                        })
-                    })?;
+                let api_key = std::env::var(env_key).ok().filter(|v| !v.trim().is_empty()).or_else(|| {
+                    if env_key == "OPENROUTER_API_KEY" {
+                        std::env::var("OPENROUTER_API_KEYS")
+                            .ok()
+                            .and_then(|v| {
+                                v.split(',')
+                                    .map(str::trim)
+                                    .find(|candidate| !candidate.is_empty())
+                                    .map(ToString::to_string)
+                            })
+                    } else {
+                        None
+                    }
+                }).ok_or_else(|| {
+                    CodexErr::EnvVar(EnvVarError {
+                        var: env_key.clone(),
+                        instructions: self.env_key_instructions.clone(),
+                    })
+                })?;
                 Ok(Some(api_key))
             }
             None => Ok(None),
@@ -317,6 +328,7 @@ pub fn built_in_model_providers(
 ) -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
     let openai_provider = P::create_openai_provider(openai_base_url);
+    let local_proxy_provider = create_local_proxy_provider();
 
     // We do not want to be in the business of adjucating which third-party
     // providers are bundled with Codex CLI, so we only include the OpenAI and
@@ -324,6 +336,7 @@ pub fn built_in_model_providers(
     // `model_providers` in config.toml to add their own providers.
     [
         (OPENAI_PROVIDER_ID, openai_provider),
+        (LOCAL_PROXY_PROVIDER_ID, local_proxy_provider),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),
@@ -336,6 +349,39 @@ pub fn built_in_model_providers(
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect()
+}
+
+pub fn create_local_proxy_provider() -> ModelProviderInfo {
+    let default_base_url = std::env::var("EVERY_CODE_PROXY_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:8080/v1".to_string());
+
+    let base_url = std::env::var("EVERY_CODE_PROXY_OPENAI_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(default_base_url);
+
+    ModelProviderInfo {
+        name: "Local Proxy".into(),
+        base_url: Some(base_url),
+        env_key: Some("OPENROUTER_API_KEY".into()),
+        env_key_instructions: Some(
+            "Set OPENROUTER_API_KEY, or OPENROUTER_API_KEYS with a comma-separated list, for the local Every Code proxy provider.".into(),
+        ),
+        experimental_bearer_token: None,
+        auth: None,
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: None,
+        stream_max_retries: None,
+        stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
+        requires_openai_auth: false,
+        supports_websockets: false,
+    }
 }
 
 pub fn create_oss_provider(default_provider_port: u16, wire_api: WireApi) -> ModelProviderInfo {

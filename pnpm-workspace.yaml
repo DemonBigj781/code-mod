@@ -3,6 +3,8 @@ packages:
   - codex-rs/responses-api-proxy/npm
   - sdk/typescript
   - shell-tool-mcp
+  - tools/ai-workspace/rag-mcp-server
+  - tools/ai-workspace/openrouter-proxy
 
 ignoredBuiltDependencies:
   - esbuild
