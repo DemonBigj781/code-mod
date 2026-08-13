@@ -13,7 +13,7 @@ changes:
     path: changes/0001-canonical-history-recovery.md
     description: Rebase every integration onto the intended codex-mod source line.
     spec: null
-    status: in-progress
+    status: complete
     depends_on: []
   # - id: "NNNN"
   #   name: <change-name>

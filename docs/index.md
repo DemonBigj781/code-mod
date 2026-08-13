@@ -34,4 +34,4 @@ Use these docs to install, configure, and operate Every Code (Code).
 
 | # | Change | Spec | Status | Depends On |
 |---|--------|------|--------|------------|
-| 0001 | [Canonical history recovery](changes/0001-canonical-history-recovery.md) | — | in-progress | — |
+| 0001 | [Canonical history recovery](changes/0001-canonical-history-recovery.md) | — | complete | — |

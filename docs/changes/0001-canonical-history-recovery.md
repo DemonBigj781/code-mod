@@ -1,6 +1,6 @@
 # Canonical History Recovery
 
-**Status:** in-progress
+**Status:** complete
 
 ## Decision
 
@@ -64,11 +64,11 @@ does not make the later forks interchangeable.
 
 ## Tasks
 
-- [ ] Deliver one canonical Code update
+- [x] Deliver one canonical Code update
   - [x] Replace wrong-fork `main` ancestry with the recorded immateria base and push the checkpoint.
   - [x] Assign `origin` to `DemonBigj781/code-mod`, assign `upstream` to `immateria/codex-mod`, and remove the `just-every/code` remote.
   - [x] Reconcile OpenRouter routing, picker/provider selection, model variants, CPU/history performance, startup safety, remote compact fallback, and backend changes on canonical `main`.
   - [x] Recover and reconcile the uncommitted backend/runtime source from `projects/Linux_Project/codex-mod`.
-  - [ ] Build and validate the combined executable from canonical `main`.
-  - [ ] Remove all Code-related linked worktrees and obsolete local variant branches.
-  - [ ] Rename the sole checkout to `/var/home/jack/projects/AI_Project/code`, enable the pre-push hook, and verify the history guard locally.
+  - [x] Build and validate the combined executable from canonical `main`.
+  - [x] Remove all Code-related linked worktrees and obsolete local variant branches.
+  - [x] Rename the sole checkout to `/var/home/jack/projects/AI_Project/code`, enable the pre-push hook, and verify the history guard locally.
