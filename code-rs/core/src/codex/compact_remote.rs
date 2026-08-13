@@ -3,8 +3,10 @@ use std::sync::Arc;
 use super::compact::{
     apply_emergency_compaction_fallback,
     is_context_overflow_error,
+    perform_compaction,
     prune_orphan_tool_outputs,
     response_input_from_core_items,
+    run_inline_auto_compact_task,
     sanitize_items_for_compact,
     send_compaction_checkpoint_warning,
 };
@@ -23,10 +25,18 @@ use code_protocol::models::ResponseItem;
 use code_protocol::protocol::CompactedItem;
 use code_protocol::protocol::RolloutItem;
 use crate::util::backoff;
+use reqwest::StatusCode;
 use std::time::Duration;
 
 const MAX_REMOTE_COMPACT_CONTEXT_OVERFLOW_TRIMS: usize = 32;
 const MAX_REMOTE_COMPACT_USAGE_LIMIT_RETRIES: usize = 2;
+
+fn should_fallback_to_local_compaction(err: &CodexErr) -> bool {
+    matches!(
+        err,
+        CodexErr::UnexpectedStatus(response) if response.status == StatusCode::NOT_FOUND
+    )
+}
 
 pub(super) async fn run_inline_remote_auto_compact_task(
     sess: Arc<Session>,
@@ -36,6 +46,13 @@ pub(super) async fn run_inline_remote_auto_compact_task(
     let sub_id = sess.next_internal_sub_id();
     match run_remote_compact_task_inner(&sess, &turn_context, &sub_id, extra_input).await {
         Ok(history) => history,
+        Err(err) if should_fallback_to_local_compaction(&err) => {
+            tracing::warn!(
+                error = %err,
+                "remote compact endpoint is unavailable; falling back to local compaction"
+            );
+            run_inline_auto_compact_task(sess, turn_context).await
+        }
         Err(err) => {
             let event = sess.make_event(
                 &sub_id,
@@ -55,12 +72,20 @@ pub(super) async fn run_remote_compact_task(
     sub_id: String,
     extra_input: Vec<InputItem>,
 ) -> CodexResult<()> {
+    let fallback_input = extra_input.clone();
     match run_remote_compact_task_inner(&sess, &turn_context, &sub_id, extra_input).await {
         Ok(_history) => {
             // Mirror local compaction behaviour: clear the running task when the
             // compaction finished successfully so the UI can unblock.
             sess.remove_task(&sub_id);
             Ok(())
+        }
+        Err(err) if should_fallback_to_local_compaction(&err) => {
+            tracing::warn!(
+                error = %err,
+                "remote compact endpoint is unavailable; falling back to local compaction"
+            );
+            perform_compaction(sess, turn_context, sub_id, fallback_input, true).await
         }
         Err(err) => {
             let event = sess.make_event(
@@ -185,6 +210,7 @@ async fn run_remote_compact_task_inner(
                 retries = 0;
                 continue;
             }
+            Err(err) if should_fallback_to_local_compaction(&err) => return Err(err),
             Err(err) => {
                 if retries < max_retries {
                     retries += 1;
@@ -229,4 +255,29 @@ async fn run_remote_compact_task_inner(
     sess.send_event(event).await;
 
     Ok(new_history)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_fallback_to_local_compaction;
+    use crate::error::CodexErr;
+    use crate::error::UnexpectedResponseError;
+    use reqwest::StatusCode;
+
+    #[test]
+    fn missing_remote_compact_endpoint_falls_back_locally() {
+        let not_found = CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::NOT_FOUND,
+            body: r#"{"detail":"Not Found"}"#.to_string(),
+            request_id: None,
+        });
+        let server_error = CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            body: "temporary failure".to_string(),
+            request_id: None,
+        });
+
+        assert!(should_fallback_to_local_compaction(&not_found));
+        assert!(!should_fallback_to_local_compaction(&server_error));
+    }
 }
