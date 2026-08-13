@@ -770,6 +770,8 @@ pub(crate) struct ChatWidget<'a> {
     allow_remote_default_at_startup: bool,
     /// Tracks whether the user explicitly selected a chat model in this session.
     chat_model_selected_explicitly: bool,
+    /// Provider/profile in effect before the OpenRouter Free virtual model was selected.
+    model_provider_before_openrouter: Option<(String, ModelProviderInfo, Option<String>)>,
     collaboration_mode: code_core::protocol::CollaborationModeKind,
 
     planning_restore: Option<(String, ReasoningEffort)>,

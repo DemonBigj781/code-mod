@@ -1,0 +1,5 @@
+upstream_url=https://github.com/immateria/codex-mod.git
+base_commit=f471024e1985d32e98231b66469635d36f41ccf7
+integration_url=https://github.com/DemonBigj781/code-mod.git
+forbidden_ancestor=f5dff6a9f2a8e05509aef5669223247137713511
+forbidden_ancestor=32a1963d5e2120ae88b3c93980e6ace93dabafbc

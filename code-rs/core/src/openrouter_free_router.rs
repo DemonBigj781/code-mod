@@ -233,7 +233,7 @@ async fn refresh(
     let models_url = reqwest::Url::parse(&format!("{}/models", base_url.trim_end_matches('/')))
         .map_err(|error| format!("invalid OpenRouter catalog URL: {error}"))?;
     let response = provider
-        .create_request_builder_for_url_with_auth(client, auth, Method::GET, models_url)
+        .create_request_builder_for_url_with_auth(client, auth.as_ref(), Method::GET, models_url)
         .await
         .map_err(|error| format!("failed to build OpenRouter catalog request: {error}"))?
         .timeout(REQUEST_TIMEOUT)

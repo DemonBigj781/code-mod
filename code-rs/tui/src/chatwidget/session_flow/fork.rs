@@ -71,6 +71,7 @@ impl ChatWidget<'_> {
             remote_model_presets: None,
             allow_remote_default_at_startup: !config.model_explicit,
             chat_model_selected_explicitly: false,
+            model_provider_before_openrouter: None,
             collaboration_mode: code_core::protocol::CollaborationModeKind::from_sandbox_policy(
                 &config.sandbox_policy,
             ),

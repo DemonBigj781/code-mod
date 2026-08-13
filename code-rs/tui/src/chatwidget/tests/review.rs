@@ -1931,7 +1931,32 @@
         "last reasoning should remain visible",
     );
     }
-    
+
+    #[test]
+    fn reasoning_collapse_skips_refresh_for_appended_non_reasoning_cell() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+
+    chat.config.tui.show_reasoning = false;
+    chat.history_push(history_cell::CollapsibleReasoningCell::new_with_id(
+        vec![Line::from("First reasoning".to_string())],
+        Some("r1".to_string()),
+    ));
+    chat.history_push(history_cell::CollapsibleReasoningCell::new_with_id(
+        vec![Line::from("Second reasoning".to_string())],
+        Some("r2".to_string()),
+    ));
+
+    reset_reasoning_visibility_refresh_count();
+    chat.history_push(history_cell::AgentRunCell::new("Batch".to_string()));
+
+    assert_eq!(
+        reasoning_visibility_refresh_count(),
+        0,
+        "tail-appending a non-reasoning cell must not rescan prior reasoning runs",
+    );
+    }
+
     #[test]
     fn auto_drive_stays_paused_while_auto_resolve_pending_fix() {
     let mut harness = ChatWidgetHarness::new();

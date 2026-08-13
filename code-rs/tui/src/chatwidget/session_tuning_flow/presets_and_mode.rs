@@ -1,8 +1,5 @@
 impl ChatWidget<'_> {
     pub(super) fn available_model_presets(&self) -> Vec<ModelPreset> {
-        if let Some(presets) = self.remote_model_presets.as_ref() {
-            return presets.clone();
-        }
         let auth_mode = self
             .auth_manager
             .auth()
@@ -15,7 +12,17 @@ impl ChatWidget<'_> {
                 }
             });
         let supports_pro_only_models = self.auth_manager.supports_pro_only_models();
-        builtin_model_presets(auth_mode, supports_pro_only_models)
+        let mut presets = builtin_model_presets(auth_mode, supports_pro_only_models);
+        if let Some(remote_presets) = self.remote_model_presets.as_ref() {
+            for remote in remote_presets {
+                if let Some(existing) = presets.iter_mut().find(|preset| preset.id == remote.id) {
+                    *existing = remote.clone();
+                } else {
+                    presets.push(remote.clone());
+                }
+            }
+        }
+        presets
     }
 
     pub(crate) fn update_model_presets(
@@ -27,8 +34,9 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.remote_model_presets = Some(presets.clone());
-        self.bottom_pane.update_model_selection_presets(presets);
+        self.remote_model_presets = Some(presets);
+        self.bottom_pane
+            .update_model_selection_presets(self.available_model_presets());
 
         if let Some(default_model) = default_model {
             self.maybe_apply_remote_default_model(default_model);

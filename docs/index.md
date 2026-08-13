@@ -24,3 +24,14 @@ Use these docs to install, configure, and operate Every Code (Code).
 - [Sandboxing overview](sandbox.md)
 - [Platform sandboxing](platform-sandboxing.md)
 - [Windows sandbox security](platform-sandboxing.md#windows)
+
+## Specs
+
+| Spec | Description | Status |
+|------|-------------|--------|
+
+## Changes
+
+| # | Change | Spec | Status | Depends On |
+|---|--------|------|--------|------------|
+| 0001 | [Canonical history recovery](changes/0001-canonical-history-recovery.md) | — | in-progress | — |

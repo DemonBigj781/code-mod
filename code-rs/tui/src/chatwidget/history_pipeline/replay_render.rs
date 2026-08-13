@@ -377,6 +377,9 @@ impl ChatWidget<'_> {
     }
 
     pub(in super::super) fn refresh_reasoning_collapsed_visibility(&mut self) {
+        #[cfg(test)]
+        REASONING_VISIBILITY_REFRESH_COUNT.with(|count| count.set(count.get() + 1));
+
         let show = self.config.tui.show_reasoning;
         let mut needs_invalidate = false;
         if show {

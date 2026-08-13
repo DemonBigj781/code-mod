@@ -47,6 +47,20 @@
         "streaming assistant output should append after the existing background tail cell",
     );
     }
+
+    #[test]
+    fn startup_background_status_uses_background_history_path() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    reset_history(chat);
+
+    chat.history_push_top_next_req(history_cell::new_background_event(
+        "Connecting to MCP servers…".to_owned(),
+    ));
+
+    assert_eq!(chat.history_cells.len(), 1);
+    assert_eq!(chat.history_cells[0].kind(), HistoryCellType::BackgroundEvent);
+    }
     
     #[test]
     fn ordering_tool_reasoning_explore_should_preserve_arrival_sequence() {

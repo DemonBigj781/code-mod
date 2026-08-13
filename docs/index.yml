@@ -1,0 +1,24 @@
+# Documentation Index
+# Auto-updated by /spec-writer and /project-management skills
+
+specs:
+  # - name: <spec-name>
+  #   path: specs/<spec-name>/
+  #   description: <one-line description>
+  #   status: active | deprecated
+
+changes:
+  - id: "0001"
+    name: canonical-history-recovery
+    path: changes/0001-canonical-history-recovery.md
+    description: Rebase every integration onto the intended codex-mod source line.
+    spec: null
+    status: in-progress
+    depends_on: []
+  # - id: "NNNN"
+  #   name: <change-name>
+  #   path: changes/NNNN-<change-name>.md
+  #   description: <one-line description>
+  #   spec: <spec-name>
+  #   status: draft | in-progress | complete
+  #   depends_on: []

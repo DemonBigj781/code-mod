@@ -40,6 +40,7 @@ use code_core::agent_defaults::{agent_model_spec, enabled_agent_model_specs};
 use code_core::smoke_test_agent_blocking;
 use code_core::config::Config;
 use code_core::config::persist_shell;
+use code_core::ModelProviderInfo;
 use code_core::git_info::CommitLogEntry;
 use code_core::config_types::AgentConfig;
 use code_core::config_types::AutoDriveContinueMode;
@@ -69,6 +70,10 @@ use code_core::split_command_and_args;
 use code_utils_sleep_inhibitor::SleepInhibitor;
 use code_utils_stream_parser as stream_parser;
 use serde_json::Value as JsonValue;
+
+const OPENROUTER_FREE_MAX_MODEL: &str = "openrouter/free-max";
+const OPENROUTER_PROVIDER_ID: &str = "openrouter";
+const OPENROUTER_FREE_PROFILE: &str = "openrouter-free";
 
 
 mod diff_handlers;
@@ -498,6 +503,21 @@ fn insert_background_lock(agent_id: &str, guard: code_core::review_coord::Review
 
 fn release_background_lock(agent_id: Option<&String>) {
     background_review::release_background_lock_inner(agent_id);
+}
+
+#[cfg(test)]
+thread_local! {
+    static REASONING_VISIBILITY_REFRESH_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_reasoning_visibility_refresh_count() {
+    REASONING_VISIBILITY_REFRESH_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn reasoning_visibility_refresh_count() -> usize {
+    REASONING_VISIBILITY_REFRESH_COUNT.with(Cell::get)
 }
 
 #[cfg(test)]

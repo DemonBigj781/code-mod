@@ -67,9 +67,11 @@ use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
-use crate::model_family::{find_family_for_model, ModelFamily};
+use crate::model_family::{derive_default_model_family, find_family_for_model, ModelFamily};
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
+use crate::openrouter_free_router::OPENROUTER_FREE_MAX_MODEL;
+use crate::openrouter_free_router::OpenRouterFreeRouter;
 use crate::openai_tools::create_tools_json_for_responses_api;
 use crate::openai_tools::ConfigShellToolType;
 use crate::openai_tools::ToolsConfig;
@@ -121,6 +123,39 @@ const CODE_OPENAI_SUBAGENT_ENV: &str = "CODE_OPENAI_SUBAGENT";
 struct StreamCheckpoint {
     /// Highest `sequence_number` observed across attempts. Used to drop replayed deltas.
     last_sequence: Option<u64>,
+}
+
+fn should_try_next_openrouter_model(error: &CodexErr) -> bool {
+    match error {
+        CodexErr::Interrupted
+        | CodexErr::QuotaExceeded
+        | CodexErr::AuthRefreshPermanent(_)
+        | CodexErr::UsageLimitReached(_)
+        | CodexErr::UsageNotIncluded
+        | CodexErr::UnsupportedOperation(_)
+        | CodexErr::EnvVar(_) => false,
+        CodexErr::UnexpectedStatus(response) => {
+            response.status != StatusCode::PAYMENT_REQUIRED
+                && response.status != StatusCode::UNAUTHORIZED
+                && response.status != StatusCode::FORBIDDEN
+        }
+        _ => true,
+    }
+}
+
+async fn validate_initial_openrouter_stream(mut stream: ResponseStream) -> Result<ResponseStream> {
+    match stream.next().await {
+        Some(Ok(event)) => {
+            stream.pending_event = Some(Ok(event));
+            Ok(stream)
+        }
+        Some(Err(error)) => Err(error),
+        None => Err(CodexErr::Stream(
+            "OpenRouter response stream closed before its first event".to_owned(),
+            None,
+            None,
+        )),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -268,6 +303,7 @@ pub struct ModelClient {
     websockets_disabled: AtomicBool,
     verbosity: TextVerbosityConfig,
     debug_logger: Arc<Mutex<DebugLogger>>,
+    openrouter_free_router: Option<Arc<OpenRouterFreeRouter>>,
 }
 
 impl Clone for ModelClient {
@@ -289,6 +325,7 @@ impl Clone for ModelClient {
             ),
             verbosity: self.verbosity,
             debug_logger: Arc::clone(&self.debug_logger),
+            openrouter_free_router: self.openrouter_free_router.clone(),
         }
     }
 }
@@ -309,6 +346,10 @@ impl ModelClient {
         let effective_verbosity = clamp_text_verbosity_for_model(config.model.as_str(), verbosity);
         let clamped_effort = clamp_reasoning_effort_for_model(config.model.as_str(), effort);
         let client = create_client(&config.responses_originator_header);
+        let openrouter_free_router = provider
+            .openrouter_config()
+            .is_some()
+            .then(|| Arc::new(OpenRouterFreeRouter::new(&config.code_home)));
 
         Self {
             config,
@@ -323,6 +364,7 @@ impl ModelClient {
             websockets_disabled: AtomicBool::new(false),
             verbosity: effective_verbosity,
             debug_logger,
+            openrouter_free_router,
         }
     }
 
@@ -582,6 +624,13 @@ impl ModelClient {
         let log_tag = env_log_tag
             .as_deref()
             .or(prompt.log_tag.as_deref());
+        let request_model = prompt
+            .model_override
+            .as_deref()
+            .unwrap_or(self.config.model.as_str());
+        if request_model == OPENROUTER_FREE_MAX_MODEL {
+            return self.stream_openrouter_free(prompt, log_tag).await;
+        }
         match self.provider.wire_api {
             WireApi::Responses => {
                 if let Some(ws_version) = self.active_ws_version_for_prompt(prompt) {
@@ -673,9 +722,76 @@ impl ModelClient {
                     }
                 });
 
-                Ok(ResponseStream { rx_event: rx })
+                Ok(ResponseStream {
+                    pending_event: None,
+                    rx_event: rx,
+                })
             }
         }
+    }
+
+    async fn stream_openrouter_free(
+        &self,
+        prompt: &Prompt,
+        log_tag: Option<&str>,
+    ) -> Result<ResponseStream> {
+        let router = self.openrouter_free_router.as_ref().ok_or_else(|| {
+            CodexErr::UnsupportedOperation(
+                "openrouter/free-max requires an OpenRouter provider".to_owned(),
+            )
+        })?;
+        let base_auth = self.auth_manager.as_ref().and_then(|manager| manager.auth());
+        let auth = self.provider.effective_auth(base_auth.as_ref()).await?;
+        let candidate_ids = router
+            .candidate_ids(&self.provider, &auth, &self.client)
+            .await
+            .map_err(CodexErr::UnsupportedOperation)?;
+        let mut last_error = None;
+
+        for candidate_id in candidate_ids {
+            let mut candidate_prompt = prompt.clone();
+            candidate_prompt.model_override = Some(candidate_id.clone());
+            candidate_prompt.model_family_override = Some(
+                find_family_for_model(&candidate_id)
+                    .unwrap_or_else(|| derive_default_model_family(&candidate_id)),
+            );
+
+            match self
+                .stream_responses_with_retry_limit(&candidate_prompt, log_tag, Some(0))
+                .await
+            {
+                Ok(stream) => match validate_initial_openrouter_stream(stream).await {
+                    Ok(stream) => {
+                        tracing::info!(model = %candidate_id, "selected OpenRouter free-max model");
+                        return Ok(stream);
+                    }
+                    Err(error) if should_try_next_openrouter_model(&error) => {
+                        tracing::warn!(
+                            model = %candidate_id,
+                            error = %error,
+                            "OpenRouter free-max candidate failed before output; trying next model"
+                        );
+                        last_error = Some(error);
+                    }
+                    Err(error) => return Err(error),
+                },
+                Err(error) if should_try_next_openrouter_model(&error) => {
+                    tracing::warn!(
+                        model = %candidate_id,
+                        error = %error,
+                        "OpenRouter free-max candidate failed before output; trying next model"
+                    );
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            CodexErr::UnsupportedOperation(
+                "openrouter/free-max produced no candidate models".to_owned(),
+            )
+        }))
     }
 
     async fn stream_responses_websocket(
@@ -1077,7 +1193,10 @@ impl ModelClient {
                         ws_reader_handle.abort();
                     });
 
-                    return Ok(ResponseStream { rx_event });
+                    return Ok(ResponseStream {
+                        pending_event: None,
+                        rx_event,
+                    });
                 }
                 Ok(Err(err)) => {
                     if websocket_connect_is_upgrade_required(&err) {
@@ -1120,6 +1239,16 @@ impl ModelClient {
 
     /// Implementation for the `OpenAI` *Responses* experimental API.
     async fn stream_responses(&self, prompt: &Prompt, log_tag: Option<&str>) -> Result<ResponseStream> {
+        self.stream_responses_with_retry_limit(prompt, log_tag, None)
+            .await
+    }
+
+    async fn stream_responses_with_retry_limit(
+        &self,
+        prompt: &Prompt,
+        log_tag: Option<&str>,
+        max_retries_override: Option<u64>,
+    ) -> Result<ResponseStream> {
         if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
             // short circuit for tests
             warn!(path, "Streaming from fixture");
@@ -1213,7 +1342,7 @@ impl ModelClient {
         let session_id_str = session_id.to_string();
 
         let mut attempt = 0;
-        let max_retries = self.provider.request_max_retries();
+        let max_retries = max_retries_override.unwrap_or_else(|| self.provider.request_max_retries());
         let mut request_id = String::new();
         let mut rate_limit_switch_state = crate::account_switching::RateLimitSwitchState::default();
 
@@ -1463,7 +1592,10 @@ impl ModelClient {
                         Arc::new(RwLock::new(StreamCheckpoint::default())),
                     ));
 
-                    return Ok(ResponseStream { rx_event });
+                    return Ok(ResponseStream {
+                        pending_event: None,
+                        rx_event,
+                    });
                 }
                 Ok(res) => {
                     let status = res.status();
@@ -2989,7 +3121,10 @@ fn stream_from_fixture(
         otel_event_manager,
         Arc::new(RwLock::new(StreamCheckpoint::default())),
     ));
-    Ok(ResponseStream { rx_event })
+    Ok(ResponseStream {
+        pending_event: None,
+        rx_event,
+    })
 }
 
 // Note: legacy helpers for parsing Retry-After headers and rate-limit messages

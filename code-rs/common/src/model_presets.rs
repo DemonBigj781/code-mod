@@ -50,6 +50,62 @@ const ALL_TEXT_VERBOSITY: &[TextVerbosityConfig] = &[
 static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     vec![
         ModelPreset {
+            id: "openrouter/free-max".to_owned(),
+            model: "openrouter/free-max".to_owned(),
+            display_name: "OpenRouter Free".to_owned(),
+            description: "Routes each request to the highest-capacity compatible free OpenRouter model."
+                .to_owned(),
+            default_reasoning_effort: ReasoningEffort::None,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffort::None,
+                description: "Uses the selected free model's default reasoning behavior".to_owned(),
+            }],
+            supported_text_verbosity: &[TextVerbosityConfig::Medium],
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-5.6-sol".to_owned(),
+            model: "gpt-5.6-sol".to_owned(),
+            display_name: "GPT-5.6 Sol".to_owned(),
+            description: "GPT-5.6 Sol model.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: frontier_reasoning_efforts(),
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-5.6-terra".to_owned(),
+            model: "gpt-5.6-terra".to_owned(),
+            display_name: "GPT-5.6 Terra".to_owned(),
+            description: "GPT-5.6 Terra model.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: frontier_reasoning_efforts(),
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-5.6-luna".to_owned(),
+            model: "gpt-5.6-luna".to_owned(),
+            display_name: "GPT-5.6 Luna".to_owned(),
+            description: "GPT-5.6 Luna model.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: frontier_reasoning_efforts(),
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
+        ModelPreset {
             id: "gpt-5.5".to_string(),
             model: "gpt-5.5".to_string(),
             display_name: "GPT-5.5".to_string(),
@@ -551,6 +607,27 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     ]
 });
 
+fn frontier_reasoning_efforts() -> Vec<ReasoningEffortPreset> {
+    vec![
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Low,
+            description: "Fast responses with lighter reasoning".to_owned(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Medium,
+            description: "Balances speed and reasoning depth for everyday tasks".to_owned(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::High,
+            description: "Greater reasoning depth for complex problems".to_owned(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::XHigh,
+            description: "Extra high reasoning depth for complex problems".to_owned(),
+        },
+    ]
+}
+
 pub fn model_preset_available_for_auth(
     preset: &ModelPreset,
     auth_mode: Option<AuthMode>,
@@ -691,6 +768,23 @@ mod tests {
     fn gpt_5_5_available_for_chatgpt_auth() {
         let presets = builtin_model_presets(Some(AuthMode::Chatgpt), true);
         assert!(presets.iter().any(|preset| preset.id == "gpt-5.5"));
+    }
+
+    #[test]
+    fn integrated_picker_models_are_available_in_canonical_order() {
+        let presets = builtin_model_presets(Some(AuthMode::Chatgpt), true);
+        let ids: Vec<&str> = presets.iter().map(|preset| preset.id.as_str()).collect();
+
+        assert_eq!(
+            &ids[..5],
+            &[
+                "openrouter/free-max",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+                "gpt-5.5",
+            ],
+        );
     }
 
     #[test]

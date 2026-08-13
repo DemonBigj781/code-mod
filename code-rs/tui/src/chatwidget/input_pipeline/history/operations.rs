@@ -4,7 +4,21 @@ impl ChatWidget<'_> {
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     pub(in crate::chatwidget) fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_top();
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prelude", None);
+        let (tag, record) = if cell.kind() == HistoryCellType::BackgroundEvent {
+            let background = cell
+                .as_any()
+                .downcast_ref::<crate::history_cell::BackgroundEventCell>()
+                .expect("background history cells must use BackgroundEventCell");
+            (
+                "background",
+                Some(HistoryDomainRecord::BackgroundEvent(
+                    background.state().clone(),
+                )),
+            )
+        } else {
+            ("prelude", None)
+        };
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, record);
     }
     pub(in crate::chatwidget) fn history_replace_with_record(
         &mut self,

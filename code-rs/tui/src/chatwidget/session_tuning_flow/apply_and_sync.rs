@@ -1,4 +1,62 @@
 impl ChatWidget<'_> {
+    fn sync_provider_for_model_selection(&mut self, model: &str) -> bool {
+        if model.eq_ignore_ascii_case(OPENROUTER_FREE_MAX_MODEL) {
+            let Some(openrouter) = self
+                .config
+                .model_providers
+                .get(OPENROUTER_PROVIDER_ID)
+                .cloned()
+            else {
+                tracing::error!("OpenRouter Free was selected without a registered OpenRouter provider");
+                return false;
+            };
+
+            if self.model_provider_before_openrouter.is_none()
+                && (self.config.model_provider_id != OPENROUTER_PROVIDER_ID
+                    || self.config.active_profile.as_deref() != Some(OPENROUTER_FREE_PROFILE))
+            {
+                self.model_provider_before_openrouter = Some((
+                    self.config.model_provider_id.clone(),
+                    self.config.model_provider.clone(),
+                    self.config.active_profile.clone(),
+                ));
+            }
+
+            let changed = self.config.model_provider_id != OPENROUTER_PROVIDER_ID
+                || self.config.model_provider != openrouter
+                || self.config.active_profile.as_deref() != Some(OPENROUTER_FREE_PROFILE);
+            self.config.model_provider_id = OPENROUTER_PROVIDER_ID.to_owned();
+            self.config.model_provider = openrouter;
+            self.config.active_profile = Some(OPENROUTER_FREE_PROFILE.to_owned());
+            return changed;
+        }
+
+        if self.config.model_provider_id != OPENROUTER_PROVIDER_ID
+            || self.config.active_profile.as_deref() != Some(OPENROUTER_FREE_PROFILE)
+        {
+            return false;
+        }
+
+        let (provider_id, provider, profile) = self
+            .model_provider_before_openrouter
+            .take()
+            .or_else(|| {
+                self.config
+                    .model_providers
+                    .get("openai")
+                    .cloned()
+                    .map(|provider| ("openai".to_owned(), provider, None))
+            })
+            .expect("built-in OpenAI provider must be available");
+        let changed = self.config.model_provider_id != provider_id
+            || self.config.model_provider != provider
+            || self.config.active_profile != profile;
+        self.config.model_provider_id = provider_id;
+        self.config.model_provider = provider;
+        self.config.active_profile = profile;
+        changed
+    }
+
     fn clamp_reasoning_for_model_from_presets(
         model: &str,
         requested: ReasoningEffort,
@@ -60,6 +118,8 @@ impl ChatWidget<'_> {
             self.config.model_explicit = true;
         }
 
+        let provider_changed = self.sync_provider_for_model_selection(trimmed);
+
         let model_changed = if !self.config.model.eq_ignore_ascii_case(trimmed) {
             trimmed.clone_into(&mut self.config.model);
             let family = find_family_for_model(&self.config.model)
@@ -91,7 +151,7 @@ impl ChatWidget<'_> {
             false
         };
 
-        let updated = model_changed || effort_changed || reasoning_changed;
+        let updated = provider_changed || model_changed || effort_changed || reasoning_changed;
 
         if updated {
             let op = self.current_configure_session_op();

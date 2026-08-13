@@ -1186,6 +1186,91 @@
     }
 
     #[test]
+    fn model_selection_switches_openrouter_provider_in_both_directions() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let original_provider_id = chat.config.model_provider_id.clone();
+    let original_provider = chat.config.model_provider.clone();
+    let original_profile = chat.config.active_profile.clone();
+
+    chat.apply_model_selection(
+        OPENROUTER_FREE_MAX_MODEL.to_owned(),
+        Some(ReasoningEffort::None),
+    );
+
+    assert_eq!(chat.config.model_provider_id, OPENROUTER_PROVIDER_ID);
+    assert_eq!(chat.config.model_provider.name, "OpenRouter");
+    assert_eq!(
+        chat.config.active_profile.as_deref(),
+        Some(OPENROUTER_FREE_PROFILE),
+    );
+
+    chat.apply_model_selection(
+        "gpt-5.5".to_owned(),
+        Some(ReasoningEffort::Medium),
+    );
+
+    assert_eq!(chat.config.model_provider_id, original_provider_id);
+    assert_eq!(chat.config.model_provider, original_provider);
+    assert_eq!(chat.config.active_profile, original_profile);
+    }
+
+    #[test]
+    fn free_router_selection_restores_an_existing_openrouter_profile() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let openrouter = chat
+        .config
+        .model_providers
+        .get(OPENROUTER_PROVIDER_ID)
+        .cloned()
+        .expect("built-in OpenRouter provider");
+    chat.config.model_provider_id = OPENROUTER_PROVIDER_ID.to_owned();
+    chat.config.model_provider = openrouter.clone();
+    chat.config.active_profile = Some("openrouter-custom".to_owned());
+
+    chat.apply_model_selection(
+        OPENROUTER_FREE_MAX_MODEL.to_owned(),
+        Some(ReasoningEffort::None),
+    );
+    chat.apply_model_selection(
+        "openrouter/another-model".to_owned(),
+        Some(ReasoningEffort::Medium),
+    );
+
+    assert_eq!(chat.config.model_provider_id, OPENROUTER_PROVIDER_ID);
+    assert_eq!(chat.config.model_provider, openrouter);
+    assert_eq!(chat.config.active_profile.as_deref(), Some("openrouter-custom"));
+    }
+
+    #[test]
+    fn remote_presets_do_not_remove_integrated_picker_models() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let only_remote = code_common::model_presets::builtin_model_presets(None, true)
+        .into_iter()
+        .find(|preset| preset.id == "gpt-5.4")
+        .expect("gpt-5.4 preset");
+    chat.remote_model_presets = Some(vec![only_remote]);
+
+    let ids: Vec<String> = chat
+        .available_model_presets()
+        .into_iter()
+        .map(|preset| preset.id)
+        .collect();
+
+    for expected in [
+        OPENROUTER_FREE_MAX_MODEL,
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+    ] {
+        assert!(ids.iter().any(|id| id == expected), "missing {expected}");
+    }
+    }
+
+    #[test]
     fn statusline_shortcut_f3_cycles_reasoning_effort() {
     let _guard = enter_test_runtime_guard();
     let mut harness = ChatWidgetHarness::new();

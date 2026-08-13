@@ -189,7 +189,9 @@ impl ChatWidget<'_> {
         }
         self.app_event_tx.send(AppEvent::RequestRedraw);
         self.refresh_explore_trailing_flags();
-        self.refresh_reasoning_collapsed_visibility();
+        if is_reasoning_cell || !append {
+            self.refresh_reasoning_collapsed_visibility();
+        }
         self.mark_history_dirty();
         pos
     }

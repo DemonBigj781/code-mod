@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Enforce running the full pre-release pipeline before pushing to main.
-# The hook is scoped to pushes that target refs/heads/main only.
-
-repo_root=$(git rev-parse --show-toplevel)
+repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+"$repo_root/scripts/verify-canonical-history.sh" --local
+
+# Enforce running the full pre-release pipeline before pushing to main.
+# The hook is scoped to pushes that target refs/heads/main only.
 while read -r local_ref _ remote_ref _; do
     if [[ "$remote_ref" == "refs/heads/main" ]]; then
         echo "[pre-push] Running ./pre-release.sh before pushing to main..."

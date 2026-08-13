@@ -43,6 +43,7 @@ enum RowKind {
     Socks5Enabled,
     Socks5Udp,
     AllowUpstreamProxyEnv,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     AllowUnixSockets,
     Apply,
     Close,
@@ -109,4 +110,3 @@ impl NetworkSettingsView {
         !matches!(self.mode, ViewMode::Main { .. })
     }
 }
-
