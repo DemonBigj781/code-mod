@@ -455,7 +455,10 @@ pub(crate) async fn stream_chat_completions(
                     request_id_clone,
                     otel_event_manager.clone(),
                 ));
-                return Ok(ResponseStream { rx_event });
+                return Ok(ResponseStream {
+                    pending_event: None,
+                    rx_event,
+                });
             }
             Ok(res) => {
                 let status = res.status();

@@ -749,6 +749,42 @@ pub fn built_in_model_providers(
                 openrouter: None,
             },
         ),
+        (
+            "openrouter",
+            P {
+                name: "OpenRouter".into(),
+                base_url: Some("https://openrouter.ai/api/v1".into()),
+                env_key: Some("OPENROUTER_API_KEY".into()),
+                env_key_instructions: Some(
+                    "Set OPENROUTER_API_KEY to an OpenRouter API key.".into(),
+                ),
+                experimental_bearer_token: None,
+                auth: None,
+                wire_api: WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: Some(
+                    [
+                        (
+                            "HTTP-Referer".to_string(),
+                            "OPENROUTER_HTTP_REFERER".to_string(),
+                        ),
+                        (
+                            "X-OpenRouter-Title".to_string(),
+                            "OPENROUTER_APP_NAME".to_string(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                websocket_connect_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: Some(OpenRouterConfig::default()),
+            },
+        ),
         (BUILT_IN_OSS_MODEL_PROVIDER_ID, create_oss_provider()),
     ]
     .into_iter()
@@ -1000,6 +1036,23 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
             .expect("openai provider should include version header");
 
         assert_eq!(version, code_version::wire_compatible_version());
+    }
+
+    #[test]
+    fn built_in_model_providers_include_openrouter() {
+        let providers = built_in_model_providers(None);
+        let openrouter = providers
+            .get("openrouter")
+            .expect("openrouter provider should exist");
+
+        assert_eq!(openrouter.name, "OpenRouter");
+        assert_eq!(
+            openrouter.base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert_eq!(openrouter.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
+        assert_eq!(openrouter.wire_api, WireApi::Responses);
+        assert!(openrouter.openrouter.is_some());
     }
 
     #[test]

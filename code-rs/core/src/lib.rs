@@ -74,6 +74,9 @@ pub mod apps_sources;
 mod mcp_tool_call;
 mod memories;
 mod model_provider_info;
+mod openrouter_free_router;
+#[cfg(test)]
+mod openrouter_free_router_tests;
 pub mod remote_models;
 // Remote model discovery caches its own on-disk state within the module.
 mod cgroup;

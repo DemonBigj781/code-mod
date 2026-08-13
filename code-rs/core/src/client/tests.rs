@@ -11,6 +11,24 @@ use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 // Helpers
 // ────────────────────────────
 
+#[test]
+fn openrouter_free_max_stops_on_global_payment_failure() {
+    assert!(!should_try_next_openrouter_model(
+        &CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::PAYMENT_REQUIRED,
+            body: String::new(),
+            request_id: None,
+        })
+    ));
+    assert!(should_try_next_openrouter_model(
+        &CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::NOT_FOUND,
+            body: String::new(),
+            request_id: None,
+        })
+    ));
+}
+
 trait ResultOrPanic<T> {
     fn or_panic(self, context: &str) -> T;
 }

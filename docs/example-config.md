@@ -384,6 +384,11 @@ experimental_use_freeform_apply_patch = false
 # base_url = "http://localhost:11434/v1"
 # wire_api = "chat"
 
+# --- Built-in OpenRouter free routing ---
+# Required environment variable: OPENROUTER_API_KEY
+# Optional attribution variables: OPENROUTER_HTTP_REFERER, OPENROUTER_APP_NAME
+# Select with: code --profile openrouter-free
+
 ################################################################################
 # Profiles (named presets)
 ################################################################################
@@ -392,6 +397,12 @@ experimental_use_freeform_apply_patch = false
 # profile = "default"
 
 [profiles]
+
+# [profiles.openrouter-free]
+# model_provider = "openrouter"
+# model = "openrouter/free-max"
+# model_reasoning_effort = "medium"
+# model_reasoning_summary = "auto"
 
 # [profiles.default]
 # model = "gpt-5.1-codex-max"
