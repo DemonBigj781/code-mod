@@ -36,6 +36,12 @@ there.
    repairs, and effective-settings work are ancestors of the canonical anchor.
    They were retained from `immateria/codex-mod`, not reintroduced through the
    rejected `just-every/code` merge.
+7. A second standalone checkout was discovered at
+   `/var/home/jack/projects/Linux_Project/codex-mod`. It was also rooted at the
+   canonical anchor but held 63 changed source files outside Git history. That
+   source was captured and reconciled onto canonical `main`, adding the missing
+   backend provider persistence, maximum reasoning mode, terminal/MCP lifecycle,
+   event deduplication, renderer safety, and browser stack-overflow integrations.
 
 The merge base between the intended and wrong lines is
 `5b0c8300e56fdae096848a1376859e2d326b50e6`; shared ancestry before that point
@@ -50,6 +56,9 @@ does not make the later forks interchangeable.
 - GitHub runs that verifier for every pull request and every push to `main`.
 - The repository pre-push hook additionally rejects noncanonical local paths,
   extra linked worktrees, or incorrect remote assignments.
+- `scripts/audit-code-variants.sh` scans project, temporary, and backup locations
+  for additional Code source checkouts. Local verification fails unless the
+  canonical checkout is the only one.
 - Integrations are tracked below as one change. A feature branch is temporary
   delivery state, never a product variant; it is deleted after integration.
 
@@ -59,6 +68,7 @@ does not make the later forks interchangeable.
   - [x] Replace wrong-fork `main` ancestry with the recorded immateria base and push the checkpoint.
   - [x] Assign `origin` to `DemonBigj781/code-mod`, assign `upstream` to `immateria/codex-mod`, and remove the `just-every/code` remote.
   - [x] Reconcile OpenRouter routing, picker/provider selection, model variants, CPU/history performance, startup safety, remote compact fallback, and backend changes on canonical `main`.
+  - [x] Recover and reconcile the uncommitted backend/runtime source from `projects/Linux_Project/codex-mod`.
   - [ ] Build and validate the combined executable from canonical `main`.
   - [ ] Remove all Code-related linked worktrees and obsolete local variant branches.
   - [ ] Rename the sole checkout to `/var/home/jack/projects/AI_Project/code`, enable the pre-push hook, and verify the history guard locally.

@@ -49,6 +49,8 @@ if [[ "${1:-}" == "--local" ]]; then
     || fail "upstream must be $canonical_upstream"
   [[ "$(git remote get-url origin)" == "$integration_url" ]] \
     || fail "origin must be $integration_url"
+
+  "$repo_root/scripts/audit-code-variants.sh"
 fi
 
 echo "canonical-history: verified $canonical_base"
