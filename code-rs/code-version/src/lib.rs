@@ -3,13 +3,15 @@ use std::sync::LazyLock;
 
 use serde_json::Value;
 
+include!("../default_version.rs");
+
 // Compile-time embedded version string.
-// Prefer the CODE_VERSION provided by CI; fall back to the package
+// Prefer the CODE_VERSION provided by CI; use the pinned stable CLI
 // version for local builds.
 pub const CODE_VERSION: &str = {
     match option_env!("CODE_VERSION") {
         Some(v) => v,
-        None => env!("CARGO_PKG_VERSION"),
+        None => DEFAULT_CODE_VERSION,
     }
 };
 
@@ -160,6 +162,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn local_build_fallback_matches_current_stable_cli() {
+        assert_eq!(DEFAULT_CODE_VERSION, "0.144.6");
+    }
+
+    #[test]
     fn wire_compat_clamps_old_versions() {
         assert_eq!(
             wire_compatible_version_for("0.0.0", "0.101.0"),
@@ -236,8 +243,11 @@ mod tests {
     }
 
     #[test]
-    fn wire_compatible_version_for_model_raises_for_gpt_5_5() {
-        assert_eq!(wire_compatible_version_for_model("gpt-5.5"), "0.124.0");
+    fn model_minimum_does_not_downgrade_a_newer_client() {
+        assert_eq!(
+            wire_compatible_version_for_model("gpt-5.5"),
+            wire_compatible_version()
+        );
     }
 
     #[test]

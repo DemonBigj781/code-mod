@@ -174,6 +174,7 @@ fn normalize_auto_drive_routing_reasoning_levels(
         ReasoningEffort::Medium,
         ReasoningEffort::High,
         ReasoningEffort::XHigh,
+        ReasoningEffort::Max,
     ] {
         if levels.contains(&level) {
             normalized.push(level);
@@ -3386,6 +3387,7 @@ args = ["-y", "@upstash/context7-mcp"]
         persist_model_selection(
             code_home.path(),
             None,
+            "openai",
             "gpt-5.1-codex",
             Some(ReasoningEffort::High),
             None,
@@ -3397,6 +3399,7 @@ args = ["-y", "@upstash/context7-mcp"]
         let parsed: ConfigToml = toml::from_str(&serialized)?;
 
         assert_eq!(parsed.model.as_deref(), Some("gpt-5.1-codex"));
+        assert_eq!(parsed.model_provider.as_deref(), Some("openai"));
         assert_eq!(parsed.model_reasoning_effort, Some(ReasoningEffort::High));
 
         Ok(())
@@ -3422,6 +3425,7 @@ model = "gpt-4.1"
         persist_model_selection(
             code_home.path(),
             None,
+            "openai",
             "o4-mini",
             Some(ReasoningEffort::High),
             None,
@@ -3451,6 +3455,7 @@ model = "gpt-4.1"
         persist_model_selection(
             code_home.path(),
             Some("dev"),
+            "openrouter",
             "gpt-5.1-codex",
             Some(ReasoningEffort::Medium),
             None,
@@ -3466,6 +3471,7 @@ model = "gpt-4.1"
             .or_panic("profile should be created");
 
         assert_eq!(profile.model.as_deref(), Some("gpt-5.1-codex"));
+        assert_eq!(profile.model_provider.as_deref(), Some("openrouter"));
         assert_eq!(
             profile.model_reasoning_effort,
             Some(ReasoningEffort::Medium)
@@ -3495,6 +3501,7 @@ model = "gpt-5.1-codex"
         persist_model_selection(
             code_home.path(),
             Some("dev"),
+            "openai",
             "o4-high",
             Some(ReasoningEffort::Medium),
             None,

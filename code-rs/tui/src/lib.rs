@@ -916,7 +916,15 @@ fn run_ratatui_app(
     // Optionally print timing summary to stderr after restoring the terminal.
     let timing_summary = app.perf_summary();
 
+    let terminal_disconnected = tui::stdin_has_terminal_hangup();
     restore();
+    if terminal_disconnected {
+        // Ratatui's Terminal destructor reports cursor-restore failures to
+        // stderr. When the PTY is already gone, that report can panic and then
+        // double-panic in our panic hook. The process is exiting, so retain the
+        // inert backend instead of running its destructor against a dead TTY.
+        std::mem::forget(terminal);
+    }
 
     // After restoring the terminal, clean up any worktrees created by this process.
     cleanup_session_worktrees_and_print();

@@ -763,20 +763,16 @@ pub fn built_in_model_providers(
                 wire_api: WireApi::Responses,
                 query_params: None,
                 http_headers: None,
-                env_http_headers: Some(
-                    [
-                        (
-                            "HTTP-Referer".to_string(),
-                            "OPENROUTER_HTTP_REFERER".to_string(),
-                        ),
-                        (
-                            "X-OpenRouter-Title".to_string(),
-                            "OPENROUTER_APP_NAME".to_string(),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
-                ),
+                env_http_headers: Some(HashMap::from([
+                    (
+                        "HTTP-Referer".to_owned(),
+                        "OPENROUTER_HTTP_REFERER".to_owned(),
+                    ),
+                    (
+                        "X-OpenRouter-Title".to_owned(),
+                        "OPENROUTER_APP_NAME".to_owned(),
+                    ),
+                ])),
                 request_max_retries: None,
                 stream_max_retries: None,
                 stream_idle_timeout_ms: None,

@@ -56,7 +56,8 @@ impl ChatWidget<'_> {
                     ReasoningEffort::Low => ReasoningEffort::Medium,
                     ReasoningEffort::Medium => ReasoningEffort::High,
                     ReasoningEffort::High => ReasoningEffort::XHigh,
-                    ReasoningEffort::XHigh => ReasoningEffort::None,
+                    ReasoningEffort::XHigh => ReasoningEffort::Max,
+                    ReasoningEffort::Max => ReasoningEffort::None,
                 };
                 self.set_reasoning_effort(next);
             }

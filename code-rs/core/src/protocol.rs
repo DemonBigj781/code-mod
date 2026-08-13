@@ -108,6 +108,8 @@ impl CollaborationModeKind {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ConfigureSessionOp {
     /// Provider identifier ("openai", "openrouter", ...).
+    pub provider_id: String,
+    /// Provider configuration resolved from `provider_id`.
     pub provider: ModelProviderInfo,
     /// If not specified, server will use its default model.
     pub model: String,
@@ -1831,6 +1833,7 @@ mod tests {
     fn serialize_configure_session_op_keeps_flattened_shape() {
         let cwd = PathBuf::from("project");
         let op = Op::configure_session(ConfigureSessionOp {
+            provider_id: "openai".to_string(),
             provider: ModelProviderInfo {
                 name: "OpenAI".to_string(),
                 base_url: Some(OPENAI_API_BASE_URL.to_string()),

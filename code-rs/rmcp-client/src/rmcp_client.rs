@@ -37,6 +37,10 @@ use rmcp::service::{self};
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+#[cfg(unix)]
+use process_wrap::tokio::ProcessGroup;
+#[cfg(unix)]
+use process_wrap::tokio::TokioCommandWrap;
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
@@ -56,6 +60,35 @@ use crate::utils::create_env_for_mcp_server;
 use crate::utils::run_with_timeout;
 
 pub type StreamableHttpClientConfig = StreamableHttpClientTransportConfig;
+
+#[cfg(unix)]
+fn configure_stdio_child_lifecycle(mut command: Command) -> TokioCommandWrap {
+    // Keep each MCP server tree separate from the TUI's foreground process
+    // group. Linux also asks the kernel to terminate the direct server process
+    // if Code disappears before normal async cleanup can run.
+    unsafe {
+        command.pre_exec(|| {
+            #[cfg(target_os = "linux")]
+            {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                if libc::getppid() == 1 {
+                    libc::raise(libc::SIGTERM);
+                }
+            }
+            Ok(())
+        });
+    }
+    let mut command = TokioCommandWrap::from(command);
+    command.wrap(ProcessGroup::leader());
+    command
+}
+
+#[cfg(not(unix))]
+fn configure_stdio_child_lifecycle(command: Command) -> Command {
+    command
+}
 
 enum PendingTransport {
     ChildProcess(TokioChildProcess),
@@ -155,6 +188,7 @@ impl RmcpClient {
                 .env_clear()
                 .envs(mcp_env.iter())
                 .args(&args);
+            let command = configure_stdio_child_lifecycle(command);
 
             match TokioChildProcess::builder(command)
                 .stderr(Stdio::piped())
@@ -438,5 +472,93 @@ mod tests {
             Some(value) => unsafe { std::env::set_var("CODE_TEST_MCP_TOKEN", value) },
             None => unsafe { std::env::remove_var("CODE_TEST_MCP_TOKEN") },
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn stdio_mcp_child_uses_its_own_process_group() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let output_file = tempdir.path().join("process-group");
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                "printf '%s %s\\n' \"$$\" \"$(ps -o pgid= -p \"$$\")\" > \"$1\"; sleep 30",
+                "sh",
+            ])
+            .arg(&output_file);
+        let command = configure_stdio_child_lifecycle(command);
+        let (transport, _) = TokioChildProcess::builder(command)
+            .spawn()
+            .expect("spawn lifecycle probe");
+        let stdout = loop {
+            if let Ok(contents) = std::fs::read_to_string(&output_file)
+                && !contents.trim().is_empty()
+            {
+                break contents;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        let mut values = stdout.split_whitespace();
+        let pid = values.next().expect("child pid");
+        let process_group = values.next().expect("child process group");
+
+        assert_eq!(
+            process_group, pid,
+            "MCP child did not lead its process group"
+        );
+        drop(transport);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn dropping_stdio_mcp_transport_terminates_the_process_group() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let pid_file = tempdir.path().join("pids");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("sleep 30 & child=$!; printf '%s %s\\n' \"$$\" \"$child\" > \"$1\"; wait")
+            .arg("sh")
+            .arg(&pid_file);
+        let command = configure_stdio_child_lifecycle(command);
+
+        let (transport, _) = TokioChildProcess::builder(command)
+            .spawn()
+            .expect("spawn process tree");
+
+        let pids = loop {
+            if let Ok(contents) = std::fs::read_to_string(&pid_file)
+                && !contents.trim().is_empty()
+            {
+                break contents;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        let mut pids = pids.split_whitespace();
+        let process_group = pids
+            .next()
+            .expect("process group leader")
+            .parse::<i32>()
+            .expect("numeric process group leader");
+        let grandchild = pids
+            .next()
+            .expect("grandchild pid")
+            .parse::<i32>()
+            .expect("numeric grandchild pid");
+
+        drop(transport);
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let grandchild_survived = unsafe { libc::kill(grandchild, 0) == 0 };
+
+        unsafe {
+            libc::kill(-process_group, libc::SIGKILL);
+            libc::kill(grandchild, libc::SIGKILL);
+        }
+
+        assert!(
+            !grandchild_survived,
+            "dropping the MCP transport left its grandchild running"
+        );
     }
 }

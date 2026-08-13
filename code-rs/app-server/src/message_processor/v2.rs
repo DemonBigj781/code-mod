@@ -4388,6 +4388,9 @@ fn map_core_reasoning_effort(
         code_core::protocol_config_types::ReasoningEffort::XHigh => {
             code_protocol::openai_models::ReasoningEffort::XHigh
         }
+        code_core::protocol_config_types::ReasoningEffort::Max => {
+            code_protocol::openai_models::ReasoningEffort::Max
+        }
     }
 }
 

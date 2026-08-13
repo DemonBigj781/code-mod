@@ -111,7 +111,10 @@ pub(crate) fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     // terminal environment is known to handle them reliably. Some Windows
     // terminal stacks (including WSL/ConPTY-derived PTYs) can report support
     // but still deliver broken input when these flags are enabled.
-    if supports_keyboard_enhancement().unwrap_or(false) && should_enable_keyboard_enhancement() {
+    if !stdin_has_terminal_hangup()
+        && supports_keyboard_enhancement().unwrap_or(false)
+        && should_enable_keyboard_enhancement()
+    {
         let _ = execute!(
             stdout(),
             PushKeyboardEnhancementFlags(
@@ -228,7 +231,10 @@ pub(crate) fn restore() -> Result<()> {
     // Belt-and-suspenders: on terminals that do not maintain a clean stack,
     // explicitly set enhancement flags to empty, then pop again. This avoids
     // leaving kitty/xterm enhanced keyboard protocols active after exit.
-    if supports_keyboard_enhancement().unwrap_or(false) && should_enable_keyboard_enhancement() {
+    if !stdin_has_terminal_hangup()
+        && supports_keyboard_enhancement().unwrap_or(false)
+        && should_enable_keyboard_enhancement()
+    {
         let _ = execute!(stdout(), PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::empty()));
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }
@@ -344,6 +350,29 @@ pub(crate) fn stdout_ready_for_writes() -> bool {
     true
 }
 
+#[cfg(unix)]
+fn fd_has_terminal_hangup(fd: std::os::fd::RawFd) -> bool {
+    use libc::{POLLERR, POLLHUP, POLLIN, POLLNVAL, poll, pollfd};
+
+    let mut fds = pollfd {
+        fd,
+        events: POLLIN,
+        revents: 0,
+    };
+    let rc = unsafe { poll(&mut fds, 1, 0) };
+    rc > 0 && fds.revents & (POLLHUP | POLLERR | POLLNVAL) != 0
+}
+
+#[cfg(unix)]
+pub(crate) fn stdin_has_terminal_hangup() -> bool {
+    fd_has_terminal_hangup(std::io::stdin().as_raw_fd())
+}
+
+#[cfg(not(unix))]
+pub(crate) fn stdin_has_terminal_hangup() -> bool {
+    false
+}
+
 fn should_enable_alternate_scroll_mode() -> bool {
     // macOS Terminal hijacks scrolling when 1007h is set without also enabling
     // mouse reporting, so skip the escape in that environment.
@@ -427,6 +456,39 @@ pub(crate) fn should_enable_keyboard_enhancement() -> bool {
 #[cfg(test)]
 mod tests {
     use super::should_enable_keyboard_enhancement;
+
+    #[cfg(unix)]
+    use super::fd_has_terminal_hangup;
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_hangup_detects_closed_input_writer() {
+        let mut fds = [0; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+
+        unsafe {
+            libc::close(fds[1]);
+        }
+        assert!(fd_has_terminal_hangup(fds[0]));
+
+        unsafe {
+            libc::close(fds[0]);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_hangup_ignores_connected_input() {
+        let mut fds = [0; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+
+        assert!(!fd_has_terminal_hangup(fds[0]));
+
+        unsafe {
+            libc::close(fds[0]);
+            libc::close(fds[1]);
+        }
+    }
 
     #[test]
     fn keyboard_enhancement_respects_env_overrides() {

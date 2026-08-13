@@ -585,10 +585,50 @@ pub(crate) struct HighlightedCodeBlock {
     pub(crate) max_width: usize,
 }
 
+// Generated tool commands can contain enough shell punctuation to trigger
+// pathological regex work in syntect/oniguruma well below multi-kilobyte sizes.
+// Long lines remain readable without colors, so keep regex parsing bounded.
+const MAX_HIGHLIGHT_LINE_BYTES: usize = 512;
+
+fn plain_code_block_with_metrics(content: &str) -> HighlightedCodeBlock {
+    use unicode_width::UnicodeWidthStr;
+
+    let estimated_lines = content
+        .as_bytes()
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count()
+        .saturating_add(1);
+    let mut lines = Vec::with_capacity(estimated_lines);
+    let mut line_widths = Vec::with_capacity(estimated_lines);
+    let mut max_width = 0;
+
+    for line in LinesWithEndings::from(content) {
+        let raw = line.strip_suffix('\n').unwrap_or(line);
+        let width = UnicodeWidthStr::width(raw);
+        max_width = max_width.max(width);
+        line_widths.push(width);
+        lines.push(Line::from(raw.to_owned()));
+    }
+
+    HighlightedCodeBlock {
+        lines,
+        line_widths,
+        max_width,
+    }
+}
+
 /// Highlight a code block into ratatui Lines while preserving exact text.
 pub(crate) fn highlight_code_block_with_metrics(content: &str, lang: Option<&str>) -> HighlightedCodeBlock {
     #[cfg(feature = "test-helpers")]
     HIGHLIGHT_CALLS.with(|c| c.set(c.get().saturating_add(1)));
+
+    if content
+        .lines()
+        .any(|line| line.len() > MAX_HIGHLIGHT_LINE_BYTES)
+    {
+        return plain_code_block_with_metrics(content);
+    }
 
     // Choose theme: if user configured a specific syntect theme, honor it.
     // Otherwise, derive colors from our current UI theme for cohesion.
@@ -975,4 +1015,21 @@ fn autodetect_lang(content: &str) -> Option<&'static str> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_single_line_bypasses_highlighting_and_preserves_text() {
+        let payload = "x".repeat(513);
+        let command = format!("printf '%s\\n' '{payload}' | sed -n '1p'");
+
+        let highlighted = highlight_code_block_with_metrics(&command, Some("bash"));
+
+        assert_eq!(highlighted.lines, vec![Line::from(command.clone())]);
+        assert_eq!(highlighted.line_widths, vec![command.len()]);
+        assert_eq!(highlighted.max_width, command.len());
+    }
 }

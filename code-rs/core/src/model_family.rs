@@ -274,6 +274,7 @@ fn apply_upstream_model_overrides(mut family: ModelFamily) -> ModelFamily {
         code_protocol::openai_models::ReasoningEffort::Medium => ReasoningEffort::Medium,
         code_protocol::openai_models::ReasoningEffort::High => ReasoningEffort::High,
         code_protocol::openai_models::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
+        code_protocol::openai_models::ReasoningEffort::Max => ReasoningEffort::Max,
     });
     family.default_reasoning_summary = model_info.default_reasoning_summary.into();
     family.supports_reasoning_summaries = model_info.supports_reasoning_summaries;

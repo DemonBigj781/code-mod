@@ -74,6 +74,14 @@ impl HistoryRenderState {
     }
 
     pub(crate) fn invalidate_history_id(&self, id: HistoryId) {
+        self.invalidate_history_id_inner(id, true);
+    }
+
+    pub(crate) fn invalidate_history_id_preserving_prefix_sums(&self, id: HistoryId) {
+        self.invalidate_history_id_inner(id, false);
+    }
+
+    fn invalidate_history_id_inner(&self, id: HistoryId, clear_prefix_sums: bool) {
         if id == HistoryId::ZERO {
             return;
         }
@@ -84,7 +92,9 @@ impl HistoryRenderState {
             .borrow_mut()
             .retain(|key, _| key.history_id != id);
         self.fallback_cache.borrow_mut().remove(&id);
-        self.prefix_sums.borrow_mut().clear();
+        if clear_prefix_sums {
+            self.prefix_sums.borrow_mut().clear();
+        }
         self.last_total_height.set(0);
         self.last_history_count.set(0);
         self.prefix_valid.set(false);

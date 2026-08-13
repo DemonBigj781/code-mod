@@ -10,6 +10,9 @@ pub const HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG: &str =
     "hide_gpt-5.1-codex-max_migration_prompt";
 pub const HIDE_GPT_5_2_MIGRATION_PROMPT_CONFIG: &str = "hide_gpt5_2_migration_prompt";
 pub const HIDE_GPT_5_2_CODEX_MIGRATION_PROMPT_CONFIG: &str = "hide_gpt5_2_codex_migration_prompt";
+pub const OPENROUTER_FREE_PROFILE_ID: &str = "openrouter-free";
+pub const OPENROUTER_FREE_PROFILE_MODEL: &str = "openrouter/free-max";
+pub const OPENROUTER_PROVIDER_ID: &str = "openrouter";
 
 /// A reasoning effort option surfaced for a model.
 #[derive(Debug, Clone)]
@@ -47,32 +50,67 @@ const ALL_TEXT_VERBOSITY: &[TextVerbosityConfig] = &[
     TextVerbosityConfig::High,
 ];
 
+fn gpt_5_6_reasoning_efforts() -> Vec<ReasoningEffortPreset> {
+    vec![
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Low,
+            description: "Fast responses with lighter reasoning".to_owned(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Medium,
+            description: "Balances speed and reasoning depth for everyday tasks".to_owned(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::High,
+            description: "Greater reasoning depth for complex problems".to_owned(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::XHigh,
+            description: "Extra high reasoning depth for complex problems".to_owned(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Max,
+            description: "Maximum reasoning depth for the hardest problems".to_owned(),
+        },
+    ]
+}
+
+pub fn openrouter_free_profile_preset() -> ModelPreset {
+    ModelPreset {
+        id: OPENROUTER_FREE_PROFILE_MODEL.to_owned(),
+        model: OPENROUTER_FREE_PROFILE_MODEL.to_owned(),
+        display_name: "OpenRouter Free".to_owned(),
+        description: "Routes each request to the highest-capacity compatible free OpenRouter model."
+            .to_owned(),
+        default_reasoning_effort: ReasoningEffort::None,
+        supported_reasoning_efforts: vec![ReasoningEffortPreset {
+            effort: ReasoningEffort::None,
+            description: "Uses the selected free model's default reasoning behavior".to_owned(),
+        }],
+        supported_text_verbosity: &[TextVerbosityConfig::Medium],
+        is_default: false,
+        upgrade: None,
+        pro_only: false,
+        show_in_picker: true,
+    }
+}
+
+pub fn provider_id_for_profile_model(model: &str) -> Option<&'static str> {
+    model
+        .eq_ignore_ascii_case(OPENROUTER_FREE_PROFILE_MODEL)
+        .then_some(OPENROUTER_PROVIDER_ID)
+}
+
 static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     vec![
-        ModelPreset {
-            id: "openrouter/free-max".to_owned(),
-            model: "openrouter/free-max".to_owned(),
-            display_name: "OpenRouter Free".to_owned(),
-            description: "Routes each request to the highest-capacity compatible free OpenRouter model."
-                .to_owned(),
-            default_reasoning_effort: ReasoningEffort::None,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffort::None,
-                description: "Uses the selected free model's default reasoning behavior".to_owned(),
-            }],
-            supported_text_verbosity: &[TextVerbosityConfig::Medium],
-            is_default: false,
-            upgrade: None,
-            pro_only: false,
-            show_in_picker: true,
-        },
+        openrouter_free_profile_preset(),
         ModelPreset {
             id: "gpt-5.6-sol".to_owned(),
             model: "gpt-5.6-sol".to_owned(),
             display_name: "GPT-5.6 Sol".to_owned(),
             description: "GPT-5.6 Sol model.".to_owned(),
             default_reasoning_effort: ReasoningEffort::Medium,
-            supported_reasoning_efforts: frontier_reasoning_efforts(),
+            supported_reasoning_efforts: gpt_5_6_reasoning_efforts(),
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
@@ -85,7 +123,7 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
             display_name: "GPT-5.6 Terra".to_owned(),
             description: "GPT-5.6 Terra model.".to_owned(),
             default_reasoning_effort: ReasoningEffort::Medium,
-            supported_reasoning_efforts: frontier_reasoning_efforts(),
+            supported_reasoning_efforts: gpt_5_6_reasoning_efforts(),
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
@@ -98,7 +136,7 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
             display_name: "GPT-5.6 Luna".to_owned(),
             description: "GPT-5.6 Luna model.".to_owned(),
             default_reasoning_effort: ReasoningEffort::Medium,
-            supported_reasoning_efforts: frontier_reasoning_efforts(),
+            supported_reasoning_efforts: gpt_5_6_reasoning_efforts(),
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
@@ -607,27 +645,6 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     ]
 });
 
-fn frontier_reasoning_efforts() -> Vec<ReasoningEffortPreset> {
-    vec![
-        ReasoningEffortPreset {
-            effort: ReasoningEffort::Low,
-            description: "Fast responses with lighter reasoning".to_owned(),
-        },
-        ReasoningEffortPreset {
-            effort: ReasoningEffort::Medium,
-            description: "Balances speed and reasoning depth for everyday tasks".to_owned(),
-        },
-        ReasoningEffortPreset {
-            effort: ReasoningEffort::High,
-            description: "Greater reasoning depth for complex problems".to_owned(),
-        },
-        ReasoningEffortPreset {
-            effort: ReasoningEffort::XHigh,
-            description: "Extra high reasoning depth for complex problems".to_owned(),
-        },
-    ]
-}
-
 pub fn model_preset_available_for_auth(
     preset: &ModelPreset,
     auth_mode: Option<AuthMode>,
@@ -682,6 +699,7 @@ fn reasoning_effort_rank(effort: ReasoningEffort) -> u8 {
         ReasoningEffort::Medium => 2,
         ReasoningEffort::High => 3,
         ReasoningEffort::XHigh => 4,
+        ReasoningEffort::Max => 5,
     }
 }
 
@@ -784,6 +802,44 @@ mod tests {
                 "gpt-5.6-luna",
                 "gpt-5.5",
             ],
+        );
+    }
+
+    #[test]
+    fn gpt_5_6_variants_include_all_reasoning_modes() {
+        let presets = builtin_model_presets(Some(AuthMode::Chatgpt), true);
+        let expected_efforts = [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
+        ];
+
+        for model in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            let preset = presets
+                .iter()
+                .find(|preset| preset.id == model)
+                .unwrap_or_else(|| panic!("missing preset for {model}"));
+            let efforts: Vec<_> = preset
+                .supported_reasoning_efforts
+                .iter()
+                .map(|preset| preset.effort)
+                .collect();
+            assert_eq!(efforts, expected_efforts, "reasoning modes for {model}");
+        }
+    }
+
+    #[test]
+    fn openrouter_free_profile_is_available_for_session_picker() {
+        let preset = openrouter_free_profile_preset();
+
+        assert_eq!(preset.id, "openrouter/free-max");
+        assert_eq!(preset.model, "openrouter/free-max");
+        assert_eq!(preset.display_name, "OpenRouter Free");
+        assert_eq!(
+            provider_id_for_profile_model(&preset.model),
+            Some("openrouter")
         );
     }
 

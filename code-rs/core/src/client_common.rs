@@ -17,6 +17,7 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -525,7 +526,7 @@ pub(crate) fn create_reasoning_param_for_request(
 // Removed legacy TextControls helper; use `Text` with `OpenAiTextVerbosity` instead.
 
 pub struct ResponseStream {
-    pub(crate) pending_event: Option<Result<ResponseEvent>>,
+    pub(crate) pending_events: VecDeque<Result<ResponseEvent>>,
     pub(crate) rx_event: mpsc::Receiver<Result<ResponseEvent>>,
 }
 
@@ -533,8 +534,8 @@ impl Stream for ResponseStream {
     type Item = Result<ResponseEvent>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.pending_event.is_some() {
-            return Poll::Ready(self.pending_event.take());
+        if let Some(event) = self.pending_events.pop_front() {
+            return Poll::Ready(Some(event));
         }
         self.rx_event.poll_recv(cx)
     }

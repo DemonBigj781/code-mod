@@ -635,6 +635,7 @@ impl ChatWidget<'_> {
 
     pub(crate) fn current_configure_session_op(&self) -> Op {
         Op::configure_session(code_core::protocol::ConfigureSessionOp {
+            provider_id: self.config.model_provider_id.clone(),
             provider: self.config.model_provider.clone(),
             model: self.config.model.clone(),
             model_explicit: self.config.model_explicit,

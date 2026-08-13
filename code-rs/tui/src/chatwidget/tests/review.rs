@@ -1889,7 +1889,7 @@
         "last reasoning should remain visible",
     );
     }
-    
+
     #[test]
     fn reasoning_collapse_applies_without_anchor_cells() {
     let mut harness = ChatWidgetHarness::new();
@@ -3132,6 +3132,22 @@
         "spinner should clear after the final answer even when TaskComplete never arrives"
     );
     }
+
+    #[test]
+    fn stale_reasoning_height_cache_recovers_without_panicking() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(|chat| {
+        let _prefix = chat.history_render.prefix_sums.borrow();
+        chat.recover_history_height_mismatch_for_test(
+            HistoryId(1635),
+            1539,
+            36,
+            1,
+            "Confirming part combinations and dependencies",
+        );
+    });
+    }
     
     #[test]
     fn scrollback_spacer_exact_offset_adjusts_to_content() {
@@ -3223,5 +3239,31 @@
         visible.contains("old-1"),
         "scrolling to the top should keep the oldest content visible"
     );
+    }
+
+    #[test]
+    fn selecting_openrouter_profile_switches_provider_and_normal_models_switch_back() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+
+    chat.apply_model_selection(
+        code_common::model_presets::OPENROUTER_FREE_PROFILE_MODEL.to_owned(),
+        Some(ReasoningEffort::Medium),
+    );
+
+    assert_eq!(
+        chat.config.model_provider_id,
+        code_common::model_presets::OPENROUTER_PROVIDER_ID
+    );
+    assert_eq!(
+        chat.config.model,
+        code_common::model_presets::OPENROUTER_FREE_PROFILE_MODEL
+    );
+    assert_eq!(chat.config.model_provider.name, "OpenRouter");
+
+    chat.apply_model_selection("gpt-5.5".to_owned(), Some(ReasoningEffort::Medium));
+
+    assert_eq!(chat.config.model_provider_id, "openai");
+    assert_eq!(chat.config.model_provider.name, "OpenAI");
     }
     

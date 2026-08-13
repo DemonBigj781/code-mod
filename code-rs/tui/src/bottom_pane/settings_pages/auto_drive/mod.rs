@@ -13,12 +13,13 @@ mod render;
 #[cfg(test)]
 mod tests;
 
-const ROUTING_REASONING_LEVELS: [ReasoningEffort; 5] = [
+const ROUTING_REASONING_LEVELS: [ReasoningEffort; 6] = [
     ReasoningEffort::Minimal,
     ReasoningEffort::Low,
     ReasoningEffort::Medium,
     ReasoningEffort::High,
     ReasoningEffort::XHigh,
+    ReasoningEffort::Max,
 ];
 
 const ROUTING_DESCRIPTION_MAX_CHARS: usize = 200;

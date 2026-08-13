@@ -1,4 +1,5 @@
 mod events;
+mod event_deduper;
 mod init;
 mod input;
 mod render;

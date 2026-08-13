@@ -267,7 +267,7 @@ impl ChatWidget<'_> {
         let trimmed = command_args.trim();
 
         if trimmed.is_empty() {
-            let presets = self.available_model_presets();
+            let presets = self.available_session_model_presets();
             if presets.is_empty() {
                 let message =
                     "No model presets are available. Update your configuration to define models.".to_owned();
@@ -294,6 +294,7 @@ impl ChatWidget<'_> {
                 "low" => ReasoningEffort::Low,
                 "medium" | "med" => ReasoningEffort::Medium,
                 "xhigh" | "extra-high" | "extra_high" => ReasoningEffort::XHigh,
+                "max" => ReasoningEffort::Max,
                 "high" => ReasoningEffort::High,
                 _ => {
                     // Invalid parameter, show error and return

@@ -6,7 +6,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let presets = self.available_model_presets();
+        let presets = self.available_session_model_presets();
         if presets.is_empty() {
             let message =
                 "No model presets are available. Update your configuration to define models.".to_owned();

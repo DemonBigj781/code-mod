@@ -51,6 +51,7 @@ pub(super) async fn handle_configure_session(
         unreachable!("handle_configure_session called with non-ConfigureSession op");
     };
     let crate::protocol::ConfigureSessionOp {
+        provider_id,
         provider,
         model,
         model_explicit,
@@ -84,6 +85,7 @@ pub(super) async fn handle_configure_session(
 
     let req = ConfigureSessionRequest {
         submission_id: sub_id,
+        provider_id,
         provider,
         model,
         model_explicit,
@@ -132,6 +134,7 @@ pub(super) async fn handle_configure_session(
 
 struct ConfigureSessionRequest {
     submission_id: String,
+    provider_id: String,
     provider: ModelProviderInfo,
     model: String,
     model_explicit: bool,

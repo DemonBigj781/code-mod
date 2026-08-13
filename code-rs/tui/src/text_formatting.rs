@@ -270,6 +270,7 @@ pub(crate) fn format_path_list(paths: &[std::path::PathBuf]) -> String {
 pub(crate) fn reasoning_effort_label(effort: code_core::config_types::ReasoningEffort) -> &'static str {
     use code_core::config_types::ReasoningEffort;
     match effort {
+        ReasoningEffort::Max => "Max",
         ReasoningEffort::XHigh => "XHigh",
         ReasoningEffort::High => "High",
         ReasoningEffort::Medium => "Medium",

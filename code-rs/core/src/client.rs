@@ -127,35 +127,49 @@ struct StreamCheckpoint {
 
 fn should_try_next_openrouter_model(error: &CodexErr) -> bool {
     match error {
-        CodexErr::Interrupted
-        | CodexErr::QuotaExceeded
-        | CodexErr::AuthRefreshPermanent(_)
-        | CodexErr::UsageLimitReached(_)
-        | CodexErr::UsageNotIncluded
-        | CodexErr::UnsupportedOperation(_)
-        | CodexErr::EnvVar(_) => false,
         CodexErr::UnexpectedStatus(response) => {
             response.status != StatusCode::PAYMENT_REQUIRED
                 && response.status != StatusCode::UNAUTHORIZED
                 && response.status != StatusCode::FORBIDDEN
+                && response.status != StatusCode::TOO_MANY_REQUESTS
         }
-        _ => true,
+        CodexErr::RetryLimit(error) => error.status.is_server_error(),
+        CodexErr::ModelCap(_) | CodexErr::ServerError(_) | CodexErr::ServerOverloaded => true,
+        CodexErr::Stream(_, _, _) => true,
+        _ => false,
     }
 }
 
+fn starts_model_response(event: &ResponseEvent) -> bool {
+    !matches!(
+        event,
+        ResponseEvent::Created { .. }
+            | ResponseEvent::ResponseHeaders(_)
+            | ResponseEvent::RateLimits(_)
+            | ResponseEvent::ModelsEtag(_)
+            | ResponseEvent::ServerReasoningIncluded(_)
+    )
+}
+
 async fn validate_initial_openrouter_stream(mut stream: ResponseStream) -> Result<ResponseStream> {
-    match stream.next().await {
-        Some(Ok(event)) => {
-            stream.pending_event = Some(Ok(event));
-            Ok(stream)
+    while let Some(event) = stream.rx_event.recv().await {
+        match event {
+            Ok(event) => {
+                let response_started = starts_model_response(&event);
+                stream.pending_events.push_back(Ok(event));
+                if response_started {
+                    return Ok(stream);
+                }
+            }
+            Err(error) => return Err(error),
         }
-        Some(Err(error)) => Err(error),
-        None => Err(CodexErr::Stream(
-            "OpenRouter response stream closed before its first event".to_owned(),
-            None,
-            None,
-        )),
     }
+
+    Err(CodexErr::Stream(
+        "OpenRouter response stream closed before the model started responding".to_owned(),
+        None,
+        None,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -723,7 +737,7 @@ impl ModelClient {
                 });
 
                 Ok(ResponseStream {
-                    pending_event: None,
+                    pending_events: Default::default(),
                     rx_event: rx,
                 })
             }
@@ -1194,7 +1208,7 @@ impl ModelClient {
                     });
 
                     return Ok(ResponseStream {
-                        pending_event: None,
+                        pending_events: Default::default(),
                         rx_event,
                     });
                 }
@@ -1247,7 +1261,7 @@ impl ModelClient {
         &self,
         prompt: &Prompt,
         log_tag: Option<&str>,
-        max_retries_override: Option<u64>,
+        request_max_retries: Option<u64>,
     ) -> Result<ResponseStream> {
         if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
             // short circuit for tests
@@ -1342,7 +1356,8 @@ impl ModelClient {
         let session_id_str = session_id.to_string();
 
         let mut attempt = 0;
-        let max_retries = max_retries_override.unwrap_or_else(|| self.provider.request_max_retries());
+        let max_retries = request_max_retries
+            .unwrap_or_else(|| self.provider.request_max_retries());
         let mut request_id = String::new();
         let mut rate_limit_switch_state = crate::account_switching::RateLimitSwitchState::default();
 
@@ -1593,7 +1608,7 @@ impl ModelClient {
                     ));
 
                     return Ok(ResponseStream {
-                        pending_event: None,
+                        pending_events: Default::default(),
                         rx_event,
                     });
                 }
@@ -3122,7 +3137,7 @@ fn stream_from_fixture(
         Arc::new(RwLock::new(StreamCheckpoint::default())),
     ));
     Ok(ResponseStream {
-        pending_event: None,
+        pending_events: Default::default(),
         rx_event,
     })
 }

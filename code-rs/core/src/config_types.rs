@@ -3340,6 +3340,7 @@ pub enum ReasoningEffort {
     Medium,
     High,
     XHigh,
+    Max,
     /// Deprecated: previously disabled reasoning. Kept for internal use only.
     #[serde(skip)]
     #[schemars(skip)]
@@ -3553,6 +3554,7 @@ impl From<code_protocol::config_types::ReasoningEffort> for ReasoningEffort {
             code_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
             code_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
             code_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
+            code_protocol::config_types::ReasoningEffort::Max => ReasoningEffort::Max,
         }
     }
 }
@@ -3567,6 +3569,7 @@ impl From<ReasoningEffort> for code_protocol::config_types::ReasoningEffort {
             ReasoningEffort::Medium => code_protocol::config_types::ReasoningEffort::Medium,
             ReasoningEffort::High => code_protocol::config_types::ReasoningEffort::High,
             ReasoningEffort::XHigh => code_protocol::config_types::ReasoningEffort::XHigh,
+            ReasoningEffort::Max => code_protocol::config_types::ReasoningEffort::Max,
         }
     }
 }

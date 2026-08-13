@@ -39,6 +39,7 @@ impl FlatPreset {
 
 pub(crate) fn reasoning_effort_label(effort: ReasoningEffort) -> &'static str {
     match effort {
+        ReasoningEffort::Max => "Max",
         ReasoningEffort::XHigh => "XHigh",
         ReasoningEffort::High => "High",
         ReasoningEffort::Medium => "Medium",
@@ -59,12 +60,12 @@ pub(crate) fn compare_presets(a: &FlatPreset, b: &FlatPreset) -> Ordering {
 
 fn effort_rank(effort: ReasoningEffort) -> u8 {
     match effort {
-        ReasoningEffort::XHigh => 0,
-        ReasoningEffort::High => 1,
-        ReasoningEffort::Medium => 2,
-        ReasoningEffort::Low => 3,
-        ReasoningEffort::Minimal => 4,
-        ReasoningEffort::None => 5,
+        ReasoningEffort::Max => 0,
+        ReasoningEffort::XHigh => 1,
+        ReasoningEffort::High => 2,
+        ReasoningEffort::Medium => 3,
+        ReasoningEffort::Low => 4,
+        ReasoningEffort::Minimal => 5,
+        ReasoningEffort::None => 6,
     }
 }
-

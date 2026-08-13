@@ -261,6 +261,7 @@ pub fn write_global_mcp_servers(
 pub async fn persist_model_selection(
     code_home: &Path,
     profile: Option<&str>,
+    provider_id: &str,
     model: &str,
     effort: Option<ReasoningEffort>,
     preferred_effort: Option<ReasoningEffort>,
@@ -311,6 +312,7 @@ pub async fn persist_model_selection(
             };
 
             profile_table["model"] = toml_edit::value(model.to_owned());
+            profile_table["model_provider"] = toml_edit::value(provider_id.to_owned());
 
             if let Some(effort) = effort {
                 profile_table["model_reasoning_effort"] =
@@ -327,6 +329,7 @@ pub async fn persist_model_selection(
             }
         } else {
             root["model"] = toml_edit::value(model.to_owned());
+            root["model_provider"] = toml_edit::value(provider_id.to_owned());
             match effort {
                 Some(effort) => {
                     root["model_reasoning_effort"] =

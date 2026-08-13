@@ -1614,6 +1614,7 @@ fn apply_model_selection(config: &mut Config, model: &str, effort: ReasoningEffo
 
 fn configure_session_op_from_config(config: &Config) -> Op {
     Op::configure_session(code_core::protocol::ConfigureSessionOp {
+        provider_id: config.model_provider_id.clone(),
         provider: config.model_provider.clone(),
         model: config.model.clone(),
         model_explicit: config.model_explicit,

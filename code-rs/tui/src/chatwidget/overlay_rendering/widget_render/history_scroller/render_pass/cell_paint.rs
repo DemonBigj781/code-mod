@@ -1,5 +1,15 @@
 use super::*;
 
+#[cfg(debug_assertions)]
+#[derive(Debug)]
+struct HeightMismatch {
+    history_id: HistoryId,
+    cached: u16,
+    recomputed: u16,
+    idx: usize,
+    preview: String,
+}
+
 pub(super) struct PaintVisibleCellsArgs<'a> {
     pub history_area: Rect,
     pub content_area: Rect,
@@ -52,16 +62,6 @@ impl ChatWidget<'_> {
         let c_info = crate::colors::info();
 
         let render_loop_start = self.perf_state.enabled.then(std::time::Instant::now);
-
-        #[cfg(debug_assertions)]
-        #[derive(Debug)]
-        struct HeightMismatch {
-            history_id: HistoryId,
-            cached: u16,
-            recomputed: u16,
-            idx: usize,
-            preview: String,
-        }
 
         #[cfg(debug_assertions)]
         let mut height_mismatches: Vec<HeightMismatch> = Vec::new();
@@ -754,26 +754,8 @@ impl ChatWidget<'_> {
         drop(hovered_action_ref);
 
         #[cfg(debug_assertions)]
-        if let Some(first) = height_mismatches.first() {
-            for mismatch in &height_mismatches {
-                tracing::error!(
-                    target: "code_tui::history_cells",
-                    history_id = ?mismatch.history_id,
-                    idx = mismatch.idx,
-                    cached = mismatch.cached,
-                    recomputed = mismatch.recomputed,
-                    preview = %mismatch.preview,
-                    "History cell height mismatch detected; aborting to capture repro",
-                );
-            }
-            panic!(
-                "history cell height mismatch ({} cases); first id={:?} cached={} recomputed={} preview={}",
-                height_mismatches.len(),
-                first.history_id,
-                first.cached,
-                first.recomputed,
-                first.preview
-            );
+        if !height_mismatches.is_empty() {
+            self.recover_history_height_mismatches(&height_mismatches);
         }
 
         if let Some(start) = render_loop_start && self.perf_state.enabled {
@@ -792,5 +774,45 @@ impl ChatWidget<'_> {
         }
 
         (screen_y, has_visible_animation)
+    }
+
+    #[cfg(debug_assertions)]
+    fn recover_history_height_mismatches(&self, mismatches: &[HeightMismatch]) {
+        for mismatch in mismatches {
+            tracing::error!(
+                target: "code_tui::history_cells",
+                history_id = ?mismatch.history_id,
+                idx = mismatch.idx,
+                cached = mismatch.cached,
+                recomputed = mismatch.recomputed,
+                preview = %mismatch.preview,
+                "History cell height mismatch detected; invalidating stale cache",
+            );
+            self.history_render
+                .invalidate_history_id_preserving_prefix_sums(mismatch.history_id);
+        }
+
+        self.mark_render_requests_dirty();
+        self.history_prefix_append_only.set(false);
+        self.history_virtualization_sync_pending.set(true);
+        self.request_redraw();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn recover_history_height_mismatch_for_test(
+        &self,
+        history_id: HistoryId,
+        idx: usize,
+        cached: u16,
+        recomputed: u16,
+        preview: &str,
+    ) {
+        self.recover_history_height_mismatches(&[HeightMismatch {
+            history_id,
+            cached,
+            recomputed,
+            idx,
+            preview: preview.to_string(),
+        }]);
     }
 }

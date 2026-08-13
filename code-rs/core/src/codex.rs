@@ -194,6 +194,7 @@ fn to_proto_reasoning_effort(effort: ReasoningEffortConfig) -> ProtoReasoningEff
         ReasoningEffortConfig::Medium => ProtoReasoningEffort::Medium,
         ReasoningEffortConfig::High => ProtoReasoningEffort::High,
         ReasoningEffortConfig::XHigh => ProtoReasoningEffort::XHigh,
+        ReasoningEffortConfig::Max => ProtoReasoningEffort::Max,
     }
 }
 
@@ -1045,6 +1046,7 @@ impl Codex {
 
         let configure_session =
             Op::configure_session(crate::protocol::ConfigureSessionOp {
+                provider_id: config.model_provider_id.clone(),
                 provider: config.model_provider.clone(),
                 model: config.model.clone(),
                 model_explicit: config.model_explicit,

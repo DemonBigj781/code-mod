@@ -69,7 +69,8 @@ fn reasoning_effort_rank(effort: ReasoningEffort) -> u8 {
         ReasoningEffort::Medium => 2,
         ReasoningEffort::High => 3,
         ReasoningEffort::XHigh => 4,
-        ReasoningEffort::None => 5,
+        ReasoningEffort::Max => 5,
+        ReasoningEffort::None => 6,
     }
 }
 

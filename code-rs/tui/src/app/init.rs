@@ -26,6 +26,13 @@ use crate::thread_spawner;
 
 use super::state::{App, AppInitArgs, AppState, ChatWidgetArgs, FrameTimer};
 
+fn is_hard_terminal_refresh_event(event: &crossterm::event::Event) -> bool {
+    matches!(
+        event,
+        crossterm::event::Event::Resize(_, _) | crossterm::event::Event::FocusGained
+    )
+}
+
 impl App<'_> {
     pub(crate) fn new(args: AppInitArgs) -> Self {
         let AppInitArgs {
@@ -137,6 +144,11 @@ impl App<'_> {
                 let mut last_key_time = Instant::now();
                 loop {
                     if !input_running_thread.load(Ordering::Relaxed) { break; }
+                    if crate::tui::stdin_has_terminal_hangup() {
+                        input_running_thread.store(false, Ordering::Release);
+                        app_event_tx.send(AppEvent::ExitRequest);
+                        break;
+                    }
                     if input_suspended_thread.load(Ordering::Relaxed) {
                         std::thread::sleep(Duration::from_millis(10));
                         continue;
@@ -154,9 +166,19 @@ impl App<'_> {
                     let hot_typing = Instant::now().duration_since(last_key_time) <= Duration::from_millis(250);
                     let poll_timeout = if hot_typing { Duration::from_millis(2) } else { Duration::from_millis(10) };
                     match crossterm::event::poll(poll_timeout) {
+                        Ok(true) if crate::tui::stdin_has_terminal_hangup() => {
+                            input_running_thread.store(false, Ordering::Release);
+                            app_event_tx.send(AppEvent::ExitRequest);
+                            break;
+                        }
                         Ok(true) => match crossterm::event::read() {
                             Ok(event) => {
                                 match event {
+                                    event @ (crossterm::event::Event::Resize(_, _)
+                                        | crossterm::event::Event::FocusGained) => {
+                                        debug_assert!(is_hard_terminal_refresh_event(&event));
+                                        app_event_tx.send(AppEvent::TerminalRefresh);
+                                    }
                                     crossterm::event::Event::Key(key_event) => {
                                         // Some Windows terminals (e.g., legacy conhost) only report
                                         // `Release` events when keyboard enhancement flags are not
@@ -167,14 +189,6 @@ impl App<'_> {
                                             last_key_time = Instant::now();
                                             app_event_tx.send(AppEvent::KeyEvent(key_event));
                                         }
-                                    }
-                                    // When the terminal resizes or regains focus, issue a redraw.
-                                    // Some terminals clear the alt‑screen buffer on focus switches,
-                                    // which can leave the status bar and inline images blank until
-                                    // the next resize. A focus‑gain repaint fixes this immediately.
-                                    crossterm::event::Event::Resize(_, _)
-                                    | crossterm::event::Event::FocusGained => {
-                                        app_event_tx.send(AppEvent::RequestRedraw);
                                     }
                                     crossterm::event::Event::FocusLost => {
                                         // No action needed; keep state as‑is.
@@ -236,6 +250,11 @@ impl App<'_> {
             let flag_for_thread = sigterm_flag.clone();
             let listener = move || {
                 while running_for_thread.load(Ordering::Relaxed) {
+                    if crate::tui::stdin_has_terminal_hangup() {
+                        running_for_thread.store(false, Ordering::Release);
+                        tx.send(AppEvent::ExitRequest);
+                        break;
+                    }
                     if trigger_for_thread.swap(false, Ordering::SeqCst) {
                         running_for_thread.store(false, Ordering::Release);
                         flag_for_thread.store(true, Ordering::Release);
@@ -332,6 +351,7 @@ impl App<'_> {
             app_event_rx_high,
             app_event_rx_bulk,
             consecutive_high_events: 0,
+            event_deduper: super::event_deduper::EventDeduper::new(),
             app_state,
             config,
             cli_kv_overrides,
@@ -369,6 +389,19 @@ impl App<'_> {
             #[cfg(unix)]
             sigterm_flag,
         }
+    }
+}
+
+#[cfg(test)]
+mod terminal_refresh_tests {
+    use super::is_hard_terminal_refresh_event;
+    use crossterm::event::Event;
+
+    #[test]
+    fn resize_and_focus_gain_require_a_hard_terminal_refresh() {
+        assert!(is_hard_terminal_refresh_event(&Event::Resize(80, 24)));
+        assert!(is_hard_terminal_refresh_event(&Event::FocusGained));
+        assert!(!is_hard_terminal_refresh_event(&Event::FocusLost));
     }
 }
 

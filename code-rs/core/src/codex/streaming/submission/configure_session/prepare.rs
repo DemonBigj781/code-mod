@@ -9,6 +9,7 @@ impl Runner<'_> {
     ) -> Result<Prepared, ConfigureSessionControl> {
         let ConfigureSessionRequest {
             submission_id,
+            provider_id,
             provider,
             model,
             model_explicit,
@@ -54,6 +55,7 @@ impl Runner<'_> {
         let mut updated_config = (*current_config).clone();
 
         let model_changed = !updated_config.model.eq_ignore_ascii_case(&model);
+        let provider_changed = updated_config.model_provider_id != provider_id;
         let effort_changed = updated_config.model_reasoning_effort != model_reasoning_effort;
         let preferred_effort_changed = preferred_model_reasoning_effort
             .as_ref()
@@ -67,6 +69,7 @@ impl Runner<'_> {
 
         updated_config.model = model.clone();
         updated_config.model_explicit = model_explicit;
+        updated_config.model_provider_id = provider_id.clone();
         updated_config.model_provider = provider.clone();
         updated_config.model_reasoning_effort = model_reasoning_effort;
         if let Some(preferred) = preferred_model_reasoning_effort {
@@ -497,10 +500,11 @@ impl Runner<'_> {
         let new_config = Arc::new(updated_config);
 
         if new_config.model_explicit
-            && (model_changed || effort_changed || preferred_effort_changed)
+            && (provider_changed || model_changed || effort_changed || preferred_effort_changed)
             && let Err(err) = persist_model_selection(
                 &new_config.code_home,
                 new_config.active_profile.as_deref(),
+                &new_config.model_provider_id,
                 &new_config.model,
                 Some(new_config.model_reasoning_effort),
                 new_config.preferred_model_reasoning_effort,

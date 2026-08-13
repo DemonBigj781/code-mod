@@ -1,6 +1,6 @@
 impl ChatWidget<'_> {
     pub(super) fn build_model_settings_view(&self) -> ModelSelectionView {
-        let presets = self.available_model_presets();
+        let presets = self.available_session_model_presets();
         let current_model = self.config.model.clone();
         let current_effort = self.config.model_reasoning_effort;
         ModelSelectionView::new(

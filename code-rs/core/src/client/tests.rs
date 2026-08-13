@@ -1,5 +1,6 @@
 use super::*;
 use crate::model_provider_info::{ModelProviderInfo, WireApi, CHATGPT_CODEX_BASE_URL};
+use futures::StreamExt;
 use std::collections::HashMap;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -73,6 +74,96 @@ fn utc_ymd_hms_or_panic(
     Utc.with_ymd_and_hms(year, month, day, hour, minute, second)
         .single()
         .or_panic("valid UTC datetime")
+}
+
+#[test]
+fn openrouter_free_max_only_retries_model_specific_failures() {
+    for status in [
+        StatusCode::UNAUTHORIZED,
+        StatusCode::PAYMENT_REQUIRED,
+        StatusCode::FORBIDDEN,
+        StatusCode::TOO_MANY_REQUESTS,
+    ] {
+        assert!(!should_try_next_openrouter_model(
+            &CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                status,
+                body: String::new(),
+                request_id: None,
+            })
+        ));
+    }
+
+    assert!(should_try_next_openrouter_model(
+        &CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::NOT_FOUND,
+            body: String::new(),
+            request_id: None,
+        })
+    ));
+    assert!(!should_try_next_openrouter_model(&CodexErr::RetryLimit(
+        RetryLimitReachedError {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            request_id: None,
+            retryable: true,
+        }
+    )));
+    assert!(should_try_next_openrouter_model(&CodexErr::RetryLimit(
+        RetryLimitReachedError {
+            status: StatusCode::BAD_GATEWAY,
+            request_id: None,
+            retryable: true,
+        }
+    )));
+    assert!(!should_try_next_openrouter_model(&CodexErr::Reqwest(
+        reqwest::Client::new()
+            .get("not a URL")
+            .build()
+            .expect_err("invalid URL should fail")
+    )));
+}
+
+#[tokio::test]
+async fn openrouter_validation_waits_for_output_and_preserves_metadata() {
+    let (tx, rx) = mpsc::channel(4);
+    tx.send(Ok(ResponseEvent::ResponseHeaders(json!({"x-test": "value"}))))
+        .await
+        .or_panic("metadata should be queued");
+    tx.send(Ok(ResponseEvent::Created {
+        response_id: Some("response-id".to_owned()),
+        response_model: Some("vendor/model:free".to_owned()),
+    }))
+    .await
+    .or_panic("created event should be queued");
+    tx.send(Ok(ResponseEvent::OutputTextDelta {
+        delta: "hello".to_owned(),
+        item_id: None,
+        sequence_number: None,
+        output_index: None,
+    }))
+    .await
+    .or_panic("output event should be queued");
+    drop(tx);
+
+    let stream = ResponseStream {
+        pending_events: Default::default(),
+        rx_event: rx,
+    };
+    let mut stream = validate_initial_openrouter_stream(stream)
+        .await
+        .or_panic("stream should validate");
+
+    assert!(matches!(
+        stream.next().await,
+        Some(Ok(ResponseEvent::ResponseHeaders(_)))
+    ));
+    assert!(matches!(
+        stream.next().await,
+        Some(Ok(ResponseEvent::Created { .. }))
+    ));
+    assert!(matches!(
+        stream.next().await,
+        Some(Ok(ResponseEvent::OutputTextDelta { .. }))
+    ));
 }
 
 #[test]

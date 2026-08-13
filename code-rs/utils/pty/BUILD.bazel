@@ -1,11 +1,6 @@
 load("//:defs.bzl", "codex_rust_crate")
 
 codex_rust_crate(
-<<<<<<<< HEAD:code-rs/utils/pty/BUILD.bazel
     name = "pty",
     crate_name = "codex_utils_pty",
-========
-    name = "codex-mcp",
-    crate_name = "codex_mcp",
->>>>>>>> every-code/main:codex-rs/codex-mcp/BUILD.bazel
 )

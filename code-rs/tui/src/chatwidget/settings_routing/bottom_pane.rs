@@ -1,6 +1,6 @@
 impl ChatWidget<'_> {
     fn open_model_settings_section(&mut self) -> bool {
-        let presets = self.available_model_presets();
+        let presets = self.available_session_model_presets();
         let current_model = self.config.model.clone();
         let current_effort = self.config.model_reasoning_effort;
         self.open_bottom_pane_settings(move |this| {

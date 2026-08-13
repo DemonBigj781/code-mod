@@ -456,7 +456,7 @@ pub(crate) async fn stream_chat_completions(
                     otel_event_manager.clone(),
                 ));
                 return Ok(ResponseStream {
-                    pending_event: None,
+                    pending_events: Default::default(),
                     rx_event,
                 });
             }
@@ -1104,8 +1104,16 @@ where
                         this.cumulative_item_id = Some(id.clone());
                     }
 
-                    // Not an assistant message – forward immediately.
-                    return Poll::Ready(Some(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })));
+                    // Assistant messages are finalized from `cumulative` when
+                    // `Completed` arrives. Forwarding the provider's terminal
+                    // item here would render the same message twice.
+                    if !is_assistant_delta {
+                        return Poll::Ready(Some(Ok(ResponseEvent::OutputItemDone {
+                            item,
+                            sequence_number: None,
+                            output_index: None,
+                        })));
+                    }
                 }
                 Poll::Ready(Some(Ok(ResponseEvent::RateLimits(snapshot)))) => {
                     return Poll::Ready(Some(Ok(ResponseEvent::RateLimits(snapshot))));
@@ -1288,5 +1296,61 @@ impl<S> AggregatedChatStream<S> {
 
     pub(crate) fn streaming_mode(inner: S) -> Self {
         Self::new(inner, AggregateMode::Streaming)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+
+    #[tokio::test]
+    async fn streaming_mode_emits_one_final_message_after_deltas() {
+        let provider_final = ResponseItem::Message {
+            id: Some("message-1".to_owned()),
+            role: "assistant".to_owned(),
+            content: vec![ContentItem::OutputText {
+                text: "hello".to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+        let input = stream::iter(vec![
+            Ok(ResponseEvent::OutputTextDelta {
+                delta: "hello".to_owned(),
+                item_id: Some("message-1".to_owned()),
+                sequence_number: None,
+                output_index: None,
+            }),
+            Ok(ResponseEvent::OutputItemDone {
+                item: provider_final,
+                sequence_number: None,
+                output_index: None,
+            }),
+            Ok(ResponseEvent::Completed {
+                response_id: "response-1".to_owned(),
+                token_usage: None,
+            }),
+        ]);
+
+        let events = AggregatedChatStream::streaming_mode(input)
+            .try_collect::<Vec<_>>()
+            .await
+            .expect("stream should complete");
+
+        let final_messages = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ResponseEvent::OutputItemDone {
+                        item: ResponseItem::Message { role, .. },
+                        ..
+                    } if role == "assistant"
+                )
+            })
+            .count();
+
+        assert_eq!(final_messages, 1, "the final assistant message was replayed");
     }
 }

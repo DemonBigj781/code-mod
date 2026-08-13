@@ -2,9 +2,11 @@ use crate::CodexAuth;
 use crate::model_provider_info::ModelProviderInfo;
 
 use reqwest::Method;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
@@ -71,6 +73,8 @@ struct OpenRouterCatalogModel {
 struct OpenRouterPricing {
     prompt: Value,
     completion: Value,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +94,20 @@ struct OpenRouterTopProvider {
 pub(crate) struct OpenRouterFreeRouter {
     cache_path: PathBuf,
     cache: Mutex<Option<FreeModelCache>>,
+}
+
+#[derive(Debug)]
+enum CatalogRefreshError {
+    Fatal(String),
+    Transient(String),
+}
+
+impl CatalogRefreshError {
+    fn into_message(self) -> String {
+        match self {
+            Self::Fatal(message) | Self::Transient(message) => message,
+        }
+    }
 }
 
 impl OpenRouterFreeRouter {
@@ -137,9 +155,9 @@ impl OpenRouterFreeRouter {
             }
             Ok(cache) => {
                 *cache_guard = Some(cache);
-                Err("OpenRouter has no compatible zero-price free models".to_string())
+                Err("OpenRouter has no compatible zero-price free models".to_owned())
             }
-            Err(error) => {
+            Err(CatalogRefreshError::Transient(error)) => {
                 if let Some(stale) = stale {
                     tracing::warn!(%error, "using stale OpenRouter free-max cache after refresh failure");
                     let ids = candidate_ids(&stale.candidates);
@@ -149,6 +167,7 @@ impl OpenRouterFreeRouter {
                     Err(error)
                 }
             }
+            Err(error @ CatalogRefreshError::Fatal(_)) => Err(error.into_message()),
         }
     }
 }
@@ -191,8 +210,7 @@ pub(crate) fn eligible_candidates(
 fn is_eligible(model: &OpenRouterCatalogModel) -> bool {
     model.id.contains('/')
         && model.id.ends_with(":free")
-        && is_zero_price(&model.pricing.prompt)
-        && is_zero_price(&model.pricing.completion)
+        && is_zero_pricing(&model.pricing)
         && model
             .architecture
             .input_modalities
@@ -213,6 +231,12 @@ fn is_eligible(model: &OpenRouterCatalogModel) -> bool {
             .any(|parameter| parameter == "tool_choice")
 }
 
+fn is_zero_pricing(pricing: &OpenRouterPricing) -> bool {
+    is_zero_price(&pricing.prompt)
+        && is_zero_price(&pricing.completion)
+        && pricing.extra.values().all(is_zero_price)
+}
+
 fn is_zero_price(value: &Value) -> bool {
     value
         .as_f64()
@@ -220,38 +244,54 @@ fn is_zero_price(value: &Value) -> bool {
         == Some(0.0)
 }
 
+pub(crate) fn catalog_status_allows_stale_fallback(status: StatusCode) -> bool {
+    status == StatusCode::REQUEST_TIMEOUT || status.is_server_error()
+}
+
 async fn refresh(
     provider: &ModelProviderInfo,
     auth: &Option<CodexAuth>,
     client: &reqwest::Client,
     now_unix_seconds: u64,
-) -> Result<FreeModelCache, String> {
-    let base_url = provider
-        .base_url
-        .as_deref()
-        .ok_or_else(|| "OpenRouter provider has no base URL".to_string())?;
+) -> Result<FreeModelCache, CatalogRefreshError> {
+    let base_url = provider.base_url.as_deref().ok_or_else(|| {
+        CatalogRefreshError::Fatal("OpenRouter provider has no base URL".to_owned())
+    })?;
     let models_url = reqwest::Url::parse(&format!("{}/models", base_url.trim_end_matches('/')))
-        .map_err(|error| format!("invalid OpenRouter catalog URL: {error}"))?;
+        .map_err(|error| {
+            CatalogRefreshError::Fatal(format!("invalid OpenRouter catalog URL: {error}"))
+        })?;
     let response = provider
         .create_request_builder_for_url_with_auth(client, auth.as_ref(), Method::GET, models_url)
         .await
-        .map_err(|error| format!("failed to build OpenRouter catalog request: {error}"))?
+        .map_err(|error| {
+            CatalogRefreshError::Fatal(format!(
+                "failed to build OpenRouter catalog request: {error}"
+            ))
+        })?
         .timeout(REQUEST_TIMEOUT)
         .send()
         .await
-        .map_err(|error| format!("failed to fetch OpenRouter model catalog: {error}"))?;
+        .map_err(|error| {
+            CatalogRefreshError::Transient(format!(
+                "failed to fetch OpenRouter model catalog: {error}"
+            ))
+        })?;
     if !response.status().is_success() {
-        return Err(format!(
-            "OpenRouter model catalog returned HTTP {}",
-            response.status().as_u16()
-        ));
+        let status = response.status();
+        let message = format!("OpenRouter model catalog returned HTTP {}", status.as_u16());
+        return Err(if catalog_status_allows_stale_fallback(status) {
+            CatalogRefreshError::Transient(message)
+        } else {
+            CatalogRefreshError::Fatal(message)
+        });
     }
-    let catalog = response
-        .json::<Value>()
-        .await
-        .map_err(|error| format!("invalid OpenRouter model catalog: {error}"))?;
-    let candidates = eligible_candidates(catalog)
-        .map_err(|error| format!("invalid OpenRouter model metadata: {error}"))?;
+    let catalog = response.json::<Value>().await.map_err(|error| {
+        CatalogRefreshError::Transient(format!("invalid OpenRouter model catalog: {error}"))
+    })?;
+    let candidates = eligible_candidates(catalog).map_err(|error| {
+        CatalogRefreshError::Transient(format!("invalid OpenRouter model metadata: {error}"))
+    })?;
     Ok(FreeModelCache::new(now_unix_seconds, candidates))
 }
 

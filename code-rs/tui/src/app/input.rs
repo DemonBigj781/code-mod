@@ -40,6 +40,15 @@ impl App<'_> {
     }
 
     pub(super) fn dispatch_code_event(&mut self, event: Event) {
+        if self.event_deduper.is_duplicate(&event.id, event.event_seq) {
+            tracing::warn!(
+                event_id = %event.id,
+                event_seq = event.event_seq,
+                "discarding duplicate code event"
+            );
+            return;
+        }
+
         match &mut self.app_state {
             AppState::Chat { widget } => widget.handle_code_event(event),
             AppState::Onboarding { .. } => {}

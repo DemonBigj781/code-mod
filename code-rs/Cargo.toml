@@ -48,6 +48,7 @@ members = [
     "otel",
     "terminal-detection",
     "tui",
+    "vendor/crossterm",
     "git-apply",
     "utils/absolute-path",
     "utils/cache",
@@ -331,6 +332,7 @@ codegen-units = 1
 
 [patch.crates-io]
 # ratatui = { path = "../../ratatui" }
+crossterm = { path = "vendor/crossterm" }
 ratatui = { git = "https://github.com/nornagon/ratatui", branch = "nornagon-v0.29.0-patch" }
 
 # Custom build profiles used by build-fast.sh

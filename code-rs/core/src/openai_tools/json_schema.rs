@@ -178,6 +178,16 @@ pub(super) fn sanitize_json_schema(value: &mut JsonValue) {
                 }
             }
             if let Some(items) = map.get_mut("items") {
+                // Draft 7 represents tuple schemas as `items: [schema, ...]`,
+                // while our reduced schema model supports homogeneous arrays
+                // only. Keep the first tuple entry as the closest compatible
+                // representation instead of dropping the entire MCP tool.
+                if let JsonValue::Array(tuple_items) = items {
+                    *items = tuple_items
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| json!({ "type": "string" }));
+                }
                 sanitize_json_schema(items);
             }
             // Some schemas use oneOf/anyOf/allOf - sanitize their entries
@@ -258,5 +268,61 @@ pub(super) fn sanitize_json_schema(value: &mut JsonValue) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitizes_draft_7_tuple_items_for_mcp_tools() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "transform": {
+                    "type": "object",
+                    "properties": {
+                        "translate": {
+                            "type": "array",
+                            "items": [
+                                { "type": "number" },
+                                { "type": "number" },
+                                { "type": "number" }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+
+        sanitize_json_schema(&mut schema);
+
+        assert_eq!(
+            schema["properties"]["transform"]["properties"]["translate"]["items"],
+            json!({ "type": "number" })
+        );
+        assert!(serde_json::from_value::<JsonSchema>(schema).is_ok());
+    }
+
+    #[test]
+    fn sanitizes_empty_tuple_items_for_mcp_tools() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "values": {
+                    "type": "array",
+                    "items": []
+                }
+            }
+        });
+
+        sanitize_json_schema(&mut schema);
+
+        assert_eq!(
+            schema["properties"]["values"]["items"],
+            json!({ "type": "string" })
+        );
+        assert!(serde_json::from_value::<JsonSchema>(schema).is_ok());
     }
 }

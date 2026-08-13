@@ -153,28 +153,22 @@ Code also includes a built-in `openrouter` provider. Set `OPENROUTER_API_KEY`
 before launch. Optional `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_NAME`
 values are sent as OpenRouter attribution headers when present.
 
-To select the highest-capacity compatible free model, add this profile to
-`~/.code/config.toml`:
+To select the highest-capacity compatible free model, open the model picker and
+choose **OpenRouter Free**. Code switches the active provider to the built-in
+`openrouter` provider and persists that provider together with the model
+selection. Selecting a normal Code model switches the provider back to
+`openai`.
 
-```toml
-[profiles.openrouter-free]
-model_provider = "openrouter"
-model = "openrouter/free-max"
-model_reasoning_effort = "medium"
-model_reasoning_summary = "auto"
-```
-
-Start Code with `--profile openrouter-free`. The virtual
-`openrouter/free-max` model reads OpenRouter's catalog, keeps zero-price
+The virtual `openrouter/free-max` model reads OpenRouter's catalog, keeps zero-price
 `vendor/model:free` entries with text and tool support, then ranks them by
 context length, maximum output tokens, and model ID. Catalog metadata is
 cached for 24 hours under `~/.code/cache/openrouter-free-max.json`.
 
 Discovery does not send inference probes. The real user request is sent to the
 highest-ranked candidate, and Code advances to the next candidate only when a
-model-specific failure occurs before the first response event. Global account
-failures such as HTTP 402, authentication failures, and usage-limit failures
-stop immediately so Code does not multiply chargeable requests.
+model-specific failure occurs before the model starts responding. Global
+account failures such as HTTP 402, authentication failures, and usage-limit
+failures stop immediately so Code does not multiply chargeable requests.
 
 Note that if you override `model_provider`, then you likely want to override
 `model`, as well. For example, if you are running ollama with Mistral locally,

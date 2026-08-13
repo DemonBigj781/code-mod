@@ -26,6 +26,9 @@ use crate::tools::registry::ToolHandler;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use async_trait::async_trait;
 use code_protocol::models::ResponseInputItem;
+use futures::FutureExt;
+use futures::future::BoxFuture;
+use futures::future::ready;
 use serde_json::Value;
 
 pub(crate) struct BrowserToolHandler;
@@ -46,25 +49,37 @@ impl ToolHandler for BrowserToolHandler {
     }
 }
 
-pub(crate) async fn handle_browser_tool(
-    sess: &Session,
-    ctx: &ToolCallCtx,
+pub(crate) fn handle_browser_tool<'a>(
+    sess: &'a Session,
+    ctx: &'a ToolCallCtx,
     arguments: String,
-) -> ResponseInputItem {
+) -> BoxFuture<'a, ResponseInputItem> {
     let parsed_value = match serde_json::from_str::<Value>(&arguments) {
         Ok(value) => value,
         Err(e) => {
-            return tool_error(ctx.call_id.clone(), format!("Invalid browser arguments: {e}"));
+            return ready(tool_error(
+                ctx.call_id.clone(),
+                format!("Invalid browser arguments: {e}"),
+            ))
+            .boxed();
         }
     };
 
     let Value::Object(mut object) = parsed_value else {
-        return tool_error(ctx.call_id.clone(), "Invalid browser arguments: expected an object");
+        return ready(tool_error(
+            ctx.call_id.clone(),
+            "Invalid browser arguments: expected an object",
+        ))
+        .boxed();
     };
 
     let action_value = object.remove("action");
     let Some(action) = action_value.and_then(|v| v.as_str().map(ToString::to_string)) else {
-        return tool_error(ctx.call_id.clone(), "Invalid browser arguments: missing 'action'");
+        return ready(tool_error(
+            ctx.call_id.clone(),
+            "Invalid browser arguments: missing 'action'",
+        ))
+        .boxed();
     };
 
     let payload_value = Value::Object(object.clone());
@@ -79,83 +94,124 @@ pub(crate) async fn handle_browser_tool(
         "status" => {
             #[cfg(feature = "browser-automation")]
             {
-                lifecycle::handle_browser_status(sess, ctx).await
+                lifecycle::handle_browser_status(sess, ctx).boxed()
             }
             #[cfg(not(feature = "browser-automation"))]
             {
-                tool_output(ctx.call_id.clone(), "Browser automation is not available in this build.")
+                ready(tool_output(
+                    ctx.call_id.clone(),
+                    "Browser automation is not available in this build.",
+                ))
+                .boxed()
             }
         }
         #[cfg(feature = "browser-automation")]
-        "open" => lifecycle::handle_browser_open(sess, ctx, payload_string).await,
+        "open" => lifecycle::handle_browser_open(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "close" => lifecycle::handle_browser_close(sess, ctx).await,
+        "close" => lifecycle::handle_browser_close(sess, ctx).boxed(),
         #[cfg(feature = "browser-automation")]
-        "restart" => lifecycle::handle_browser_restart(sess, ctx, payload_string).await,
+        "restart" => lifecycle::handle_browser_restart(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "targets" => lifecycle::handle_browser_targets(sess, ctx).await,
+        "targets" => lifecycle::handle_browser_targets(sess, ctx).boxed(),
         #[cfg(feature = "browser-automation")]
-        "new_tab" => lifecycle::handle_browser_new_tab(sess, ctx, payload_string).await,
+        "new_tab" => lifecycle::handle_browser_new_tab(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "switch_target" => lifecycle::handle_browser_switch_target(sess, ctx, payload_string).await,
+        "switch_target" => {
+            lifecycle::handle_browser_switch_target(sess, ctx, payload_string).boxed()
+        }
         #[cfg(feature = "browser-automation")]
-        "activate_target" => lifecycle::handle_browser_activate_target(sess, ctx, payload_string).await,
+        "activate_target" => {
+            lifecycle::handle_browser_activate_target(sess, ctx, payload_string).boxed()
+        }
         #[cfg(feature = "browser-automation")]
-        "close_target" => lifecycle::handle_browser_close_target(sess, ctx, payload_string).await,
+        "close_target" => lifecycle::handle_browser_close_target(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "click" => input::handle_browser_click(sess, ctx, payload_string).await,
+        "click" => input::handle_browser_click(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "click_selector" => selectors::handle_browser_click_selector(sess, ctx, payload_string).await,
+        "click_selector" => {
+            selectors::handle_browser_click_selector(sess, ctx, payload_string).boxed()
+        }
         #[cfg(feature = "browser-automation")]
-        "move" => input::handle_browser_move(sess, ctx, payload_string).await,
+        "move" => input::handle_browser_move(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "type" => input::handle_browser_type(sess, ctx, payload_string).await,
+        "type" => input::handle_browser_type(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "type_selector" => selectors::handle_browser_type_selector(sess, ctx, payload_string).await,
+        "type_selector" => {
+            selectors::handle_browser_type_selector(sess, ctx, payload_string).boxed()
+        }
         #[cfg(feature = "browser-automation")]
-        "key" => input::handle_browser_key(sess, ctx, payload_string).await,
+        "key" => input::handle_browser_key(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "javascript" => page_ops::handle_browser_javascript(sess, ctx, payload_string).await,
+        "javascript" => page_ops::handle_browser_javascript(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "scroll" => input::handle_browser_scroll(sess, ctx, payload_string).await,
+        "scroll" => input::handle_browser_scroll(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "scroll_into_view" => selectors::handle_browser_scroll_into_view(sess, ctx, payload_string).await,
+        "scroll_into_view" => {
+            selectors::handle_browser_scroll_into_view(sess, ctx, payload_string).boxed()
+        }
         #[cfg(feature = "browser-automation")]
-        "wait_for" => selectors::handle_browser_wait_for(sess, ctx, payload_string).await,
+        "wait_for" => selectors::handle_browser_wait_for(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "history" => input::handle_browser_history(sess, ctx, payload_string).await,
+        "history" => input::handle_browser_history(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "inspect" => inspect::handle_browser_inspect(sess, ctx, payload_string).await,
+        "inspect" => inspect::handle_browser_inspect(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "console" => page_ops::handle_browser_console(sess, ctx, payload_string).await,
+        "console" => page_ops::handle_browser_console(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "inspect_selector" => inspect::handle_browser_inspect_selector(sess, ctx, payload_string).await,
+        "inspect_selector" => {
+            inspect::handle_browser_inspect_selector(sess, ctx, payload_string).boxed()
+        }
         #[cfg(feature = "browser-automation")]
-        "screenshot" => screenshot::handle_browser_screenshot(sess, ctx, payload_string).await,
+        "screenshot" => screenshot::handle_browser_screenshot(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "cookies_get" => storage::handle_browser_cookies_get(sess, ctx, payload_string).await,
+        "cookies_get" => storage::handle_browser_cookies_get(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "cookies_set" => storage::handle_browser_cookies_set(sess, ctx, payload_string).await,
+        "cookies_set" => storage::handle_browser_cookies_set(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "storage_get" => storage::handle_browser_storage_get(sess, ctx, payload_string).await,
+        "storage_get" => storage::handle_browser_storage_get(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "storage_set" => storage::handle_browser_storage_set(sess, ctx, payload_string).await,
+        "storage_set" => storage::handle_browser_storage_set(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "cdp" => page_ops::handle_browser_cdp(sess, ctx, payload_string).await,
+        "cdp" => page_ops::handle_browser_cdp(sess, ctx, payload_string).boxed(),
         #[cfg(feature = "browser-automation")]
-        "cleanup" => lifecycle::handle_browser_cleanup(sess, ctx).await,
-        "fetch" => super::web_fetch::handle_web_fetch(sess, ctx, payload_string).await,
-        _ => tool_error(ctx.call_id.clone(), {
+        "cleanup" => lifecycle::handle_browser_cleanup(sess, ctx).boxed(),
+        "fetch" => super::web_fetch::handle_web_fetch(sess, ctx, payload_string).boxed(),
+        _ => ready(tool_error(ctx.call_id.clone(), {
             #[cfg(feature = "browser-automation")]
             {
                 format!("Unknown browser action: {action}")
             }
             #[cfg(not(feature = "browser-automation"))]
             {
-                format!(
-                    "Browser automation is not available in this build (action: {action})."
-                )
+                format!("Browser automation is not available in this build (action: {action}).")
             }
-        }),
+        }))
+        .boxed(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::Future;
+    use std::mem::size_of;
+
+    fn returned_future_size<Factory, Fut>(_: Factory) -> usize
+    where
+        Factory: FnOnce(&'static Session, &'static ToolCallCtx, String) -> Fut,
+        Fut: Future<Output = ResponseInputItem>,
+    {
+        size_of::<Fut>()
+    }
+
+    #[test]
+    fn browser_tool_dispatch_future_stays_boxed() {
+        let future_size =
+            returned_future_size(|sess, ctx, arguments| handle_browser_tool(sess, ctx, arguments));
+
+        assert!(
+            future_size <= 2 * size_of::<usize>(),
+            "browser dispatcher future is {future_size} bytes instead of a boxed future"
+        );
     }
 }

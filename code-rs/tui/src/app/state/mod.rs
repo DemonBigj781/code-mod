@@ -127,6 +127,7 @@ pub(crate) struct App<'a> {
     pub(super) app_event_rx_high: Receiver<AppEvent>,
     pub(super) app_event_rx_bulk: Receiver<AppEvent>,
     pub(super) consecutive_high_events: u32,
+    pub(super) event_deduper: super::event_deduper::EventDeduper,
     pub(super) app_state: AppState<'a>,
 
     /// Config is stored here so we can recreate `ChatWidgets` as needed.

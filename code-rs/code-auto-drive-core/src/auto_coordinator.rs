@@ -115,7 +115,8 @@ fn cli_routing_reasoning_priority(level: ReasoningEffort) -> u8 {
         ReasoningEffort::Medium => 2,
         ReasoningEffort::High => 3,
         ReasoningEffort::XHigh => 4,
-        ReasoningEffort::None => 5,
+        ReasoningEffort::Max => 5,
+        ReasoningEffort::None => 6,
     }
 }
 
@@ -127,6 +128,7 @@ fn normalize_cli_routing_reasoning_levels(levels: &[ReasoningEffort]) -> Vec<Rea
         ReasoningEffort::Medium,
         ReasoningEffort::High,
         ReasoningEffort::XHigh,
+        ReasoningEffort::Max,
     ] {
         if levels.contains(&level) {
             normalized.push(level);
@@ -142,6 +144,7 @@ fn cli_reasoning_effort_to_str(level: ReasoningEffort) -> &'static str {
         ReasoningEffort::Medium => "medium",
         ReasoningEffort::High => "high",
         ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::Max => "max",
     }
 }
 
@@ -2889,6 +2892,7 @@ fn build_schema(
             ReasoningEffort::Medium,
             ReasoningEffort::High,
             ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
         ] {
             if cli_routing_entries
                 .iter()
@@ -4304,8 +4308,9 @@ fn parse_cli_reasoning_effort(value: &str) -> Result<ReasoningEffort> {
         "medium" => Ok(ReasoningEffort::Medium),
         "high" => Ok(ReasoningEffort::High),
         "xhigh" => Ok(ReasoningEffort::XHigh),
+        "max" => Ok(ReasoningEffort::Max),
         _ => Err(anyhow!(
-            "unsupported cli_reasoning_effort '{normalized}'; expected one of: minimal, low, medium, high, xhigh"
+            "unsupported cli_reasoning_effort '{normalized}'; expected one of: minimal, low, medium, high, xhigh, max"
         )),
     }
 }

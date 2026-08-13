@@ -26,6 +26,12 @@
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
+                AppEvent::TerminalRefresh => {
+                    // The emulator may have discarded its screen while the PTY kept
+                    // the same dimensions. A normal differential draw cannot restore it.
+                    self.clear_on_first_frame = true;
+                    self.schedule_redraw();
+                }
                 AppEvent::BottomPaneViewChanged => {
                     // Notify the height manager that the bottom pane view changed
                     // so it can bypass hysteresis and apply the new height immediately.
@@ -161,6 +167,7 @@
                     self.commit_anim_running.store(false, Ordering::Release);
                 }
                 AppEvent::CommitTick => {
+                    self.app_event_tx.mark_commit_tick_consumed();
                     // Advance streaming animation: commit at most one queued line.
                     //
                     // Do not skip commit ticks when a redraw is already pending.

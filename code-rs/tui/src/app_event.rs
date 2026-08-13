@@ -209,6 +209,9 @@ pub(crate) enum AppEvent {
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
 
+    /// Clear and repaint the terminal after resize or focus restoration.
+    TerminalRefresh,
+
     /// Notify that the bottom pane view changed, requiring immediate height recalculation.
     /// This bypasses height manager hysteresis to ensure the new view's height is applied.
     BottomPaneViewChanged,

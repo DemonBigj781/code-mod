@@ -635,6 +635,7 @@ impl ChatWidget<'_> {
             ReasoningEffort::Medium => "Medium",
             ReasoningEffort::High => "High",
             ReasoningEffort::XHigh => "XHigh",
+            ReasoningEffort::Max => "Max",
         }
     }
 

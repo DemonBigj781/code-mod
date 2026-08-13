@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 
 use crate::app_event::{AppEvent, BackgroundPlacement};
@@ -11,17 +14,32 @@ pub(crate) struct AppEventSender {
     high_tx: Sender<AppEvent>,
     // Bulk/streaming events (history inserts, commit ticks, file search, etc.).
     bulk_tx: Sender<AppEvent>,
+    // The animation producer may run faster than the renderer. Keep at most one
+    // commit tick queued so a stalled terminal cannot grow an unbounded backlog.
+    commit_tick_pending: Arc<AtomicBool>,
 }
 
 impl AppEventSender {
     /// Create a sender that splits events by priority across two channels.
     pub(crate) fn new_dual(high_tx: Sender<AppEvent>, bulk_tx: Sender<AppEvent>) -> Self {
-        Self { high_tx, bulk_tx }
+        Self {
+            high_tx,
+            bulk_tx,
+            commit_tick_pending: Arc::new(AtomicBool::new(false)),
+        }
     }
     /// Backward‑compatible constructor for tests/fixtures that expect a single
     /// channel. Routes both high‑priority and bulk events to the same sender.
     pub(crate) fn new(app_event_tx: Sender<AppEvent>) -> Self {
-        Self { high_tx: app_event_tx.clone(), bulk_tx: app_event_tx }
+        Self {
+            high_tx: app_event_tx.clone(),
+            bulk_tx: app_event_tx,
+            commit_tick_pending: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn mark_commit_tick_consumed(&self) {
+        self.commit_tick_pending.store(false, Ordering::Release);
     }
 
     /// Send an event to the app event channel. If it fails, we swallow the
@@ -34,6 +52,11 @@ impl AppEventSender {
     /// Returns `true` if the event was delivered, `false` if the channel was
     /// disconnected (already logged).
     pub(crate) fn send_with_result(&self, event: AppEvent) -> bool {
+        let is_commit_tick = matches!(event, AppEvent::CommitTick);
+        if is_commit_tick && self.commit_tick_pending.swap(true, Ordering::AcqRel) {
+            return true;
+        }
+
         // Record inbound events for high-fidelity session replay.
         // Avoid double-logging Ops; those are logged at the point of submission.
         if !matches!(event, AppEvent::CodexOp(_)) {
@@ -45,17 +68,22 @@ impl AppEventSender {
                 | AppEvent::MouseEvent(_)
                 | AppEvent::Paste(_)
                 | AppEvent::RequestRedraw
+                | AppEvent::TerminalRefresh
                 | AppEvent::Redraw
                 | AppEvent::ExitRequest
                 | AppEvent::SetTerminalTitle { .. }
                 | AppEvent::EmitTuiNotification { .. }
                 | AppEvent::AutoCoordinatorCountdown { .. }
+                | AppEvent::StopCommitAnimation
         );
 
         let tx = if is_high { &self.high_tx } else { &self.bulk_tx };
         match tx.send(event) {
             Ok(()) => true,
             Err(std::sync::mpsc::SendError(event)) => {
+                if is_commit_tick {
+                    self.commit_tick_pending.store(false, Ordering::Release);
+                }
                 tracing::error!(?event, "failed to send event: sending on a closed channel");
                 false
             }
@@ -149,6 +177,40 @@ mod tests {
             }
         ));
 
+        assert!(matches!(
+            bulk_rx.try_recv(),
+            Ok(AppEvent::AutoCoordinatorAction { .. })
+        ));
+    }
+
+    #[test]
+    fn commit_ticks_are_coalesced_while_one_is_pending() {
+        let (high_tx, _high_rx) = channel();
+        let (bulk_tx, bulk_rx) = channel();
+        let sender = AppEventSender::new_dual(high_tx, bulk_tx);
+
+        sender.send(AppEvent::CommitTick);
+        sender.send(AppEvent::CommitTick);
+
+        assert!(matches!(bulk_rx.try_recv(), Ok(AppEvent::CommitTick)));
+        assert!(
+            bulk_rx.try_recv().is_err(),
+            "only one commit tick may wait in the bulk queue"
+        );
+    }
+
+    #[test]
+    fn stop_commit_animation_bypasses_bulk_backlog() {
+        let (high_tx, high_rx) = channel();
+        let (bulk_tx, bulk_rx) = channel();
+        let sender = AppEventSender::new_dual(high_tx, bulk_tx);
+
+        sender.send(AppEvent::AutoCoordinatorAction {
+            message: "bulk".to_owned(),
+        });
+        sender.send(AppEvent::StopCommitAnimation);
+
+        assert!(matches!(high_rx.try_recv(), Ok(AppEvent::StopCommitAnimation)));
         assert!(matches!(
             bulk_rx.try_recv(),
             Ok(AppEvent::AutoCoordinatorAction { .. })

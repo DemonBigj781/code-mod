@@ -25,6 +25,20 @@ impl ChatWidget<'_> {
         presets
     }
 
+    pub(super) fn available_session_model_presets(&self) -> Vec<ModelPreset> {
+        let mut presets = self.available_model_presets();
+        let openrouter_model = code_common::model_presets::OPENROUTER_FREE_PROFILE_MODEL;
+        if self.config.model_providers.contains_key(
+            code_common::model_presets::OPENROUTER_PROVIDER_ID,
+        ) && !presets
+            .iter()
+            .any(|preset| preset.model.eq_ignore_ascii_case(openrouter_model))
+        {
+            presets.push(code_common::model_presets::openrouter_free_profile_preset());
+        }
+        presets
+    }
+
     pub(crate) fn update_model_presets(
         &mut self,
         presets: Vec<ModelPreset>,

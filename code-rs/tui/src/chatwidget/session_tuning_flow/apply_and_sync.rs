@@ -69,7 +69,8 @@ impl ChatWidget<'_> {
                 ReasoningEffort::Medium => 2,
                 ReasoningEffort::High => 3,
                 ReasoningEffort::XHigh => 4,
-                ReasoningEffort::None => 5,
+                ReasoningEffort::Max => 5,
+                ReasoningEffort::None => 6,
             }
         }
 
@@ -141,7 +142,7 @@ impl ChatWidget<'_> {
         let requested_effort = effort
             .or(self.config.preferred_model_reasoning_effort)
             .unwrap_or(self.config.model_reasoning_effort);
-        let presets = self.available_model_presets();
+        let presets = self.available_session_model_presets();
         let clamped_effort = Self::clamp_reasoning_for_model_from_presets(trimmed, requested_effort, &presets);
 
         let reasoning_changed = if self.config.model_reasoning_effort != clamped_effort {
