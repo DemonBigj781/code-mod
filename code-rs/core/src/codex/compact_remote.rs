@@ -265,7 +265,7 @@ mod tests {
     use reqwest::StatusCode;
 
     #[test]
-    fn missing_remote_compact_endpoint_falls_back_locally() {
+    fn missing_remote_compact_endpoint_is_eligible_for_local_fallback() {
         let not_found = CodexErr::UnexpectedStatus(UnexpectedResponseError {
             status: StatusCode::NOT_FOUND,
             body: r#"{"detail":"Not Found"}"#.to_string(),
