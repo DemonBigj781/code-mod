@@ -5,6 +5,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
 #[cfg(target_os = "linux")]
+use std::sync::Arc;
+
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(target_os = "linux")]
 const CGROUP_MOUNT: &str = "/sys/fs/cgroup";
 
 #[cfg(target_os = "linux")]
@@ -12,6 +18,37 @@ const EXEC_CGROUP_SUBDIR: &str = "code-exec";
 
 #[cfg(target_os = "linux")]
 const EXEC_CGROUP_OOM_SCORE_ADJ: &str = "500";
+
+#[cfg(target_os = "linux")]
+const EXEC_MEMORY_WATCHDOG_POLL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub(crate) struct ExecMemoryWatchdog {
+    memory_max_bytes: u64,
+    limit_exceeded: Arc<AtomicBool>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+#[cfg(target_os = "linux")]
+impl ExecMemoryWatchdog {
+    pub(crate) fn memory_max_bytes(&self) -> u64 {
+        self.memory_max_bytes
+    }
+
+    pub(crate) fn limit_exceeded(&self) -> bool {
+        self.limit_exceeded.load(Ordering::Acquire)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ExecMemoryWatchdog {
+    fn drop(&mut self) {
+        // A detached watchdog could later target a reused process-group ID.
+        self.task.abort();
+    }
+}
 
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, Default)]
@@ -319,6 +356,130 @@ pub(crate) fn exec_cgroup_memory_max_bytes(pid: u32) -> Option<u64> {
 }
 
 #[cfg(target_os = "linux")]
+fn exec_cgroup_contains_pid(pid: u32) -> bool {
+    let Some(dir) = exec_cgroup_abs_for_pid(pid) else {
+        return false;
+    };
+    let Ok(contents) = std::fs::read_to_string(dir.join("cgroup.procs")) else {
+        return false;
+    };
+    contents
+        .lines()
+        .any(|line| line.trim().parse::<u32>().ok() == Some(pid))
+}
+
+#[cfg(target_os = "linux")]
+fn exec_cgroup_memory_limit_is_active(pid: u32) -> bool {
+    exec_cgroup_memory_max_bytes(pid).is_some() && exec_cgroup_contains_pid(pid)
+}
+
+#[cfg(target_os = "linux")]
+fn process_group_id_from_stat(contents: &str) -> Option<u32> {
+    // `/proc/<pid>/stat` starts with `pid (comm) state ppid pgrp ...`.
+    // `comm` may contain spaces and parentheses, so split only after its final `)`.
+    contents
+        .get(contents.rfind(')')? + 1..)?
+        .split_whitespace()
+        .nth(2)?
+        .parse()
+        .ok()
+}
+
+#[cfg(target_os = "linux")]
+fn process_resident_bytes(proc_dir: &Path, page_size: u64) -> Option<u64> {
+    let statm = std::fs::read_to_string(proc_dir.join("statm")).ok()?;
+    let resident_pages = statm.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+    Some(resident_pages.saturating_mul(page_size))
+}
+
+#[cfg(target_os = "linux")]
+fn process_group_resident_bytes(process_group_id: u32) -> u64 {
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    let page_size = u64::try_from(page_size).unwrap_or(4096);
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return 0;
+    };
+
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+        })
+        .filter_map(|entry| {
+            let proc_dir = entry.path();
+            let stat = std::fs::read_to_string(proc_dir.join("stat")).ok()?;
+            (process_group_id_from_stat(&stat) == Some(process_group_id))
+                .then(|| process_resident_bytes(&proc_dir, page_size))?
+        })
+        .fold(0_u64, u64::saturating_add)
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_process_group_memory_watchdog(
+    process_group_id: u32,
+    memory_max_bytes: u64,
+) -> ExecMemoryWatchdog {
+    let limit_exceeded = Arc::new(AtomicBool::new(false));
+    let limit_exceeded_for_task = Arc::clone(&limit_exceeded);
+    let task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(EXEC_MEMORY_WATCHDOG_POLL_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            let resident_bytes = process_group_resident_bytes(process_group_id);
+            if resident_bytes <= memory_max_bytes {
+                continue;
+            }
+
+            limit_exceeded_for_task.store(true, Ordering::Release);
+            tracing::warn!(
+                process_group_id,
+                resident_bytes,
+                memory_max_bytes,
+                "exec process group exceeded fallback memory limit; killing it"
+            );
+
+            let pgid = process_group_id as libc::pid_t;
+            if pgid != unsafe { libc::getpgrp() } {
+                let _ = unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            }
+            break;
+        }
+    });
+
+    ExecMemoryWatchdog {
+        memory_max_bytes,
+        limit_exceeded,
+        task,
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn spawn_exec_memory_watchdog_if_needed(
+    process_group_id: u32,
+    memory_max_bytes: u64,
+) -> Option<ExecMemoryWatchdog> {
+    if exec_cgroup_memory_limit_is_active(process_group_id) {
+        return None;
+    }
+
+    tracing::warn!(
+        process_group_id,
+        memory_max_bytes,
+        "exec cgroup memory limit is unavailable; enabling process-group memory watchdog"
+    );
+    Some(spawn_process_group_memory_watchdog(
+        process_group_id,
+        memory_max_bytes,
+    ))
+}
+
+#[cfg(target_os = "linux")]
 pub(crate) fn best_effort_cleanup_exec_cgroup(pid: u32) {
     let Some(dir) = exec_cgroup_abs_for_pid(pid) else {
         return;
@@ -331,10 +492,49 @@ pub(crate) fn best_effort_cleanup_exec_cgroup(pid: u32) {
 mod tests {
     use super::*;
 
+    use std::os::unix::process::ExitStatusExt;
+    use std::time::Duration;
+
     #[test]
     fn default_exec_pids_max_for_cpus_clamps_low_and_high() {
         assert_eq!(default_exec_pids_max_for_cpus(1), 256);
         assert_eq!(default_exec_pids_max_for_cpus(8), 512);
         assert_eq!(default_exec_pids_max_for_cpus(64), 4096);
+    }
+
+    #[test]
+    fn parses_process_group_after_a_complex_proc_stat_name() {
+        let stat = "123 (worker name with ) paren) S 45 678 9 10";
+        assert_eq!(process_group_id_from_stat(stat), Some(678));
+    }
+
+    #[tokio::test]
+    async fn fallback_memory_watchdog_kills_the_process_group_before_host_oom() {
+        let mut command = tokio::process::Command::new("python3");
+        command.args([
+            "-c",
+            "import time; payload = bytearray(64 * 1024 * 1024); time.sleep(30)",
+        ]);
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let mut child = command.spawn().expect("spawn memory test child");
+        let pid = child.id().expect("memory test child pid");
+        let watchdog = spawn_exec_memory_watchdog_if_needed(pid, 32 * 1024 * 1024)
+            .expect("unattached child should use fallback memory watchdog");
+
+        let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .expect("watchdog should stop child before timeout")
+            .expect("wait for memory test child");
+
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        assert!(watchdog.limit_exceeded());
     }
 }

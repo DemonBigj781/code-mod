@@ -12,6 +12,8 @@ pub(crate) struct ExecCommandSessionParts {
     pub(crate) process_group_id: Option<u32>,
     #[cfg(target_os = "linux")]
     pub(crate) cgroup_pid: Option<u32>,
+    #[cfg(target_os = "linux")]
+    pub(crate) memory_watchdog: Option<crate::cgroup::ExecMemoryWatchdog>,
     pub(crate) reader_handle: JoinHandle<()>,
     pub(crate) writer_handle: JoinHandle<()>,
     pub(crate) wait_handle: JoinHandle<()>,
@@ -34,6 +36,10 @@ pub(crate) struct ExecCommandSession {
     #[cfg(target_os = "linux")]
     /// PID used for Linux exec cgroup cleanup (best-effort).
     cgroup_pid: Option<u32>,
+
+    #[cfg(target_os = "linux")]
+    /// Fallback RSS monitor used when the configured cgroup limit is unavailable.
+    memory_watchdog: Option<crate::cgroup::ExecMemoryWatchdog>,
 
     /// Child killer handle for termination on drop (can signal independently
     /// of a thread blocked in `.wait()`).
@@ -69,6 +75,8 @@ impl ExecCommandSession {
             process_group_id,
             #[cfg(target_os = "linux")]
             cgroup_pid,
+            #[cfg(target_os = "linux")]
+            memory_watchdog,
             reader_handle,
             writer_handle,
             wait_handle,
@@ -84,6 +92,8 @@ impl ExecCommandSession {
                 process_group_id,
                 #[cfg(target_os = "linux")]
                 cgroup_pid,
+                #[cfg(target_os = "linux")]
+                memory_watchdog,
                 killer: StdMutex::new(Some(killer)),
                 reader_handle: StdMutex::new(Some(reader_handle)),
                 writer_handle: StdMutex::new(Some(writer_handle)),
@@ -109,10 +119,26 @@ impl ExecCommandSession {
             Err(poisoned) => *poisoned.into_inner(),
         }
     }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn exceeded_memory_limit(&self) -> Option<u64> {
+        self.memory_watchdog
+            .as_ref()
+            .filter(|watchdog| watchdog.limit_exceeded())
+            .map(crate::cgroup::ExecMemoryWatchdog::memory_max_bytes)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) fn exceeded_memory_limit(&self) -> Option<u64> {
+        None
+    }
 }
 
 impl Drop for ExecCommandSession {
     fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        drop(self.memory_watchdog.take());
+
         #[cfg(unix)]
         if let Some(process_group_id) = self.process_group_id.take() {
             let _ = crate::exec_command::process_group::kill_process_group(process_group_id);

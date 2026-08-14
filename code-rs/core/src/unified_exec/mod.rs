@@ -363,6 +363,23 @@ async fn create_unified_exec_session(
     let killer = child.clone_killer();
     #[cfg(unix)]
     let process_group_id = child.process_id();
+    #[cfg(target_os = "linux")]
+    let limits = crate::cgroup::ExecCgroupLimits {
+        memory_max_bytes: crate::cgroup::default_exec_memory_max_bytes(),
+        pids_max: crate::cgroup::default_exec_pids_max(),
+    };
+    #[cfg(target_os = "linux")]
+    if let Some(pid) = process_group_id
+        && (limits.memory_max_bytes.is_some() || limits.pids_max.is_some())
+    {
+        crate::cgroup::best_effort_attach_pid_to_exec_cgroup(pid, limits);
+    }
+    #[cfg(target_os = "linux")]
+    let memory_watchdog = process_group_id
+        .zip(limits.memory_max_bytes)
+        .and_then(|(pid, memory_max_bytes)| {
+            crate::cgroup::spawn_exec_memory_watchdog_if_needed(pid, memory_max_bytes)
+        });
 
     let (writer_tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(128);
     let (output_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(256);
@@ -429,7 +446,9 @@ async fn create_unified_exec_session(
         #[cfg(unix)]
         process_group_id,
         #[cfg(target_os = "linux")]
-        cgroup_pid: None,
+        cgroup_pid: process_group_id,
+        #[cfg(target_os = "linux")]
+        memory_watchdog,
         reader_handle,
         writer_handle,
         wait_handle,
@@ -510,6 +529,20 @@ async fn create_unified_exec_session_pipe(
         .context("pipe-backed unified exec missing child pid")
         .map_err(UnifiedExecError::create_session)?;
 
+    #[cfg(target_os = "linux")]
+    let limits = crate::cgroup::ExecCgroupLimits {
+        memory_max_bytes: crate::cgroup::default_exec_memory_max_bytes(),
+        pids_max: crate::cgroup::default_exec_pids_max(),
+    };
+    #[cfg(target_os = "linux")]
+    if limits.memory_max_bytes.is_some() || limits.pids_max.is_some() {
+        crate::cgroup::best_effort_attach_pid_to_exec_cgroup(pid, limits);
+    }
+    #[cfg(target_os = "linux")]
+    let memory_watchdog = limits.memory_max_bytes.and_then(|memory_max_bytes| {
+        crate::cgroup::spawn_exec_memory_watchdog_if_needed(pid, memory_max_bytes)
+    });
+
     let stdin = child
         .stdin
         .take()
@@ -588,7 +621,9 @@ async fn create_unified_exec_session_pipe(
         killer: Box::new(PipeChildKiller { pid }),
         process_group_id: Some(pid),
         #[cfg(target_os = "linux")]
-        cgroup_pid: None,
+        cgroup_pid: Some(pid),
+        #[cfg(target_os = "linux")]
+        memory_watchdog,
         reader_handle,
         writer_handle,
         wait_handle,

@@ -540,6 +540,13 @@ async fn consume_truncated_output(
     #[allow(unused_variables)]
     let pid = killer.as_mut().id();
 
+    #[cfg(target_os = "linux")]
+    let fallback_memory_watchdog = pid
+        .zip(crate::cgroup::default_exec_memory_max_bytes())
+        .and_then(|(pid, memory_max_bytes)| {
+            crate::cgroup::spawn_exec_memory_watchdog_if_needed(pid, memory_max_bytes)
+        });
+
     let (spool_stdout, spool_stderr, spool_combined) = if let Some(stream) = stdout_stream.as_ref()
         && let Some(root) = stream.spool_dir.as_ref()
     {
@@ -727,9 +734,14 @@ async fn consume_truncated_output(
     let (oom_killed, cgroup_memory_max_bytes) = {
         #[cfg(target_os = "linux")]
         {
-            let mut oom_killed = false;
-            let mut cgroup_memory_max_bytes: Option<u64> = None;
-            if !timed_out {
+            let fallback_memory_limit_exceeded = fallback_memory_watchdog
+                .as_ref()
+                .filter(|watchdog| watchdog.limit_exceeded())
+                .map(crate::cgroup::ExecMemoryWatchdog::memory_max_bytes);
+            drop(fallback_memory_watchdog);
+            let mut oom_killed = fallback_memory_limit_exceeded.is_some();
+            let mut cgroup_memory_max_bytes = fallback_memory_limit_exceeded;
+            if !timed_out && !oom_killed {
                 if let Some(pid) = pid {
                     if matches!(exit_status.signal(), Some(SIGKILL_CODE))
                         && crate::cgroup::exec_cgroup_oom_killed(pid).unwrap_or(false)
