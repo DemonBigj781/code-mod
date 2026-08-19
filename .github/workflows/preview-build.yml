@@ -1,8 +1,17 @@
 name: Preview Build
 
 on:
+  push:
+    branches-ignore:
+      - upstream-merge
+    paths:
+      - "code-rs/**"
+      - ".github/workflows/preview-build.yml"
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
+    paths:
+      - "code-rs/**"
+      - ".github/workflows/preview-build.yml"
   workflow_dispatch: {}
 
 concurrency:
@@ -20,6 +29,7 @@ jobs:
     # These PRs are large, frequent, and not meant for end-user preview binaries.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (
         github.event_name == 'pull_request' &&
         github.event.pull_request.draft == false &&
@@ -33,6 +43,8 @@ jobs:
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
       RUST_WORKSPACE_DIR: code-rs
       CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      CARGO_BUILD_JOBS: "1"
+      CARGO_INCREMENTAL: "0"
     strategy:
       fail-fast: false
       matrix:
@@ -61,26 +73,29 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
+        id: rust_toolchain
         shell: bash
-        env:
-          RUST_TOOLCHAIN: 1.90.0
         run: |
+          set -euo pipefail
+          RUST_TOOLCHAIN="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' code-rs/rust-toolchain.toml | head -n 1)"
+          if [ -z "$RUST_TOOLCHAIN" ]; then
+            echo "Unable to read the Rust channel from code-rs/rust-toolchain.toml" >&2
+            exit 1
+          fi
+
+          echo "channel=$RUST_TOOLCHAIN" >> "$GITHUB_OUTPUT"
           rustup set profile minimal
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
           rustup default "$RUST_TOOLCHAIN"
           rustup target add "${{ matrix.target }}"
-          if [[ "${{ matrix.target }}" == *"unknown-linux-musl"* ]]; then
-            rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
-          fi
 
       - name: Rust cache (target + registries)
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v1-preview
-          shared-key: preview-${{ matrix.target }}-rust-1.90
+          shared-key: preview-${{ matrix.target }}-rust-${{ steps.rust_toolchain.outputs.channel }}
           workspaces: |
             code-rs -> target
-            codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
           cache-on-failure: true
@@ -94,10 +109,12 @@ jobs:
       - name: Enable sccache
         shell: bash
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV"
-          echo "SCCACHE_CACHE_SIZE=10G" >> "$GITHUB_ENV"
+          {
+            echo "SCCACHE_GHA_ENABLED=true"
+            echo "RUSTC_WRAPPER=sccache"
+            echo "SCCACHE_IDLE_TIMEOUT=1800"
+            echo "SCCACHE_CACHE_SIZE=10G"
+          } >> "$GITHUB_ENV"
 
       # Platform tuning (lightweight)
       - name: Linux musl tuning
@@ -106,22 +123,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools pkg-config zstd
-          echo 'CC=musl-gcc' >> "$GITHUB_ENV"
-          case "${{ matrix.target }}" in
-            x86_64-unknown-linux-musl) echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV" ;;
-            aarch64-unknown-linux-musl) echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV" ;;
-          esac
-          echo 'PKG_CONFIG_ALLOW_CROSS=1' >> "$GITHUB_ENV"
-          echo 'OPENSSL_STATIC=1'         >> "$GITHUB_ENV"
-          echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
+          {
+            echo 'CC=musl-gcc'
+            case "${{ matrix.target }}" in
+              x86_64-unknown-linux-musl) echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' ;;
+              aarch64-unknown-linux-musl) echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' ;;
+            esac
+            echo 'PKG_CONFIG_ALLOW_CROSS=1'
+            echo 'OPENSSL_STATIC=1'
+            echo 'RUSTFLAGS=-C debuginfo=0 -C strip=symbols -C panic=abort'
+          } >> "$GITHUB_ENV"
 
       - name: macOS tuning
         if: startsWith(matrix.os, 'macos-')
         shell: bash
         run: |
-          echo 'CC=sccache clang'    >> "$GITHUB_ENV"
-          echo 'CXX=sccache clang++' >> "$GITHUB_ENV"
-          echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
+          {
+            echo 'CC=sccache clang'
+            echo 'CXX=sccache clang++'
+            echo 'RUSTFLAGS=-C debuginfo=0 -C strip=symbols -C panic=abort'
+          } >> "$GITHUB_ENV"
 
       - name: Windows tuning
         if: matrix.os == 'windows-latest'
@@ -130,9 +151,9 @@ jobs:
           "LIBGIT2_SYS_USE_SCHANNEL=1" >> $env:GITHUB_ENV
           "CURL_SSL_BACKEND=schannel"  >> $env:GITHUB_ENV
           if (Get-Command lld-link -ErrorAction SilentlyContinue) {
-            "RUSTFLAGS=-Awarnings -Clinker=lld-link -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
+            "RUSTFLAGS=-Clinker=lld-link -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
           } else {
-            "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
+            "RUSTFLAGS=-C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
           }
 
       - name: Prefetch deps
@@ -145,7 +166,7 @@ jobs:
         shell: bash
         run: |
           cd "${RUST_WORKSPACE_DIR}"
-          cargo build --release --locked --target "${{ matrix.target }}" --bin code
+          cargo build --release --locked --jobs 1 --target "${{ matrix.target }}" --bin code
 
       - name: Prepare artifacts
         shell: bash
@@ -178,7 +199,7 @@ jobs:
             base=$(basename "$f")
             # .zst (size-optimized)
             if command -v zstd >/dev/null 2>&1; then
-              zstd -T0 -19 --force -o "artifacts/${base}.zst" "$f" || true
+              zstd -T1 -19 --force -o "artifacts/${base}.zst" "$f" || true
             fi
             # .tar.gz fallback
             tar -C artifacts -czf "artifacts/${base}.tar.gz" "$base"
@@ -373,6 +394,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run build-fast
+        env:
+          CARGO_BUILD_JOBS: "1"
         run: ./build-fast.sh
 
   comment:
