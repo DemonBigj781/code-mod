@@ -140,7 +140,7 @@ jobs:
           mkdir -p artifacts
           cp "$RUST_WORKSPACE_DIR/target/$TARGET/release/code" artifacts/code
           chmod +x artifacts/code
-          sha256sum artifacts/code > artifacts/code.sha256
+          (cd artifacts && sha256sum code > code.sha256)
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v7
