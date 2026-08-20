@@ -91,7 +91,7 @@ impl ChatWidget<'_> {
             0
         } else {
             let frac = desired_thumb_start as f64 / max_thumb_start as f64;
-            (frac * f64::from(max_scroll)).round() as u16
+            (frac * f64::from(max_scroll)).round() as u32
         };
 
         layout_scroll::set_from_scrollbar(self, pos_from_top);
@@ -111,7 +111,7 @@ impl ChatWidget<'_> {
 
     /// Compute the thumb start offset (rows from top of track) and thumb length.
     /// Uses the same math as ratatui's no-arrows Scrollbar.
-    fn scrollbar_thumb_geometry(&self, sb_area: Rect, max_scroll: u16) -> Option<(usize, usize)> {
+    fn scrollbar_thumb_geometry(&self, sb_area: Rect, max_scroll: u32) -> Option<(usize, usize)> {
         let track_len = sb_area.height as usize;
         if track_len == 0 || max_scroll == 0 {
             return None;

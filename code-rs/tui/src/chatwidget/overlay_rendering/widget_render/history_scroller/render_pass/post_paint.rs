@@ -4,8 +4,8 @@ pub(super) struct PostPaintArgs {
     pub history_area: Rect,
     pub content_area: Rect,
     pub base_style: Style,
-    pub total_height: u16,
-    pub scroll_pos: u16,
+    pub total_height: u32,
+    pub scroll_pos: u32,
     pub screen_y: u16,
 }
 
@@ -42,7 +42,7 @@ impl ChatWidget<'_> {
         }
 
         let now = std::time::Instant::now();
-        let show_scrollbar = total_height > content_area.height
+        let show_scrollbar = total_height > u32::from(content_area.height)
             && self
                 .layout
                 .scrollbar_visible_until
@@ -50,7 +50,7 @@ impl ChatWidget<'_> {
                 .is_some_and(|t| now < t);
         if show_scrollbar {
             let mut sb_state = self.layout.vertical_scrollbar_state.borrow_mut();
-            let max_scroll = total_height.saturating_sub(content_area.height);
+            let max_scroll = total_height.saturating_sub(u32::from(content_area.height));
             let scroll_positions = max_scroll.saturating_add(1).max(1) as usize;
             let pos = scroll_pos.min(max_scroll) as usize;
             *sb_state = sb_state.content_length(scroll_positions).position(pos);

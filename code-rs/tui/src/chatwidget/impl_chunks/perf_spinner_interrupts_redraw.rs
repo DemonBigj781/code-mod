@@ -20,7 +20,7 @@ impl ChatWidget<'_> {
         );
     }
 
-    pub(super) fn perf_track_scroll_delta(&self, before: u16, after: u16) {
+    pub(super) fn perf_track_scroll_delta(&self, before: u32, after: u32) {
         if !self.perf_state.enabled {
             return;
         }

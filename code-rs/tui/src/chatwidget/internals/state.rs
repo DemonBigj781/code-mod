@@ -232,13 +232,13 @@ pub(crate) struct AnswerMarkupState {
 #[derive(Default)]
 pub(crate) struct LayoutState {
     // Scroll offset from bottom (0 = bottom)
-    pub(crate) scroll_offset: Cell<u16>,
+    pub(crate) scroll_offset: Cell<u32>,
     // Cached max scroll from last render
-    pub(crate) last_max_scroll: std::cell::Cell<u16>,
+    pub(crate) last_max_scroll: std::cell::Cell<u32>,
     // Track last viewport height of the history content area
     pub(crate) last_history_viewport_height: std::cell::Cell<u16>,
     // Total rendered height of all history cells (rows)
-    pub(crate) last_total_height: std::cell::Cell<u16>,
+    pub(crate) last_total_height: std::cell::Cell<u32>,
     // Stateful vertical scrollbar for history view
     pub(crate) vertical_scrollbar_state: std::cell::RefCell<ScrollbarState>,
     // Auto-hide scrollbar timer

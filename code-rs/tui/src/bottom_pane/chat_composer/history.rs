@@ -118,18 +118,10 @@ impl ChatComposerHistory {
                     return true;
                 }
 
-        // If cursor at start and text is either original or a history entry, handle navigation
+        // At the start of a non-empty draft, Up begins history navigation and
+        // `navigate_up` records the draft so Down can restore it later.
         if cursor == 0 {
-            // Check if it's the original text we saved
-            if let Some(ref orig) = self.original_text
-                && orig == text {
-                    return true;
-                }
-            // Check if it matches last history text
-            if let Some(ref last) = self.last_history_text
-                && last == text {
-                    return true;
-                }
+            return true;
         }
 
         false

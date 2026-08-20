@@ -2,9 +2,9 @@ use super::*;
 
 #[derive(Clone, Copy)]
 pub(super) struct HistoryScrollLayout {
-    pub total_height: u16,
+    pub total_height: u32,
     pub start_y: u16,
-    pub scroll_pos: u16,
+    pub scroll_pos: u32,
 }
 
 impl ChatWidget<'_> {
@@ -15,9 +15,9 @@ impl ChatWidget<'_> {
     ) -> HistoryScrollLayout {
         let mut total_height = self.history_render.last_total_height();
         let base_total_height = total_height;
-        let viewport_rows = content_area.height;
+        let viewport_rows = u32::from(content_area.height);
         let mut requested_spacer_lines = 0u16;
-        let mut remainder_for_log: Option<u16> = None;
+        let mut remainder_for_log: Option<u32> = None;
 
         if total_height > 0 && viewport_rows > 0 && request_count > 0
             && base_total_height > viewport_rows {
@@ -57,7 +57,7 @@ impl ChatWidget<'_> {
         }
 
         if spacer_lines > 0 {
-            total_height = total_height.saturating_add(spacer_lines);
+            total_height = total_height.saturating_add(u32::from(spacer_lines));
             self.history_render
                 .set_bottom_spacer_range(Some((base_total_height, total_height)));
             tracing::debug!(
@@ -87,17 +87,18 @@ impl ChatWidget<'_> {
                 .set(content_area.height);
         }
 
-        let (start_y, scroll_pos) = if total_height <= content_area.height {
+        let (start_y, scroll_pos) = if total_height <= viewport_rows {
             // Content fits - always align to bottom so the newest content stays near the composer.
-            let start_y = content_area.y + content_area.height.saturating_sub(total_height);
+            let visible_height = u16::try_from(total_height).unwrap_or(content_area.height);
+            let start_y = content_area.y + content_area.height.saturating_sub(visible_height);
             // Update last_max_scroll cache
             self.layout.last_max_scroll.set(0);
-            (start_y, 0u16) // No scrolling needed
+            (start_y, 0u32) // No scrolling needed
         } else {
             // Content overflows - calculate scroll position
             // scroll_offset is measured from the bottom (0 = bottom/newest)
             // Convert to distance from the top for rendering math.
-            let max_scroll = total_height.saturating_sub(content_area.height);
+            let max_scroll = total_height.saturating_sub(viewport_rows);
             if self.layout.scroll_offset.get() > 0 && max_scroll != prev_max_scroll {
                 // If the user has scrolled up and the history height changes (e.g. new output
                 // arrives while streaming), keep the same content anchored at the top of the

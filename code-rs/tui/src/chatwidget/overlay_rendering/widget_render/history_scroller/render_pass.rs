@@ -65,7 +65,7 @@ impl ChatWidget<'_> {
         let visible_slice = selection.visible_cells.as_slice();
 
         let ps_ref = self.history_render.prefix_sums.borrow();
-        let ps: &[u16] = &ps_ref;
+        let ps: &[u32] = &ps_ref;
         let (screen_y, has_visible_animation) =
             self.paint_visible_cells_window(cell_paint::PaintVisibleCellsArgs {
                 history_area,

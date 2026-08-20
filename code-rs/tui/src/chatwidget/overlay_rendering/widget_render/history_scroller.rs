@@ -143,11 +143,11 @@ impl ChatWidget<'_> {
                 render_settings,
             );
 
-            let mut prefix: Vec<u16> = Vec::with_capacity(cells.len().saturating_add(1));
+            let mut prefix: Vec<u32> = Vec::with_capacity(cells.len().saturating_add(1));
             prefix.push(0);
-            let mut acc = 0u16;
+            let mut acc = 0u32;
             let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
-            let mut spacing_ranges: Vec<(u16, u16)> = Vec::with_capacity(cells.len().saturating_mul(2));
+            let mut spacing_ranges: Vec<(u32, u32)> = Vec::with_capacity(cells.len().saturating_mul(2));
 
             // Precompute next_visible_idx for each cell in O(n) to avoid
             // the O(n²) forward scan that was inside the per-cell loop.
@@ -181,7 +181,7 @@ impl ChatWidget<'_> {
                     }
                 }
                 let cell_start = acc;
-                acc = acc.saturating_add(line_count);
+                acc = acc.saturating_add(u32::from(line_count));
                 let cell_end = acc;
 
                 if cell
@@ -232,7 +232,7 @@ impl ChatWidget<'_> {
                 }
                 if should_add_spacing {
                     let spacing_start = acc;
-                    acc = acc.saturating_add(spacing);
+                    acc = acc.saturating_add(u32::from(spacing));
                     // Track the spacer interval so scroll adjustments can skip over it later.
                     spacing_ranges.push((spacing_start, acc));
                 }

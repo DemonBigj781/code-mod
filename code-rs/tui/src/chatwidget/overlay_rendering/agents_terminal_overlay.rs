@@ -475,7 +475,7 @@ impl ChatWidget<'_> {
         let total_lines = wrapped_lines.len() as u16;
         let max_scroll = total_lines.saturating_sub(viewport_height);
         self.layout.last_history_viewport_height.set(viewport_height);
-        self.layout.last_max_scroll.set(max_scroll);
+        self.layout.last_max_scroll.set(u32::from(max_scroll));
 
         // scroll_offset is bottom‑anchored; Paragraph expects top‑anchored scroll.
         let preferred_offset = self

@@ -7,7 +7,7 @@ use ratatui::layout::Rect;
 /// Common epilogue after a user-initiated scroll operation: flash the
 /// scrollbar, sync virtualization, request a redraw, record the event
 /// for the height manager, show the nav hint, and track the delta.
-fn scroll_epilogue(chat: &mut ChatWidget<'_>, before: u16) {
+fn scroll_epilogue(chat: &mut ChatWidget<'_>, before: u32) {
     flash_scrollbar(chat);
     chat.sync_history_virtualization();
     chat.app_event_tx
@@ -61,7 +61,7 @@ pub(super) fn page_up(chat: &mut ChatWidget<'_>) {
     let before = chat.layout.scroll_offset.get();
     let step = chat.layout.last_history_viewport_height.get().max(1);
     let new_offset = before
-        .saturating_add(step)
+        .saturating_add(u32::from(step))
         .min(chat.layout.last_max_scroll.get());
     if new_offset == before {
         return;
@@ -103,10 +103,10 @@ pub(super) fn page_down(chat: &mut ChatWidget<'_>) {
         return;
     }
     let step = chat.layout.last_history_viewport_height.get().max(1);
-    if before > step {
+    if before > u32::from(step) {
         chat.layout
             .scroll_offset
-            .set(before.saturating_sub(step));
+            .set(before.saturating_sub(u32::from(step)));
     } else {
         chat.layout.scroll_offset.set(0);
         chat.bottom_pane.set_compact_compose(false);
@@ -179,7 +179,7 @@ pub(super) fn to_bottom(chat: &mut ChatWidget<'_>) {
 
 /// Set scroll position from a scrollbar-derived "from-top" position.
 /// `pos_from_top` is in range [0, `max_scroll`] where 0 = oldest (top).
-pub(super) fn set_from_scrollbar(chat: &mut ChatWidget<'_>, pos_from_top: u16) {
+pub(super) fn set_from_scrollbar(chat: &mut ChatWidget<'_>, pos_from_top: u32) {
     let max = chat.layout.last_max_scroll.get();
     let before = chat.layout.scroll_offset.get();
     // Convert from-top to from-bottom offset.

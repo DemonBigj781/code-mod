@@ -367,6 +367,27 @@ impl ChatWidget<'_> {
                 return;
             }
 
+        // Some SSH terminals translate wheel gestures into plain arrow keys.
+        // With no draft to edit, treat those arrows as transcript scrolling
+        // rather than sent-message history navigation.
+        if !self.bottom_pane.has_active_modal_view()
+            && self.bottom_pane.composer_is_empty()
+            && key_event.modifiers.is_empty()
+            && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        {
+            match key_event.code {
+                crossterm::event::KeyCode::Up => {
+                    layout_scroll::line_up(self);
+                    return;
+                }
+                crossterm::event::KeyCode::Down => {
+                    layout_scroll::line_down(self);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // History shortcuts (fold/jump) configured under `[tui.hotkeys]`.
         // Only intercept when the composer is empty so normal typing is unaffected.
         if !self.bottom_pane.has_active_modal_view()

@@ -23,7 +23,7 @@ impl ChatWidget<'_> {
         // "visible" window matches what the user is actually seeing.
         let base_total_height = self.history_render.last_total_height();
         let total_height = if max_scroll > 0 {
-            max_scroll.saturating_add(viewport_height)
+            max_scroll.saturating_add(u32::from(viewport_height))
         } else {
             base_total_height
         };
@@ -37,8 +37,8 @@ impl ChatWidget<'_> {
             scroll_pos = self.history_render.adjust_scroll_to_content(scroll_pos);
         }
 
-        let viewport_bottom = scroll_pos.saturating_add(viewport_height);
-        let ps: &[u16] = &ps_ref;
+        let viewport_bottom = scroll_pos.saturating_add(u32::from(viewport_height));
+        let ps: &[u32] = &ps_ref;
 
         let mut start_idx = match ps.binary_search(&scroll_pos) {
             Ok(i) => i,

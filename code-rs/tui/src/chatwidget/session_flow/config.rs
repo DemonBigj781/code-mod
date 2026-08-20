@@ -135,7 +135,7 @@ impl ChatWidget<'_> {
                 .is_some()
         {
             let cell_end = self.history_render.last_total_height();
-            let cell_start = cell_end.saturating_sub(next.height);
+            let cell_start = cell_end.saturating_sub(u32::from(next.height));
             self.history_render
                 .append_spacing_range((cell_start, cell_start.saturating_add(1)));
             self.history_render

@@ -3473,6 +3473,81 @@
     }
 
     #[test]
+    fn empty_composer_up_scrolls_transcript_instead_of_recalling_history() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(|chat| {
+        reset_history(chat);
+        for index in 0..24 {
+            insert_plain_cell(chat, &[&format!("history row {index}")]);
+        }
+        chat.set_composer_text("previous input");
+        chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    });
+
+    {
+        let chat = harness.chat();
+        let mut terminal = Terminal::new(TestBackend::new(50, 10)).expect("terminal");
+        terminal
+            .draw(|frame| frame.render_widget_ref(&*chat, frame.area()))
+            .expect("draw history");
+        assert!(chat.layout.last_max_scroll.get() > 0);
+        assert!(chat.bottom_pane.composer_is_empty());
+    }
+
+    harness.chat().handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+
+    let chat = harness.chat();
+    assert!(chat.layout.scroll_offset.get() > 0);
+    assert!(chat.bottom_pane.composer_is_empty());
+    }
+
+    #[test]
+    fn empty_composer_down_scrolls_transcript_toward_latest() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(|chat| {
+        reset_history(chat);
+        for index in 0..24 {
+            insert_plain_cell(chat, &[&format!("history row {index}")]);
+        }
+        chat.set_composer_text("previous input");
+        chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    });
+
+    {
+        let chat = harness.chat();
+        let mut terminal = Terminal::new(TestBackend::new(50, 10)).expect("terminal");
+        terminal
+            .draw(|frame| frame.render_widget_ref(&*chat, frame.area()))
+            .expect("draw history");
+        chat.layout.scroll_offset.set(2);
+    }
+
+    harness.chat().handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+
+    let chat = harness.chat();
+    assert_eq!(chat.layout.scroll_offset.get(), 1);
+    assert!(chat.bottom_pane.composer_is_empty());
+    }
+
+    #[test]
+    fn up_at_start_of_non_empty_composer_still_recalls_input_history() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(|chat| {
+        reset_history(chat);
+        chat.set_composer_text("previous input");
+        chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        chat.set_composer_text("draft");
+        chat.handle_key_event(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    });
+
+    assert_eq!(harness.chat().bottom_pane.composer_text(), "previous input");
+    }
+
+    #[test]
     fn stale_reasoning_height_cache_recovers_without_panicking() {
     let _rt = enter_test_runtime_guard();
     let mut harness = ChatWidgetHarness::new();

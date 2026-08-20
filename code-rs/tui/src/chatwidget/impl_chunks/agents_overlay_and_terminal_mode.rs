@@ -782,7 +782,8 @@ impl ChatWidget<'_> {
         self.agents_terminal.active = false;
         self.agents_terminal.clear_stop_prompt();
         self.agents_terminal.focus_sidebar();
-        self.layout.scroll_offset
+        self.layout
+            .scroll_offset
             .set(self.agents_terminal.saved_scroll_offset);
         self.bottom_pane.set_input_focus(true);
         self.request_redraw();
@@ -798,7 +799,7 @@ impl ChatWidget<'_> {
             self
                 .agents_terminal
                 .scroll_offsets
-                .insert(entry.scroll_key(), capped);
+                .insert(entry.scroll_key(), u16::try_from(capped).unwrap_or(u16::MAX));
         }
     }
 
@@ -811,7 +812,7 @@ impl ChatWidget<'_> {
                 .agents_terminal
                 .scroll_offsets
                 .insert(key, u16::MAX);
-            self.layout.scroll_offset.set(u16::MAX);
+            self.layout.scroll_offset.set(u32::from(u16::MAX));
         } else {
             self.layout.scroll_offset.set(0);
         }
@@ -824,14 +825,14 @@ impl ChatWidget<'_> {
         let applied = self
             .agents_terminal
             .last_render_scroll
-            .get()
-            .min(self.layout.last_max_scroll.get());
+            .get();
+        let applied = u32::from(applied).min(self.layout.last_max_scroll.get());
         self.layout.scroll_offset.set(applied);
         if let Some(entry) = self.agents_terminal.current_sidebar_entry() {
             self
                 .agents_terminal
                 .scroll_offsets
-                .insert(entry.scroll_key(), applied);
+                .insert(entry.scroll_key(), u16::try_from(applied).unwrap_or(u16::MAX));
         }
     }
 

@@ -156,3 +156,13 @@ jobs:
           set -eu
           cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::task_complete_
           cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::completed_submission_history_is_bounded_and_reused_ids_reopen -- --exact
+
+      - name: Test transcript geometry and navigation
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
+          cargo test --frozen --locked -j1 -p code-tui chatwidget::history_render::render_state::tests::history_row_offsets_preserve_more_than_u16_rows -- --exact
+          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::empty_composer_up_scrolls_transcript_instead_of_recalling_history -- --exact
+          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::empty_composer_down_scrolls_transcript_toward_latest -- --exact
+          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::up_at_start_of_non_empty_composer_still_recalls_input_history -- --exact

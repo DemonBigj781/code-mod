@@ -4,16 +4,16 @@ pub(crate) struct HistoryRenderState {
     pub(crate) height_cache: RefCell<HashMap<CacheKey, u16>>,
     fallback_cache: RefCell<HashMap<HistoryId, Rc<[Line<'static>]>>>,
     pub(crate) height_cache_last_width: Cell<u16>,
-    pub(crate) prefix_sums: RefCell<Vec<u16>>,
+    pub(crate) prefix_sums: RefCell<Vec<u32>>,
     pub(crate) last_prefix_width: Cell<u16>,
     pub(crate) last_prefix_count: Cell<usize>,
-    pub(crate) last_total_height: Cell<u16>,
+    pub(crate) last_total_height: Cell<u32>,
     pub(crate) last_history_count: Cell<usize>,
     pub(crate) prefix_valid: Cell<bool>,
     // Row intervals that correspond to inter-cell spacing so we can avoid
     // landing the viewport on empty gaps when scrolling.
-    spacing_ranges: RefCell<Vec<(u16, u16)>>,
-    bottom_spacer_range: Cell<Option<(u16, u16)>>,
+    spacing_ranges: RefCell<Vec<(u32, u32)>>,
+    bottom_spacer_range: Cell<Option<(u32, u32)>>,
     bottom_spacer_lines: Cell<u16>,
     pending_bottom_spacer_lines: Cell<Option<u16>>,
 }
@@ -145,8 +145,8 @@ impl HistoryRenderState {
     pub(crate) fn update_prefix_cache(
         &self,
         width: u16,
-        prefix: Vec<u16>,
-        total_height: u16,
+        prefix: Vec<u32>,
+        total_height: u32,
         count: usize,
         history_count: usize,
     ) {
@@ -186,11 +186,11 @@ impl HistoryRenderState {
         self.height_cache.borrow().get(&key).copied()
     }
 
-    pub(crate) fn update_spacing_ranges(&self, ranges: Vec<(u16, u16)>) {
+    pub(crate) fn update_spacing_ranges(&self, ranges: Vec<(u32, u32)>) {
         *self.spacing_ranges.borrow_mut() = ranges;
     }
 
-    pub(crate) fn set_bottom_spacer_range(&self, range: Option<(u16, u16)>) {
+    pub(crate) fn set_bottom_spacer_range(&self, range: Option<(u32, u32)>) {
         self.bottom_spacer_range.set(range);
     }
 
@@ -223,7 +223,7 @@ impl HistoryRenderState {
         self.pending_bottom_spacer_lines.get()
     }
 
-    pub(crate) fn adjust_scroll_to_content(&self, mut scroll_pos: u16) -> u16 {
+    pub(crate) fn adjust_scroll_to_content(&self, mut scroll_pos: u32) -> u32 {
         if scroll_pos == 0 {
             return scroll_pos;
         }
@@ -261,11 +261,11 @@ impl HistoryRenderState {
     }
 
     #[cfg(test)]
-    pub(crate) fn spacing_ranges_for_test(&self) -> Vec<(u16, u16)> {
+    pub(crate) fn spacing_ranges_for_test(&self) -> Vec<(u32, u32)> {
         self.spacing_ranges.borrow().clone()
     }
 
-    pub(crate) fn last_total_height(&self) -> u16 {
+    pub(crate) fn last_total_height(&self) -> u32 {
         self.last_total_height.get()
     }
 
@@ -289,7 +289,7 @@ impl HistoryRenderState {
         spacing: u16,
         new_height: u16,
         new_history_count: usize,
-    ) -> Option<(u16, u16)> {
+    ) -> Option<(u32, u32)> {
         if !self.prefix_valid.get() || self.last_prefix_width.get() != width {
             return None;
         }
@@ -306,13 +306,13 @@ impl HistoryRenderState {
         }
         let old_total = *ps.last().unwrap_or(&0);
         let spacing_start = old_total;
-        let spacing_end = spacing_start.saturating_add(spacing);
+        let spacing_end = spacing_start.saturating_add(u32::from(spacing));
         if let Some(last) = ps.last_mut() {
             *last = spacing_end;
         } else {
             return None;
         }
-        let new_total = spacing_end.saturating_add(new_height);
+        let new_total = spacing_end.saturating_add(u32::from(new_height));
         ps.push(new_total);
         self.last_total_height.set(new_total);
         self.last_prefix_count.set(prev_count.saturating_add(1));
@@ -322,7 +322,7 @@ impl HistoryRenderState {
         (spacing > 0).then_some((spacing_start, spacing_end))
     }
 
-    pub(crate) fn append_spacing_range(&self, range: (u16, u16)) {
+    pub(crate) fn append_spacing_range(&self, range: (u32, u32)) {
         self.spacing_ranges.borrow_mut().push(range);
     }
 
@@ -498,5 +498,20 @@ impl HistoryRenderState {
         LayoutRef {
             data: Rc::new(build_cached_layout(build_lines(), width)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HistoryRenderState;
+
+    #[test]
+    fn history_row_offsets_preserve_more_than_u16_rows() {
+        let state = HistoryRenderState::new();
+
+        state.update_prefix_cache(80, vec![0, 40_000, 80_000], 80_000, 2, 2);
+
+        assert_eq!(state.prefix_sums.borrow().as_slice(), &[0, 40_000, 80_000]);
+        assert_eq!(state.last_total_height(), 80_000);
     }
 }

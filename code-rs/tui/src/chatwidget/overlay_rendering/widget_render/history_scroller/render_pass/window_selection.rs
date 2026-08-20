@@ -40,7 +40,7 @@ pub(super) struct WindowSelection<'a> {
 
 pub(super) struct WindowSelectionRequest<'a> {
     pub request_count: usize,
-    pub scroll_pos: u16,
+    pub scroll_pos: u32,
     pub viewport_height: u16,
     pub render_settings: RenderSettings,
     pub render_requests_full: Option<&'a Vec<RenderRequest<'a>>>,
@@ -65,9 +65,9 @@ impl ChatWidget<'_> {
             queued_preview_cells,
         } = request;
 
-        let viewport_bottom = scroll_pos.saturating_add(viewport_height);
+        let viewport_bottom = scroll_pos.saturating_add(u32::from(viewport_height));
         let ps_ref = self.history_render.prefix_sums.borrow();
-        let ps: &[u16] = &ps_ref;
+        let ps: &[u32] = &ps_ref;
         let mut start_idx = match ps.binary_search(&scroll_pos) {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1),

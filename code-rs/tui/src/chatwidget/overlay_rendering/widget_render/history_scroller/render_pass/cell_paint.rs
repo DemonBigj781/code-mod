@@ -16,11 +16,11 @@ pub(super) struct PaintVisibleCellsArgs<'a> {
     pub request_count: usize,
     pub start_idx: usize,
     pub start_y: u16,
-    pub scroll_pos: u16,
+    pub scroll_pos: u32,
     pub visible_slice: &'a [VisibleCell<'a>],
     pub visible_requests_slice: &'a [RenderRequest<'a>],
     pub rendered_cells_from_subset: bool,
-    pub ps: &'a [u16],
+    pub ps: &'a [u32],
     pub buf: &'a mut Buffer,
 }
 
@@ -185,6 +185,8 @@ impl ChatWidget<'_> {
 
             let content_y = ps[idx];
             let skip_top = scroll_pos.saturating_sub(content_y);
+            let skip_top = u16::try_from(skip_top.min(u32::from(item_height)))
+                .unwrap_or(item_height);
             if screen_y >= viewport_bottom {
                 break;
             }

@@ -404,9 +404,9 @@ impl ChatWidget<'_> {
 
     pub(super) fn update_history_live_window(
         &mut self,
-        scroll_pos: u16,
+        scroll_pos: u32,
         viewport_rows: u16,
-        total_height: u16,
+        total_height: u32,
         render_settings: RenderSettings,
     ) -> bool {
         if self.history_cells.is_empty() || viewport_rows == 0 {
@@ -418,6 +418,7 @@ impl ChatWidget<'_> {
             // Tail-only content fills the viewport; keep all history frozen.
             (history_len, history_len)
         } else {
+            let viewport_rows = u32::from(viewport_rows);
             let live_margin = viewport_rows / 2;
             let live_start = scroll_pos.saturating_sub(live_margin);
             let live_end = scroll_pos
@@ -427,7 +428,7 @@ impl ChatWidget<'_> {
 
             let (mut start_idx, mut end_idx) = {
                 let ps_ref = self.history_render.prefix_sums.borrow();
-                let ps: &[u16] = &ps_ref;
+                let ps: &[u32] = &ps_ref;
                 if ps.len() <= 1 {
                     return false;
                 }
@@ -501,7 +502,7 @@ impl ChatWidget<'_> {
             return;
         }
         let total_height = self.history_render.last_total_height();
-        let max_scroll = total_height.saturating_sub(viewport_rows);
+        let max_scroll = total_height.saturating_sub(u32::from(viewport_rows));
         let clamped_offset = self.layout.scroll_offset.get().min(max_scroll);
         let scroll_pos = max_scroll.saturating_sub(clamped_offset);
         let history_len = self.history_cells.len();

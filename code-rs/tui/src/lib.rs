@@ -415,11 +415,11 @@ pub mod test_helpers {
         harness.set_standard_terminal_mode(enabled);
     }
 
-    pub fn force_scroll_offset(harness: &mut ChatWidgetHarness, offset: u16) {
+    pub fn force_scroll_offset(harness: &mut ChatWidgetHarness, offset: u32) {
         harness.force_scroll_offset(offset);
     }
 
-    pub fn scroll_offset(harness: &ChatWidgetHarness) -> u16 {
+    pub fn scroll_offset(harness: &ChatWidgetHarness) -> u32 {
         harness.scroll_offset()
     }
 }

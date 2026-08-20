@@ -48,9 +48,9 @@ const TEST_AUTO_DRIVE_PLACEHOLDER: &str = "Mapping strategy…";
 
 #[derive(Debug, Clone, Copy)]
 pub struct LayoutMetrics {
-    pub scroll_offset: u16,
+    pub scroll_offset: u32,
     pub last_viewport_height: u16,
-    pub last_max_scroll: u16,
+    pub last_max_scroll: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -706,11 +706,11 @@ impl ChatWidgetHarness {
         self.chat.set_standard_terminal_mode(enabled);
     }
 
-    pub(crate) fn force_scroll_offset(&mut self, offset: u16) {
+    pub(crate) fn force_scroll_offset(&mut self, offset: u32) {
         self.chat.layout.scroll_offset.set(offset);
     }
 
-    pub(crate) fn scroll_offset(&self) -> u16 {
+    pub(crate) fn scroll_offset(&self) -> u32 {
         self.chat.layout.scroll_offset.get()
     }
 
