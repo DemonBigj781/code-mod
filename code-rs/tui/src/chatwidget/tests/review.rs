@@ -3548,6 +3548,21 @@
     }
 
     #[test]
+    fn agents_terminal_restores_scroll_offsets_beyond_u16() {
+    let mut harness = ChatWidgetHarness::new();
+    let original_offset = u32::from(u16::MAX) + 17;
+
+    harness.with_chat(|chat| {
+        chat.layout.scroll_offset.set(original_offset);
+        chat.enter_agents_terminal_mode();
+        assert_eq!(chat.agents_terminal.saved_scroll_offset, original_offset);
+        chat.exit_agents_terminal_mode();
+    });
+
+    assert_eq!(harness.chat().layout.scroll_offset.get(), original_offset);
+    }
+
+    #[test]
     fn stale_reasoning_height_cache_recovers_without_panicking() {
     let _rt = enter_test_runtime_guard();
     let mut harness = ChatWidgetHarness::new();

@@ -1337,7 +1337,7 @@ struct AgentsTerminalState {
     scroll_offsets: HashMap<String, u16>,
     // Last scroll offset used to render the detail view (bottom-anchored)
     last_render_scroll: std::cell::Cell<u16>,
-    saved_scroll_offset: u16,
+    saved_scroll_offset: u32,
     shared_context: Option<String>,
     shared_task: Option<String>,
     pending_stop: Option<PendingAgentStop>,

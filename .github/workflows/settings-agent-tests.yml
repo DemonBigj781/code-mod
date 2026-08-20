@@ -166,3 +166,4 @@ jobs:
           cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::empty_composer_up_scrolls_transcript_instead_of_recalling_history -- --exact
           cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::empty_composer_down_scrolls_transcript_toward_latest -- --exact
           cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::up_at_start_of_non_empty_composer_still_recalls_input_history -- --exact
+          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::agents_terminal_restores_scroll_offsets_beyond_u16 -- --exact
