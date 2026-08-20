@@ -38,6 +38,7 @@ use code_protocol::config_types::WebSearchToolConfig;
 use code_core::AuthManager;
 use code_core::ConversationManager;
 use code_core::config::Config;
+use code_core::config::ConfigBuilder;
 use code_core::default_client::get_code_user_agent_with_suffix;
 use code_protocol::mcp_protocol::ClientRequest as LegacyClientRequest;
 use code_protocol::mcp_protocol::GetUserAgentResponse;
@@ -747,13 +748,17 @@ impl MessageProcessor {
             ..Default::default()
         };
 
-        Config::load_with_cli_overrides(self.cli_overrides.clone(), overrides).map_err(|err| {
-            JSONRPCErrorError {
+        ConfigBuilder::new()
+            .with_code_home(self.base_config.code_home.clone())
+            .with_cli_overrides(self.cli_overrides.clone())
+            .with_overrides(overrides)
+            .with_loader_overrides(code_core::config_loader::LoaderOverrides::default())
+            .load()
+            .map_err(|err| JSONRPCErrorError {
                 code: INTERNAL_ERROR_CODE,
                 message: format!("Unable to load effective config: {err}"),
                 data: None,
-            }
-        })
+            })
     }
 
     fn v2_config_snapshot_from(&self, config: &Config) -> V2Config {
@@ -1134,11 +1139,31 @@ mod tests {
     use super::*;
     use crate::outgoing_message::OutgoingEnvelope;
     use crate::outgoing_message::OutgoingMessage;
+    use code_core::CodexAuth;
+    use code_core::CodexConversation;
+    use code_core::protocol::EventMsg;
     use mcp_types::JSONRPC_VERSION;
     use mcp_types::RequestId;
     use serde_json::json;
     use tokio::sync::mpsc;
+    use tokio::time::Duration;
+    use tokio::time::timeout;
     use uuid::Uuid;
+
+    async fn wait_for_mcp_snapshot(conversation: &CodexConversation) {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if matches!(
+                    conversation.next_event().await.expect("next event").msg,
+                    EventMsg::McpListToolsResponse(_)
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("MCP snapshot should arrive");
+    }
 
     #[tokio::test]
     async fn initialize_applies_opt_out_notification_methods_per_connection() {
@@ -1456,5 +1481,86 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(temp_code_home);
+    }
+
+    #[test]
+    fn load_effective_config_uses_base_code_home() {
+        let code_home = tempfile::tempdir().expect("create temp code home");
+        std::fs::write(
+            code_home.path().join("config.toml"),
+            "model = \"base-home-model\"\n",
+        )
+        .expect("write config");
+        let config = ConfigBuilder::new()
+            .with_code_home(code_home.path().to_path_buf())
+            .load()
+            .expect("load isolated config");
+        let (outgoing_tx, _outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(8);
+        let outgoing = Arc::new(OutgoingMessageSender::new_with_routed_sender(outgoing_tx));
+        let processor =
+            MessageProcessor::new(outgoing, None, Arc::new(config), Vec::new(), Vec::new());
+
+        let effective = processor
+            .load_effective_config(None)
+            .expect("load effective config");
+
+        assert_eq!(effective.code_home, code_home.path());
+        assert_eq!(effective.model, "base-home-model");
+    }
+
+    #[tokio::test]
+    async fn mcp_server_reload_fans_out_before_responding() {
+        let code_home = tempfile::tempdir().expect("create temp code home");
+        std::fs::write(code_home.path().join("config.toml"), "").expect("write empty config");
+        let config = ConfigBuilder::new()
+            .with_code_home(code_home.path().to_path_buf())
+            .with_overrides(code_core::config::ConfigOverrides {
+                cwd: Some(code_home.path().to_path_buf()),
+                ..Default::default()
+            })
+            .load()
+            .expect("load isolated config");
+
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(8);
+        let outgoing = Arc::new(OutgoingMessageSender::new_with_routed_sender(outgoing_tx));
+        let mut processor = MessageProcessor::new(
+            outgoing,
+            None,
+            Arc::new(config.clone()),
+            Vec::new(),
+            Vec::new(),
+        );
+        processor.conversation_manager = Arc::new(ConversationManager::with_auth(
+            CodexAuth::from_api_key("Test API Key"),
+        ));
+
+        let first = processor
+            .conversation_manager
+            .new_conversation(config.clone())
+            .await
+            .expect("create first conversation")
+            .conversation;
+        let second = processor
+            .conversation_manager
+            .new_conversation(config)
+            .await
+            .expect("create second conversation")
+            .conversation;
+
+        processor
+            .mcp_server_refresh_v2(ConnectionId(7), RequestId::Integer(9), None)
+            .await;
+
+        let envelope = outgoing_rx.recv().await.expect("reload response envelope");
+        match envelope {
+            OutgoingEnvelope::ToConnection {
+                connection_id: ConnectionId(7),
+                message: OutgoingMessage::Response(response),
+            } => assert_eq!(response.id, RequestId::Integer(9)),
+            _ => panic!("expected MCP reload response"),
+        }
+
+        wait_for_mcp_snapshot(&first).await;
+        wait_for_mcp_snapshot(&second).await;
     }
 }

@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn interface_icon_mode_preview_reverts_when_returning_to_overview() {
+    fn interface_icon_mode_change_stays_pending_when_returning_to_overview() {
         crate::icons::with_test_icon_mode(code_core::config_types::IconMode::Unicode, || {
             let mut harness = ChatWidgetHarness::new();
             harness.with_chat(|chat| {
@@ -402,12 +402,19 @@ mod tests {
                 assert!(content.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
                 assert!(content.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
                 assert!(content.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)));
-                assert_eq!(crate::icons::icon_mode(), code_core::config_types::IconMode::NerdFonts);
+                assert_eq!(
+                    crate::icons::icon_mode(),
+                    code_core::config_types::IconMode::Unicode,
+                    "icon mode must remain pending until Apply"
+                );
             });
 
-            // Esc returns to overview and should revert the preview.
+            // Esc returns to overview without changing the applied icon mode.
             harness.send_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-            assert_eq!(crate::icons::icon_mode(), code_core::config_types::IconMode::Unicode);
+            assert_eq!(
+                crate::icons::icon_mode(),
+                code_core::config_types::IconMode::Unicode
+            );
         });
     }
 

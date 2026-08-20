@@ -13,9 +13,9 @@ use crate::util::is_shell_like_executable;
 /// (e.g. `-5.2`), and leading/trailing quotes, then lowercases.
 pub fn shell_basename(path: &str) -> String {
     let trimmed = path.trim_matches('"').trim_matches('\'');
-    let base = std::path::Path::new(trimmed)
-        .file_name()
-        .and_then(|s| s.to_str())
+    let base = trimmed
+        .rsplit(|separator| separator == '/' || separator == '\\')
+        .next()
         .unwrap_or(trimmed);
     // Strip version suffix before .exe so that `bash.exe-5.2` → `bash.exe` → `bash`.
     let base = strip_version_suffix(base);
@@ -579,6 +579,10 @@ mod tests_common {
         // Versioned Windows executables: strip version first, then .exe
         assert_eq!(shell_basename("bash.exe-5.2"), "bash");
         assert_eq!(shell_basename("zsh.exe-6"), "zsh");
+        assert_eq!(
+            shell_basename(r"C:\Program Files\PowerShell\7\pwsh.exe"),
+            "pwsh"
+        );
     }
 
     #[test]

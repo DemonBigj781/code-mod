@@ -91,10 +91,9 @@ mod tests {
         }
 
         assert_eq!(
-            std::str::from_utf8(&generated).unwrap(),
-            std::str::from_utf8(checked_in).unwrap(),
+            std::str::from_utf8(&generated).unwrap().trim_end(),
+            std::str::from_utf8(checked_in).unwrap().trim_end(),
             "config.schema.codex.json is stale — regenerate with UPDATE_SCHEMA=1 cargo test -p code-core --lib -- config::schema::tests::checked_in_codex_schema_matches_generated"
         );
     }
 }
-

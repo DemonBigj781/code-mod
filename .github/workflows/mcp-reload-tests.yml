@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - "code-rs/app-server/src/message_processor.rs"
       - "code-rs/app-server/src/message_processor/v2.rs"
       - "code-rs/core/src/codex/streaming/submission/**"
       - "code-rs/core/src/config/**"
@@ -143,7 +144,10 @@ jobs:
 
       - name: Compile app-server refresh integration
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
-        run: cargo test --frozen --locked -j1 -p code-app-server mcp_server_refresh_v2
+        run: |
+          cargo test --frozen --locked -j1 -p code-app-server mcp_server_refresh_v2
+          cargo test --frozen --locked -j1 -p code-app-server load_effective_config_uses_base_code_home
+          cargo test --frozen --locked -j1 -p code-app-server mcp_server_reload_fans_out_before_responding
 
       - name: Compile non-interactive event consumers
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}

@@ -105,6 +105,8 @@ fn edit_mode_tab_switches_focus_and_enter_activates_back_action() {
     assert_eq!(view.edit_focus, EditFocus::Field);
 
     assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Tab)));
+    assert_eq!(view.edit_focus, EditFocus::Style);
+    assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Tab)));
     assert_eq!(view.edit_focus, EditFocus::Actions);
 
     // Move selection to Back.
@@ -122,6 +124,9 @@ fn edit_mode_apply_action_submits_and_closes() {
     let (tx, rx) = mpsc::channel::<AppEvent>();
     let mut view = ShellSelectionView::new(None, vec![preset("bash")], AppEventSender::new(tx));
     view.open_custom_input_with_prefill("bash".to_string(), None);
+    assert_eq!(view.edit_focus, EditFocus::Field);
+    assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Tab)));
+    assert_eq!(view.edit_focus, EditFocus::Style);
     assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Tab)));
     assert_eq!(view.edit_focus, EditFocus::Actions);
     assert_eq!(view.selected_action, EditAction::Apply);

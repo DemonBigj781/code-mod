@@ -64,9 +64,7 @@ pub async fn spawn_command_under_seatbelt(
         sandbox_policy_cwd,
         stdio_policy,
         enforce_managed_network,
-        crate::resource_grants::to_exec_cgroup_limits(
-            crate::resource_grants::configured_resource_limits(),
-        ),
+        crate::cgroup::ExecCgroupLimits::default(),
         env,
     )
     .await

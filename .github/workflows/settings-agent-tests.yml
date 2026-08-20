@@ -124,3 +124,23 @@ jobs:
       - name: Test GPT-5.6 agents in settings
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         run: cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::agents_settings_lists_gpt_5_6_variants -- --exact
+
+      - name: Test core configuration regressions
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
+          cargo test --frozen --locked -j1 -p code-core context_mode_one_m_expands_gpt_5_5_context
+          cargo test --frozen --locked -j1 -p code-core shell_basename_handles_versioned_paths
+          cargo test --frozen --locked -j1 -p code-core requested_model_headers_replace_version_and_user_agent
+          cargo test --frozen --locked -j1 -p code-core checked_in_codex_schema_matches_generated
+          cargo test --frozen --locked -j1 -p code-core --test review_coord_integration
+
+      - name: Test settings edit persistence
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
+          cargo test --frozen --locked -j1 -p code-tui edit_mode_tab_switches_focus_and_enter_activates_back_action
+          cargo test --frozen --locked -j1 -p code-tui edit_mode_apply_action_submits_and_closes
+          cargo test --frozen --locked -j1 -p code-tui interface_icon_mode_change_stays_pending_when_returning_to_overview

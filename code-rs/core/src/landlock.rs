@@ -31,9 +31,7 @@ where
         sandbox_policy,
         sandbox_policy_cwd,
         stdio_policy,
-        crate::resource_grants::to_exec_cgroup_limits(
-            crate::resource_grants::configured_resource_limits(),
-        ),
+        crate::cgroup::ExecCgroupLimits::default(),
         env,
     )
     .await

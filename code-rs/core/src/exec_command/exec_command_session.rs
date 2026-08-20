@@ -67,6 +67,7 @@ impl ExecCommandSession {
     pub(crate) fn new(
         writer_tx: mpsc::Sender<Vec<u8>>,
         output_tx: broadcast::Sender<Vec<u8>>,
+        initial_output_rx: broadcast::Receiver<Vec<u8>>,
         parts: ExecCommandSessionParts,
     ) -> (Self, broadcast::Receiver<Vec<u8>>) {
         let ExecCommandSessionParts {
@@ -83,7 +84,6 @@ impl ExecCommandSession {
             exit_code,
             network_attempt_guard,
         } = parts;
-        let initial_output_rx = output_tx.subscribe();
         (
             Self {
                 writer_tx,

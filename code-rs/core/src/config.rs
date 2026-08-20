@@ -5304,7 +5304,7 @@ context_mode = "1m"
     }
 
     #[test]
-    fn context_mode_one_m_is_inert_for_gpt_5_5() -> anyhow::Result<()> {
+    fn context_mode_one_m_expands_gpt_5_5_context() -> anyhow::Result<()> {
         let code_home = TempDir::new()?;
         let cfg = toml::from_str::<ConfigToml>(
             r#"
@@ -5322,8 +5322,8 @@ context_mode = "1m"
         )?;
 
         assert_eq!(config.context_mode, Some(ContextMode::OneM));
-        assert_eq!(config.model_context_window, Some(272_000));
-        assert_eq!(config.model_auto_compact_token_limit, Some(244_800));
+        assert_eq!(config.model_context_window, Some(1_047_576));
+        assert_eq!(config.model_auto_compact_token_limit, Some(942_818));
         Ok(())
     }
 

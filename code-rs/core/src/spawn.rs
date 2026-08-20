@@ -113,9 +113,7 @@ pub(crate) async fn spawn_child_async(
         cwd,
         sandbox_policy,
         stdio_policy,
-        crate::resource_grants::to_exec_cgroup_limits(
-            crate::resource_grants::configured_resource_limits(),
-        ),
+        crate::cgroup::ExecCgroupLimits::default(),
         env,
     )
     .await

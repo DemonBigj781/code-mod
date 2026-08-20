@@ -310,7 +310,8 @@ mod tests {
                 .iter()
                 .map(|value| value.to_str().expect("version header"))
                 .collect();
-            assert_eq!(version_values, vec!["0.124.0"]);
+            let expected_version = code_version::wire_compatible_version_for_model("gpt-5.5");
+            assert_eq!(version_values, vec![expected_version.as_str()]);
 
             let ua_values: Vec<_> = request
                 .headers()
@@ -319,7 +320,7 @@ mod tests {
                 .map(|value| value.to_str().expect("user-agent header"))
                 .collect();
             assert_eq!(ua_values.len(), 1);
-            assert!(ua_values[0].starts_with("test_originator/0.124.0"));
+            assert!(ua_values[0].starts_with(&format!("test_originator/{expected_version}")));
         });
     }
 

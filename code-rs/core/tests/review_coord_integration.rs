@@ -5,6 +5,7 @@ use code_core::review_coord::{
     try_acquire_lock,
 };
 use code_git_tooling::{create_ghost_commit, CreateGhostCommitOptions};
+use serial_test::serial;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -15,6 +16,7 @@ fn set_code_home(path: &std::path::Path) {
 
 // Integration-style coverage of lock contention and stale-epoch handling across components.
 #[test]
+#[serial]
 fn lock_contention_and_epoch_refresh_across_components() {
     let dir = TempDir::new().unwrap();
     set_code_home(dir.path());
@@ -44,6 +46,7 @@ fn lock_contention_and_epoch_refresh_across_components() {
 }
 
 #[test]
+#[serial]
 fn ghost_commit_bumps_epoch_and_stale_resume_is_detectable() {
     let code_home = TempDir::new().unwrap();
     set_code_home(code_home.path());

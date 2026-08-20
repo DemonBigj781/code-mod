@@ -138,6 +138,10 @@ jobs:
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         run: cargo test --frozen --locked -j1 -p code-core resource_limit_failure
 
+      - name: Test fast exec output retention
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-core session_manager_pipe_fallback_works_when_pty_is_forced_to_fail
+
       - name: Test cgroup event classification
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         run: cargo test --frozen --locked -j1 -p code-core cgroup::tests::parses_named_cgroup_event_counter -- --exact

@@ -744,6 +744,7 @@ async fn create_exec_command_session(
     let (writer_tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(128);
     // Broadcast for streaming PTY output to readers: subscribers receive from subscription time.
     let (output_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(256);
+    let initial_output_rx = output_tx.subscribe();
     // Reader task: drain PTY and forward chunks to output channel.
     let mut reader = pair.master.try_clone_reader()?;
     let output_tx_clone = output_tx.clone();
@@ -819,7 +820,8 @@ async fn create_exec_command_session(
         exit_code,
         network_attempt_guard,
     };
-    let (session, initial_output_rx) = ExecCommandSession::new(writer_tx, output_tx, parts);
+    let (session, initial_output_rx) =
+        ExecCommandSession::new(writer_tx, output_tx, initial_output_rx, parts);
     Ok((session, initial_output_rx, exit_rx))
 }
 
@@ -955,6 +957,8 @@ async fn spawn_pipe_exec_command_session(
 
     let (writer_tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(128);
     let (output_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(256);
+    let initial_output_rx = output_tx.subscribe();
+    let (reader_done_tx, reader_done_rx) = oneshot::channel::<()>();
 
     let output_tx_clone = output_tx.clone();
     let reader_handle = tokio::spawn(async move {
@@ -985,6 +989,7 @@ async fn spawn_pipe_exec_command_session(
                 }
             }
         }
+        let _ = reader_done_tx.send(());
     });
 
     let writer_handle = tokio::spawn(async move {
@@ -1005,6 +1010,7 @@ async fn spawn_pipe_exec_command_session(
             Ok(status) => status.code().unwrap_or(-1),
             Err(_) => -1,
         };
+        let _ = reader_done_rx.await;
         if let Ok(mut guard) = exit_code_for_wait.lock() {
             *guard = Some(code);
         }
@@ -1025,7 +1031,8 @@ async fn spawn_pipe_exec_command_session(
         network_attempt_guard,
     };
 
-    let (session, initial_output_rx) = ExecCommandSession::new(writer_tx, output_tx, parts);
+    let (session, initial_output_rx) =
+        ExecCommandSession::new(writer_tx, output_tx, initial_output_rx, parts);
     Ok((session, initial_output_rx, exit_rx))
 }
 
@@ -1192,10 +1199,10 @@ PY"#
         let session_manager = SessionManager::default();
         let params = ExecCommandParams {
             cmd: "echo hello-from-pipe".to_string(),
-            yield_time_ms: 250,
+            yield_time_ms: 1_000,
             max_output_tokens: 256,
             workdir: None,
-            shell: "bash".to_string(),
+            shell: "sh".to_string(),
             login: false,
             sandbox_permissions: None,
             additional_permissions: None,
@@ -1216,8 +1223,12 @@ PY"#
 
         assert!(
             output.output.contains("hello-from-pipe"),
-            "unexpected output: {}",
-            output.output
+            "unexpected result: {output:?}"
+        );
+        assert_eq!(
+            output.output.matches("hello-from-pipe").count(),
+            1,
+            "fast output must be delivered exactly once: {output:?}"
         );
     }
 
