@@ -51,6 +51,18 @@ pub enum SandboxErr {
         memory_max_bytes: Option<u64>,
     },
 
+    /// Command could not create another process because its PID limit was reached.
+    #[error(
+        "command exceeded process limit{}",
+        pids_max
+            .map(|pids| format!(": {pids} processes"))
+            .unwrap_or_default()
+    )]
+    PidsLimit {
+        output: Box<ExecToolCallOutput>,
+        pids_max: Option<u64>,
+    },
+
     /// Error from linux landlock
     #[error("Landlock was not able to fully enforce all sandbox rules")]
     LandlockRestrict,
@@ -404,7 +416,31 @@ pub fn get_error_message_ui(e: &CodexErr) -> String {
             let limit_note = memory_max_bytes
                 .map(|bytes| format!(" (memory.max={bytes} bytes)"))
                 .unwrap_or_default();
-            format!("error: command exceeded memory limit{limit_note}\n{}", output.stderr.text)
+            let guidance = memory_max_bytes
+                .map(crate::resource_grants::memory_limit_failure_message)
+                .unwrap_or_else(|| {
+                    "resource_limit_failure={\"resource\":\"memory\"}\nCall `request_resources` with a larger `memory_max_mb` before retrying."
+                        .to_owned()
+                });
+            format!(
+                "error: command exceeded memory limit{limit_note}\n{guidance}\n{}",
+                output.stderr.text
+            )
+        }
+        CodexErr::Sandbox(SandboxErr::PidsLimit { output, pids_max }) => {
+            let limit_note = pids_max
+                .map(|pids| format!(" (pids.max={pids})"))
+                .unwrap_or_default();
+            let guidance = pids_max
+                .map(crate::resource_grants::pids_limit_failure_message)
+                .unwrap_or_else(|| {
+                    "resource_limit_failure={\"resource\":\"pids\"}\nCall `request_resources` with a larger `pids_max` before retrying."
+                        .to_owned()
+                });
+            format!(
+                "error: command exceeded process limit{limit_note}\n{guidance}\n{}",
+                output.stderr.text
+            )
         }
         // Timeouts are not sandbox errors from a UX perspective; present them plainly
         CodexErr::Sandbox(SandboxErr::Timeout { output }) => format!(

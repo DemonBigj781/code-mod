@@ -69,6 +69,10 @@ pub use code_protocol::request_permissions::PermissionGrantScope;
 pub use code_protocol::request_permissions::RequestPermissionProfile;
 pub use code_protocol::request_permissions::RequestPermissionsEvent;
 pub use code_protocol::request_permissions::RequestPermissionsResponse;
+pub use code_protocol::request_resources::RequestResourcesEvent;
+pub use code_protocol::request_resources::RequestResourcesResponse;
+pub use code_protocol::request_resources::ResourceGrantScope;
+pub use code_protocol::request_resources::ResourceRequestProfile;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -260,6 +264,14 @@ pub enum Op {
         id: String,
         /// User-granted permissions.
         response: RequestPermissionsResponse,
+    },
+
+    /// Resolve a `request_resources` tool call.
+    RequestResourcesResponse {
+        /// Call id for the in-flight request.
+        id: String,
+        /// User-granted execution resources.
+        response: RequestResourcesResponse,
     },
 
     /// Resolve an MCP server elicitation request.
@@ -1012,6 +1024,8 @@ pub enum EventMsg {
     RequestUserInput(RequestUserInputEvent),
 
     RequestPermissions(RequestPermissionsEvent),
+
+    RequestResources(RequestResourcesEvent),
 
     DynamicToolCallRequest(DynamicToolCallRequest),
 

@@ -122,14 +122,36 @@ impl ExecCommandSession {
 
     #[cfg(target_os = "linux")]
     pub(crate) fn exceeded_memory_limit(&self) -> Option<u64> {
-        self.memory_watchdog
+        if let Some(memory_max_bytes) = self
+            .memory_watchdog
             .as_ref()
             .filter(|watchdog| watchdog.limit_exceeded())
             .map(crate::cgroup::ExecMemoryWatchdog::memory_max_bytes)
+        {
+            return Some(memory_max_bytes);
+        }
+
+        let pid = self.cgroup_pid?;
+        crate::cgroup::exec_cgroup_oom_killed(pid)
+            .unwrap_or(false)
+            .then(|| crate::cgroup::exec_cgroup_memory_max_bytes(pid))?
     }
 
     #[cfg(not(target_os = "linux"))]
     pub(crate) fn exceeded_memory_limit(&self) -> Option<u64> {
+        None
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn exceeded_pids_limit(&self) -> Option<u64> {
+        let pid = self.cgroup_pid?;
+        crate::cgroup::exec_cgroup_pids_limit_hit(pid)
+            .unwrap_or(false)
+            .then(|| crate::cgroup::exec_cgroup_pids_max(pid))?
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) fn exceeded_pids_limit(&self) -> Option<u64> {
         None
     }
 }

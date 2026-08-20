@@ -80,6 +80,7 @@ mod openrouter_free_router_tests;
 pub mod remote_models;
 // Remote model discovery caches its own on-disk state within the module.
 mod cgroup;
+mod resource_grants;
 pub mod agent_defaults;
 mod agent_tool;
 pub use agent_tool::AGENT_MANAGER;

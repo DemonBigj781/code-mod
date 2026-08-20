@@ -264,6 +264,59 @@ pub(super) fn create_request_permissions_tool() -> OpenAiTool {
     })
 }
 
+pub(super) fn create_request_resources_tool() -> OpenAiTool {
+    let properties = BTreeMap::from([
+        (
+            "reason".to_owned(),
+            JsonSchema::String {
+                description: Some("Optional explanation shown to the user.".to_owned()),
+                allowed_values: None,
+            },
+        ),
+        (
+            "resources".to_owned(),
+            JsonSchema::Object {
+                properties: BTreeMap::from([
+                    (
+                        "memory_max_mb".to_owned(),
+                        JsonSchema::Number {
+                            description: Some(
+                                "Positive requested memory limit for subsequent tool commands, in MiB. At least one resource field is required."
+                                    .to_owned(),
+                            ),
+                        },
+                    ),
+                    (
+                        "pids_max".to_owned(),
+                        JsonSchema::Number {
+                            description: Some(
+                                "Positive requested maximum number of processes for subsequent tool commands. At least one resource field is required."
+                                    .to_owned(),
+                            ),
+                        },
+                    ),
+                ]),
+                // The shared tool-schema subset cannot express `anyOf` or a
+                // numeric minimum; the handler enforces both invariants.
+                required: Some(Vec::new()),
+                additional_properties: Some(false.into()),
+            },
+        ),
+    ]);
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "request_resources".to_owned(),
+        description: "Request a temporary increase to Code-managed memory or process limits and wait for user approval."
+            .to_owned(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["resources".to_owned()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
 pub(super) fn create_search_tool_bm25_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
     properties.insert(

@@ -1,6 +1,5 @@
 use crate::protocol::SandboxPolicy;
 use crate::spawn::StdioPolicy;
-use crate::spawn::spawn_child_async;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -25,15 +24,44 @@ pub async fn spawn_command_under_linux_sandbox<P>(
 where
     P: AsRef<Path>,
 {
+    spawn_command_under_linux_sandbox_with_limits(
+        code_linux_sandbox_exe,
+        command,
+        command_cwd,
+        sandbox_policy,
+        sandbox_policy_cwd,
+        stdio_policy,
+        crate::resource_grants::to_exec_cgroup_limits(
+            crate::resource_grants::configured_resource_limits(),
+        ),
+        env,
+    )
+    .await
+}
+
+pub(crate) async fn spawn_command_under_linux_sandbox_with_limits<P>(
+    code_linux_sandbox_exe: P,
+    command: Vec<String>,
+    command_cwd: PathBuf,
+    sandbox_policy: &SandboxPolicy,
+    sandbox_policy_cwd: &Path,
+    stdio_policy: StdioPolicy,
+    exec_limits: crate::cgroup::ExecCgroupLimits,
+    env: HashMap<String, String>,
+) -> std::io::Result<Child>
+where
+    P: AsRef<Path>,
+{
     let args = create_linux_sandbox_command_args(command, sandbox_policy, sandbox_policy_cwd);
     let arg0 = Some("codex-linux-sandbox");
-    spawn_child_async(
+    crate::spawn::spawn_child_async_with_limits(
         code_linux_sandbox_exe.as_ref().to_path_buf(),
         args,
         arg0,
         command_cwd,
         sandbox_policy,
         stdio_policy,
+        exec_limits,
         env,
     )
     .await

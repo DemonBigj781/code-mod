@@ -453,6 +453,9 @@ impl ChatWidget<'_> {
             EventMsg::RequestPermissions(ev) => {
                 self.handle_request_permissions_event(id, ev, event.event_seq);
             }
+            EventMsg::RequestResources(ev) => {
+                self.handle_request_resources_event(id, ev, event.event_seq);
+            }
             EventMsg::DynamicToolCallRequest(ev) => {
                 self.handle_dynamic_tool_call_request_event(event.order.as_ref(), ev);
             }

@@ -881,6 +881,8 @@ pub enum EventMsg {
 
     RequestPermissions(RequestPermissionsEvent),
 
+    RequestResources(crate::request_resources::RequestResourcesEvent),
+
     DynamicToolCallRequest(DynamicToolCallRequest),
 
     ElicitationRequest(ElicitationRequestEvent),

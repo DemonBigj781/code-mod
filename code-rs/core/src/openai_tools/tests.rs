@@ -95,6 +95,7 @@
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -136,6 +137,7 @@
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -233,6 +235,46 @@
     }
 
     #[test]
+    fn request_resources_tool_allows_either_positive_limit() {
+        let OpenAiTool::Function(tool_spec) =
+            super::builtin_tools::create_request_resources_tool()
+        else {
+            panic!("request_resources should be a function tool");
+        };
+
+        assert_eq!(tool_spec.name, "request_resources");
+        let JsonSchema::Object {
+            properties,
+            required,
+            ..
+        } = &tool_spec.parameters
+        else {
+            panic!("request_resources parameters should be an object schema");
+        };
+        assert_eq!(required.as_ref(), Some(&vec!["resources".to_owned()]));
+
+        let Some(JsonSchema::Object {
+            properties: resource_properties,
+            required: resource_required,
+            ..
+        }) = properties.get("resources")
+        else {
+            panic!("request_resources should expose a resources object");
+        };
+        assert_eq!(resource_required.as_ref(), Some(&Vec::<String>::new()));
+        assert!(resource_properties.contains_key("memory_max_mb"));
+        assert!(resource_properties.contains_key("pids_max"));
+        for property in resource_properties.values() {
+            let JsonSchema::Number { description } = property else {
+                panic!("resource limits should use numeric schemas");
+            };
+            let description = description.as_deref().unwrap_or_default();
+            assert!(description.contains("Positive"));
+            assert!(description.contains("At least one resource field is required"));
+        }
+    }
+
+    #[test]
     fn test_web_search_defaults_to_external_access_enabled() {
         let model_family = model_family_or_panic("o3");
         let mut config = ToolsConfig::new(ToolsConfigParams {
@@ -307,6 +349,7 @@
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -347,6 +390,7 @@
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -425,6 +469,7 @@
                 "shell",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -443,7 +488,7 @@
         );
 
         assert_eq!(
-            tools[16],
+            tools[17],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -557,6 +602,7 @@
                 "image_view",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -575,7 +621,7 @@
         );
 
         assert_eq!(
-            tools[17],
+            tools[18],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -691,6 +737,7 @@
                 "image_view",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -709,7 +756,7 @@
         );
 
         assert_eq!(
-            tools[17],
+            tools[18],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
@@ -774,6 +821,7 @@
                 "shell",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -855,6 +903,7 @@
                 "shell",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -872,7 +921,7 @@
             ],
         );
         assert_eq!(
-            tools[16],
+            tools[17],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
@@ -937,6 +986,7 @@
                 "shell",
                 "request_user_input",
                 "request_permissions",
+                "request_resources",
                 "list_mcp_resources",
                 "list_mcp_resource_templates",
                 "read_mcp_resource",
@@ -954,7 +1004,7 @@
             ],
         );
         assert_eq!(
-            tools[16],
+            tools[17],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {

@@ -24,6 +24,50 @@ pub(super) struct PendingRequestPermissions {
     pub(super) tx: oneshot::Sender<crate::protocol::RequestPermissionsResponse>,
 }
 
+#[derive(Debug)]
+pub(super) struct PendingRequestResources {
+    pub(super) turn_id: String,
+    pub(super) requested: crate::protocol::ResourceRequestProfile,
+    pub(super) tx: oneshot::Sender<crate::protocol::RequestResourcesResponse>,
+}
+
+fn deny_pending_resource_requests(
+    pending: impl IntoIterator<Item = PendingRequestResources>,
+) {
+    for pending in pending {
+        let _ = pending.tx.send(crate::protocol::RequestResourcesResponse {
+            resources: crate::protocol::ResourceRequestProfile::default(),
+            effective_resources: crate::protocol::ResourceRequestProfile::default(),
+            clamp_reason: None,
+            scope: crate::protocol::ResourceGrantScope::NextCommand,
+        });
+    }
+}
+
+fn normalize_resource_approval_response(
+    requested: &crate::protocol::ResourceRequestProfile,
+    response: &mut crate::protocol::RequestResourcesResponse,
+    outer: &crate::protocol::ResourceRequestProfile,
+) -> Result<Option<crate::protocol::ResourceRequestProfile>, ()> {
+    if response.resources.is_empty() {
+        response.effective_resources = crate::protocol::ResourceRequestProfile::default();
+        response.clamp_reason = None;
+        return Ok(None);
+    }
+    if response.resources != *requested {
+        response.resources = crate::protocol::ResourceRequestProfile::default();
+        response.effective_resources = crate::protocol::ResourceRequestProfile::default();
+        response.clamp_reason = None;
+        return Err(());
+    }
+
+    let (effective, clamp_reason) =
+        crate::resource_grants::ResourceGrantState::clamp_requested(&response.resources, outer);
+    response.effective_resources = effective.clone();
+    response.clamp_reason = clamp_reason;
+    Ok(Some(effective))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ApprovedCommandPattern {
     argv: Vec<String>,
@@ -142,12 +186,14 @@ pub(super) struct State {
     pub(super) pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
     pub(super) pending_request_user_input: HashMap<String, oneshot::Sender<crate::protocol::RequestUserInputResponse>>,
     pub(super) pending_request_permissions: HashMap<String, PendingRequestPermissions>,
+    pub(super) pending_request_resources: HashMap<String, PendingRequestResources>,
     pub(super) pending_dynamic_tools: HashMap<String, oneshot::Sender<DynamicToolResponse>>,
     pub(super) pending_input: Vec<ResponseInputItem>,
     pub(super) pending_user_input: Vec<QueuedUserInput>,
     pub(super) history: ConversationHistory,
     pub(super) granted_permissions_by_turn: HashMap<String, code_protocol::models::PermissionProfile>,
     pub(super) granted_permissions_for_session: Option<code_protocol::models::PermissionProfile>,
+    pub(super) resource_grants: crate::resource_grants::ResourceGrantState,
     /// Active MCP tool selection when `search_tool_bm25` gating is enabled.
     /// When `None`, no selection has been made yet for this session.
     pub(super) active_mcp_tool_selection: Option<Vec<String>>,
@@ -341,8 +387,14 @@ mod tests {
     use super::{
         ApprovedCommandMatchKind,
         ApprovedCommandPattern,
+        PendingRequestResources,
+        deny_pending_resource_requests,
+        normalize_resource_approval_response,
     };
     use crate::error::CodexErr;
+    use crate::protocol::RequestResourcesResponse;
+    use crate::protocol::ResourceGrantScope;
+    use crate::protocol::ResourceRequestProfile;
 
     #[test]
     fn context_overflow_transport_stream_is_not_connectivity() {
@@ -364,6 +416,61 @@ mod tests {
         );
 
         assert!(is_connectivity_error(&err));
+    }
+
+    #[test]
+    fn request_resources_pending_waiters_are_resolved_as_denied() {
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        deny_pending_resource_requests([PendingRequestResources {
+            turn_id: "turn-1".to_owned(),
+            requested: ResourceRequestProfile {
+                memory_max_mb: Some(2048),
+                pids_max: None,
+            },
+            tx,
+        }]);
+
+        assert_eq!(
+            rx.try_recv().expect("denial response"),
+            RequestResourcesResponse {
+                resources: ResourceRequestProfile::default(),
+                effective_resources: ResourceRequestProfile::default(),
+                clamp_reason: None,
+                scope: ResourceGrantScope::NextCommand,
+            }
+        );
+    }
+
+    #[test]
+    fn request_resources_rejects_an_approval_profile_that_was_not_shown() {
+        let requested = ResourceRequestProfile {
+            memory_max_mb: Some(2048),
+            pids_max: None,
+        };
+        let mut response = RequestResourcesResponse {
+            resources: ResourceRequestProfile {
+                memory_max_mb: Some(4096),
+                pids_max: None,
+            },
+            effective_resources: ResourceRequestProfile {
+                memory_max_mb: Some(4096),
+                pids_max: None,
+            },
+            clamp_reason: Some("untrusted".to_owned()),
+            scope: ResourceGrantScope::Session,
+        };
+
+        assert_eq!(
+            normalize_resource_approval_response(
+                &requested,
+                &mut response,
+                &ResourceRequestProfile::default(),
+            ),
+            Err(())
+        );
+        assert!(response.resources.is_empty());
+        assert!(response.effective_resources.is_empty());
+        assert_eq!(response.clamp_reason, None);
     }
 
     #[test]
@@ -1335,9 +1442,23 @@ impl Session {
         let mut state = crate::codex::lock_or_panic!(self.state);
         if let Some(agent) = &state.current_task
             && agent.sub_id == sub_id {
-                state.current_task.take();
-            }
+            state.current_task.take();
+        }
         state.granted_permissions_by_turn.remove(sub_id);
+
+        let pending_resource_ids = state
+            .pending_request_resources
+            .iter()
+            .filter_map(|(call_id, pending)| {
+                (pending.turn_id == sub_id).then_some(call_id.clone())
+            })
+            .collect::<Vec<_>>();
+        let pending_resources = pending_resource_ids
+            .into_iter()
+            .filter_map(|call_id| state.pending_request_resources.remove(&call_id))
+            .collect::<Vec<_>>();
+        drop(state);
+        deny_pending_resource_requests(pending_resources);
     }
 
     pub fn has_running_task(&self) -> bool {
@@ -1646,6 +1767,31 @@ impl Session {
         Ok(rx)
     }
 
+    pub fn register_pending_request_resources(
+        &self,
+        turn_id: String,
+        call_id: String,
+        requested: crate::protocol::ResourceRequestProfile,
+    ) -> std::result::Result<oneshot::Receiver<crate::protocol::RequestResourcesResponse>, String>
+    {
+        let (tx, rx) = oneshot::channel();
+        let mut state = crate::codex::lock_or_panic!(self.state);
+        if state.pending_request_resources.contains_key(&call_id) {
+            return Err(format!(
+                "request_resources already pending for call_id={call_id}"
+            ));
+        }
+        state.pending_request_resources.insert(
+            call_id,
+            PendingRequestResources {
+                turn_id,
+                requested,
+                tx,
+            },
+        );
+        Ok(rx)
+    }
+
     pub fn notify_user_input_response(
         &self,
         turn_id: &str,
@@ -1745,6 +1891,61 @@ impl Session {
         } else {
             tracing::warn!("no pending request_permissions found for call_id={call_id}");
         }
+    }
+
+    pub fn notify_request_resources_response(
+        &self,
+        call_id: &str,
+        mut response: crate::protocol::RequestResourcesResponse,
+    ) {
+        let outer = crate::resource_grants::outer_resource_limits();
+        let pending = {
+            let mut state = crate::codex::lock_or_panic!(self.state);
+            let pending = state.pending_request_resources.remove(call_id);
+            if let Some(pending) = pending.as_ref() {
+                match normalize_resource_approval_response(
+                    &pending.requested,
+                    &mut response,
+                    &outer,
+                ) {
+                    Ok(Some(effective)) => {
+                        state
+                            .resource_grants
+                            .approve(response.scope, effective);
+                    }
+                    Ok(None) => {}
+                    Err(()) => tracing::warn!(
+                        call_id,
+                        "request_resources response differed from the profile shown for approval; treating it as denied"
+                    ),
+                }
+            }
+            pending
+        };
+
+        if let Some(pending) = pending {
+            let _ = pending.tx.send(response);
+        } else {
+            tracing::warn!("no pending request_resources found for call_id={call_id}");
+        }
+    }
+
+    pub fn persistent_resource_limits(&self) -> crate::protocol::ResourceRequestProfile {
+        let configured = crate::resource_grants::configured_resource_limits();
+        let outer = crate::resource_grants::outer_resource_limits();
+        let state = crate::codex::lock_or_panic!(self.state);
+        state
+            .resource_grants
+            .persistent_current(&configured, &outer)
+    }
+
+    pub(crate) fn take_resource_limits_for_spawn(
+        &self,
+    ) -> crate::protocol::ResourceRequestProfile {
+        let configured = crate::resource_grants::configured_resource_limits();
+        let outer = crate::resource_grants::outer_resource_limits();
+        let mut state = crate::codex::lock_or_panic!(self.state);
+        state.resource_grants.take_for_spawn(&configured, &outer)
     }
 
     pub(crate) fn granted_turn_permissions(
@@ -2580,6 +2781,7 @@ impl Session {
         state.pending_approvals.clear();
         state.pending_request_user_input.clear();
         state.pending_request_permissions.clear();
+        let pending_resources = std::mem::take(&mut state.pending_request_resources);
         state.pending_dynamic_tools.clear();
         state.granted_permissions_by_turn.clear();
         // Do not clear `pending_input` here. When a user submits a new message
@@ -2590,6 +2792,7 @@ impl Session {
         // Take current task while holding the lock, then drop the lock BEFORE calling abort
         let current = state.current_task.take();
         drop(state);
+        deny_pending_resource_requests(pending_resources.into_values());
         if let Some(agent) = current {
             agent.abort(TurnAbortReason::Interrupted);
         }

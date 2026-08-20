@@ -1,0 +1,147 @@
+name: Resource Request Regression Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "code-rs/protocol/src/lib.rs"
+      - "code-rs/protocol/src/protocol.rs"
+      - "code-rs/protocol/src/request_resources.rs"
+      - "code-rs/core/src/cgroup.rs"
+      - "code-rs/core/src/codex/exec_tool.rs"
+      - "code-rs/core/src/codex/session.rs"
+      - "code-rs/core/src/codex/streaming/submission/mod.rs"
+      - "code-rs/core/src/error.rs"
+      - "code-rs/core/src/exec.rs"
+      - "code-rs/core/src/exec_command/**"
+      - "code-rs/core/src/landlock.rs"
+      - "code-rs/core/src/openai_tools/**"
+      - "code-rs/core/src/protocol.rs"
+      - "code-rs/core/src/resource_grants.rs"
+      - "code-rs/core/src/seatbelt.rs"
+      - "code-rs/core/src/spawn.rs"
+      - "code-rs/core/src/tools/**"
+      - "code-rs/core/src/unified_exec/**"
+      - "code-rs/exec/src/event_processor_with_human_output.rs"
+      - "code-rs/mcp-server/src/code_tool_runner.rs"
+      - "code-rs/tui/src/chatwidget/**"
+      - "code-rs/tui/src/user_approval_widget.rs"
+      - ".github/workflows/resource-request-tests.yml"
+
+concurrency:
+  group: resource-request-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test resource request lifecycle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      CARGO_INCREMENTAL: "0"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
+      RUST_WORKSPACE_DIR: code-rs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read Rust toolchain
+        id: rust_toolchain
+        shell: sh
+        run: |
+          set -eu
+          channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' code-rs/rust-toolchain.toml | head -n 1)
+          if [ -z "$channel" ]; then
+            echo "Unable to read the Rust channel from code-rs/rust-toolchain.toml" >&2
+            exit 1
+          fi
+          printf 'channel=%s\n' "$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust_toolchain.outputs.channel }}
+
+      - name: Cache Rust tests
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          prefix-key: code-resource-request-tests
+          shared-key: rust-${{ steps.rust_toolchain.outputs.channel }}
+          workspaces: code-rs -> target
+          cache-targets: true
+          cache-workspace-crates: true
+          cache-on-failure: true
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure compiler cache
+        shell: sh
+        run: |
+          set -eu
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'RUSTC_WRAPPER=sccache'
+            echo 'SCCACHE_IDLE_TIMEOUT=1800'
+            echo 'SCCACHE_CACHE_SIZE=10G'
+          } >> "$GITHUB_ENV"
+
+      - name: Install Linux test dependencies
+        shell: sh
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            libssl-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+          {
+            echo 'CC=clang'
+            echo 'CXX=clang++'
+            echo 'OPENSSL_NO_VENDOR=1'
+          } >> "$GITHUB_ENV"
+
+      - name: Prefetch dependencies
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo fetch --locked
+
+      - name: Test resource request protocol and handler
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-core request_resources
+
+      - name: Test grant precedence and consumption
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-core resource_grants
+
+      - name: Test resource limit reporting
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-core resource_limit_failure
+
+      - name: Test cgroup event classification
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-core cgroup::tests::parses_named_cgroup_event_counter -- --exact
+
+      - name: Test resource approval UI
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-tui request_resources

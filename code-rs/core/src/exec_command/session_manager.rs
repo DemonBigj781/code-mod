@@ -50,6 +50,7 @@ pub(crate) struct ExecCommandOutput {
     wall_time: Duration,
     exit_status: ExitStatus,
     memory_limit_exceeded: Option<u64>,
+    pids_limit_exceeded: Option<u64>,
     original_token_count: Option<u64>,
     output: String,
 }
@@ -202,16 +203,23 @@ fn pick_suffix_slice(input: &str, right_budget: usize) -> &str {
 impl ExecCommandOutput {
     pub(crate) fn to_text_output(&self) -> String {
         let wall_time_secs = self.wall_time.as_secs_f32();
-        let termination_status = match self.memory_limit_exceeded {
-            Some(memory_max_bytes) => {
-                format!("Process killed after exceeding memory limit of {memory_max_bytes} bytes")
-            }
-            None => match self.exit_status {
+        let termination_status = if let Some(memory_max_bytes) = self.memory_limit_exceeded {
+            format!(
+                "Process killed after exceeding memory limit of {memory_max_bytes} bytes\n{}",
+                crate::resource_grants::memory_limit_failure_message(memory_max_bytes)
+            )
+        } else if let Some(pids_max) = self.pids_limit_exceeded {
+            format!(
+                "Process exceeded process limit of {pids_max}\n{}",
+                crate::resource_grants::pids_limit_failure_message(pids_max)
+            )
+        } else {
+            match self.exit_status {
                 ExitStatus::Exited(code) => format!("Process exited with code {code}"),
                 ExitStatus::Ongoing(session_id) => {
                     format!("Process running with session ID {}", session_id.0)
                 }
-            },
+            }
         };
         let truncation_status = match self.original_token_count {
             Some(tokens) => {
@@ -240,7 +248,8 @@ pub(crate) fn result_into_payload(
 ) -> FunctionCallOutputPayload {
     match result {
         Ok(output) => {
-            let success = output.memory_limit_exceeded.is_none();
+            let success = output.memory_limit_exceeded.is_none()
+                && output.pids_limit_exceeded.is_none();
             FunctionCallOutputPayload {
                 body: code_protocol::models::FunctionCallOutputBody::Text(output.to_text_output()),
                 success: Some(success),
@@ -257,6 +266,7 @@ impl SessionManager {
     /// Start a PTY-backed `exec_command` session and collect output for up to
     /// `yield_time_ms`, returning either a completed result or an ongoing
     /// session ID that can be resumed via `write_stdin`.
+    #[cfg(test)]
     pub(crate) async fn handle_exec_command_request(
         &self,
         params: ExecCommandParams,
@@ -265,6 +275,31 @@ impl SessionManager {
         sandbox_policy: SandboxPolicy,
         sandbox_policy_cwd: PathBuf,
         enforce_managed_network: bool,
+    ) -> Result<ExecCommandOutput, String> {
+        self.handle_exec_command_request_with_limits(
+            params,
+            env_overrides,
+            network_attempt_guard,
+            sandbox_policy,
+            sandbox_policy_cwd,
+            enforce_managed_network,
+            crate::resource_grants::to_exec_cgroup_limits(
+                crate::resource_grants::configured_resource_limits(),
+            ),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn handle_exec_command_request_with_limits(
+        &self,
+        params: ExecCommandParams,
+        env_overrides: HashMap<String, String>,
+        network_attempt_guard: Option<crate::network_approval::NetworkAttemptGuard>,
+        sandbox_policy: SandboxPolicy,
+        sandbox_policy_cwd: PathBuf,
+        enforce_managed_network: bool,
+        exec_limits: crate::cgroup::ExecCgroupLimits,
     ) -> Result<ExecCommandOutput, String> {
         if let Some(sandbox_permissions) = params.sandbox_permissions
             && sandbox_permissions.requires_escalated_permissions()
@@ -303,6 +338,7 @@ impl SessionManager {
             sandbox_policy,
             sandbox_policy_cwd,
             enforce_managed_network,
+            exec_limits,
         )
             .await
             .map_err(|err| {
@@ -375,12 +411,14 @@ impl SessionManager {
         };
 
         let (output, original_token_count) = collector.finalize();
-        let memory_limit_exceeded = self
-            .sessions
-            .lock()
-            .await
-            .get(&session_id)
-            .and_then(ExecCommandSession::exceeded_memory_limit);
+        let (memory_limit_exceeded, pids_limit_exceeded) = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions.get(&session_id);
+            (
+                session.and_then(ExecCommandSession::exceeded_memory_limit),
+                session.and_then(ExecCommandSession::exceeded_pids_limit),
+            )
+        };
         if exit_code.is_some() {
             // Clean up completed sessions immediately so their children and attempt guards
             // are dropped without requiring a follow-up write_stdin call.
@@ -391,6 +429,7 @@ impl SessionManager {
             wall_time: Instant::now().duration_since(start_time),
             exit_status,
             memory_limit_exceeded,
+            pids_limit_exceeded,
             original_token_count,
             output,
         })
@@ -455,7 +494,7 @@ impl SessionManager {
         }
 
         let (output, original_token_count) = collector.finalize();
-        let (exit_code, memory_limit_exceeded) = {
+        let (exit_code, memory_limit_exceeded, pids_limit_exceeded) = {
             let mut sessions = self.sessions.lock().await;
             let code = sessions
                 .get(&session_id)
@@ -463,10 +502,13 @@ impl SessionManager {
             let memory_limit_exceeded = sessions
                 .get(&session_id)
                 .and_then(ExecCommandSession::exceeded_memory_limit);
+            let pids_limit_exceeded = sessions
+                .get(&session_id)
+                .and_then(ExecCommandSession::exceeded_pids_limit);
             if code.is_some() {
                 sessions.remove(&session_id);
             }
-            (code, memory_limit_exceeded)
+            (code, memory_limit_exceeded, pids_limit_exceeded)
         };
         let exit_status = if let Some(code) = exit_code {
             ExitStatus::Exited(code)
@@ -477,6 +519,7 @@ impl SessionManager {
             wall_time: Instant::now().duration_since(start_time),
             exit_status,
             memory_limit_exceeded,
+            pids_limit_exceeded,
             original_token_count,
             output,
         })
@@ -549,6 +592,7 @@ async fn create_exec_command_session(
     sandbox_policy: SandboxPolicy,
     sandbox_policy_cwd: PathBuf,
     enforce_managed_network: bool,
+    exec_limits: crate::cgroup::ExecCgroupLimits,
 ) -> anyhow::Result<(
     ExecCommandSession,
     tokio::sync::broadcast::Receiver<Vec<u8>>,
@@ -596,6 +640,7 @@ async fn create_exec_command_session(
             sandbox_policy_cwd,
             enforce_managed_network,
             seatbelt_enabled,
+            exec_limits,
         )
         .await;
     }
@@ -623,6 +668,7 @@ async fn create_exec_command_session(
                     sandbox_policy_cwd,
                     enforce_managed_network,
                     seatbelt_enabled,
+                    exec_limits,
                 )
                 .await;
             }
@@ -680,10 +726,7 @@ async fn create_exec_command_session(
     let cgroup_pid = process_group_id;
 
     #[cfg(target_os = "linux")]
-    let limits = crate::cgroup::ExecCgroupLimits {
-        memory_max_bytes: crate::cgroup::default_exec_memory_max_bytes(),
-        pids_max: crate::cgroup::default_exec_pids_max(),
-    };
+    let limits = exec_limits;
     #[cfg(target_os = "linux")]
     if let Some(pid) = cgroup_pid {
         if limits.memory_max_bytes.is_some() || limits.pids_max.is_some() {
@@ -818,6 +861,7 @@ async fn spawn_pipe_exec_command_session(
     sandbox_policy_cwd: PathBuf,
     enforce_managed_network: bool,
     seatbelt_enabled: bool,
+    exec_limits: crate::cgroup::ExecCgroupLimits,
 ) -> anyhow::Result<(
     ExecCommandSession,
     tokio::sync::broadcast::Receiver<Vec<u8>>,
@@ -886,10 +930,7 @@ async fn spawn_pipe_exec_command_session(
         .context("pipe-backed command missing child pid")?;
 
     #[cfg(target_os = "linux")]
-    let limits = crate::cgroup::ExecCgroupLimits {
-        memory_max_bytes: crate::cgroup::default_exec_memory_max_bytes(),
-        pids_max: crate::cgroup::default_exec_pids_max(),
-    };
+    let limits = exec_limits;
     #[cfg(target_os = "linux")]
     if limits.memory_max_bytes.is_some() || limits.pids_max.is_some() {
         crate::cgroup::best_effort_attach_pid_to_exec_cgroup(pid, limits);
@@ -1186,6 +1227,7 @@ PY"#
             wall_time: Duration::from_millis(1234),
             exit_status: ExitStatus::Exited(0),
             memory_limit_exceeded: None,
+            pids_limit_exceeded: None,
             original_token_count: None,
             output: "hello".to_string(),
         };
@@ -1203,6 +1245,7 @@ hello"#;
             wall_time: Duration::from_millis(500),
             exit_status: ExitStatus::Ongoing(SessionId(42)),
             memory_limit_exceeded: None,
+            pids_limit_exceeded: None,
             original_token_count: Some(1000),
             output: "abc".to_string(),
         };
@@ -1221,6 +1264,7 @@ abc"#;
             wall_time: Duration::from_millis(250),
             exit_status: ExitStatus::Exited(137),
             memory_limit_exceeded: Some(32 * 1024 * 1024),
+            pids_limit_exceeded: None,
             original_token_count: None,
             output: String::new(),
         };
@@ -1234,6 +1278,29 @@ abc"#;
             text.contains("Process killed after exceeding memory limit of 33554432 bytes"),
             "unexpected output: {text}"
         );
+        assert!(text.contains("resource_limit_failure={\"resource\":\"memory\""));
+        assert!(text.contains("request_resources"));
+    }
+
+    #[test]
+    fn pids_limit_failure_is_reported_as_an_unsuccessful_tool_call() {
+        let out = ExecCommandOutput {
+            wall_time: Duration::from_millis(250),
+            exit_status: ExitStatus::Exited(1),
+            memory_limit_exceeded: None,
+            pids_limit_exceeded: Some(64),
+            original_token_count: None,
+            output: "fork: Resource temporarily unavailable".to_owned(),
+        };
+
+        let payload = result_into_payload(Ok(out));
+        assert_eq!(payload.success, Some(false));
+        let code_protocol::models::FunctionCallOutputBody::Text(text) = payload.body else {
+            panic!("expected text function-call output");
+        };
+        assert!(text.contains("resource_limit_failure={\"resource\":\"pids\""));
+        assert!(text.contains("effective_limit\":64"));
+        assert!(text.contains("request_resources"));
     }
 
     #[test]

@@ -106,6 +106,32 @@ pub(crate) async fn spawn_child_async(
     stdio_policy: StdioPolicy,
     env: HashMap<String, String>,
 ) -> std::io::Result<Child> {
+    spawn_child_async_with_limits(
+        program,
+        args,
+        arg0,
+        cwd,
+        sandbox_policy,
+        stdio_policy,
+        crate::resource_grants::to_exec_cgroup_limits(
+            crate::resource_grants::configured_resource_limits(),
+        ),
+        env,
+    )
+    .await
+}
+
+pub(crate) async fn spawn_child_async_with_limits(
+    program: PathBuf,
+    args: Vec<String>,
+    #[cfg_attr(not(unix), allow(unused_variables))] arg0: Option<&str>,
+    cwd: PathBuf,
+    sandbox_policy: &SandboxPolicy,
+    stdio_policy: StdioPolicy,
+    #[cfg_attr(not(unix), allow(unused_variables))]
+    exec_limits: crate::cgroup::ExecCgroupLimits,
+    env: HashMap<String, String>,
+) -> std::io::Result<Child> {
     trace!(
         "spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {sandbox_policy:?} {stdio_policy:?} {env:?}"
     );
@@ -131,14 +157,9 @@ pub(crate) async fn spawn_child_async(
     #[cfg(unix)]
     unsafe {
         #[cfg(target_os = "linux")]
-        let exec_memory_max_bytes = match stdio_policy {
-            StdioPolicy::RedirectForShellTool => crate::cgroup::default_exec_memory_max_bytes(),
-            StdioPolicy::Inherit => None,
-        };
-        #[cfg(target_os = "linux")]
-        let exec_pids_max = match stdio_policy {
-            StdioPolicy::RedirectForShellTool => crate::cgroup::default_exec_pids_max(),
-            StdioPolicy::Inherit => None,
+        let exec_limits = match stdio_policy {
+            StdioPolicy::RedirectForShellTool => exec_limits,
+            StdioPolicy::Inherit => crate::cgroup::ExecCgroupLimits::default(),
         };
         cmd.pre_exec(move || {
             // Start a new process group
@@ -152,13 +173,10 @@ pub(crate) async fn spawn_child_async(
                     libc::raise(libc::SIGTERM);
                 }
 
-                if exec_memory_max_bytes.is_some() || exec_pids_max.is_some() {
+                if exec_limits.memory_max_bytes.is_some() || exec_limits.pids_max.is_some() {
                     crate::cgroup::best_effort_attach_self_to_exec_cgroup(
                         libc::getpid() as u32,
-                        crate::cgroup::ExecCgroupLimits {
-                            memory_max_bytes: exec_memory_max_bytes,
-                            pids_max: exec_pids_max,
-                        },
+                        exec_limits,
                     );
                 }
             }

@@ -127,6 +127,30 @@ code exec --model gpt-5.1-codex --json "Review the change, look for use-after-fr
 code exec --model gpt-5.1 --json resume --last "Fix use-after-free issues"
 ```
 
+### Execution resource requests
+
+In an interactive session, the model can call `request_resources` when a
+tool-spawned command needs a larger Code-managed execution allowance. Requests
+may increase either `memory_max_mb`, `pids_max`, or both. The approval prompt
+shows the current and requested values and offers these scopes:
+
+- **Next command** applies once, to the next shell or process execution attempt.
+- **Session** applies to subsequent commands until the current Code session ends.
+- **Deny** leaves the effective limits unchanged.
+
+Approvals are held in memory only; they do not modify `config.toml`. Code clamps
+approved values to any outer cgroup limit it can detect, so approval cannot add
+physical RAM, increase a container or systemd allowance, or override another
+host-enforced limit.
+
+When a managed memory or process limit is reached, command output includes a
+`resource_limit_failure={...}` classification, the effective limit, and guidance
+for a larger `request_resources` request. Code does not retry automatically; the
+model must issue a new command after approval.
+
+Non-interactive `code exec` sessions do not prompt for approvals, so resource
+requests are denied under their normal no-approval behavior.
+
 ## Authentication
 
 By default, `code exec` uses the same authentication method as the TUI and VSCode extension. You can override the API key by setting the `CODEX_API_KEY` environment variable.

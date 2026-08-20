@@ -24,7 +24,7 @@ use crate::codex::Session;
 use crate::error::CodexErr;
 use crate::error::Result;
 use crate::error::SandboxErr;
-use crate::landlock::spawn_command_under_linux_sandbox;
+use crate::landlock::spawn_command_under_linux_sandbox_with_limits;
 use crate::text_encoding::bytes_to_string_smart;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
@@ -32,9 +32,9 @@ use crate::protocol::OrderMeta;
 use crate::protocol::ExecCommandOutputDeltaEvent;
 use crate::protocol::ExecOutputStream;
 use crate::protocol::SandboxPolicy;
-use crate::seatbelt::spawn_command_under_seatbelt;
+use crate::seatbelt::spawn_command_under_seatbelt_with_limits;
 use crate::spawn::StdioPolicy;
-use crate::spawn::spawn_child_async;
+use crate::spawn::spawn_child_async_with_limits;
 use serde_bytes::ByteBuf;
 use code_protocol::models::PermissionProfile;
 use code_protocol::models::SandboxPermissions;
@@ -198,6 +198,19 @@ pub async fn process_exec_tool_call_with_managed_network(
 
     let timeout_duration = params.maybe_timeout_duration();
     let mut after_spawn = after_spawn;
+    let exec_limits = stdout_stream
+        .as_ref()
+        .and_then(|stream| stream.session.as_ref())
+        .map(|session| {
+            crate::resource_grants::to_exec_cgroup_limits(
+                session.take_resource_limits_for_spawn(),
+            )
+        })
+        .unwrap_or_else(|| {
+            crate::resource_grants::to_exec_cgroup_limits(
+                crate::resource_grants::configured_resource_limits(),
+            )
+        });
 
     let raw_output_result: std::result::Result<RawExecToolCallOutput, CodexErr> = match sandbox_type
     {
@@ -207,6 +220,7 @@ pub async fn process_exec_tool_call_with_managed_network(
                 sandbox_policy,
                 stdout_stream.clone(),
                 after_spawn.take(),
+                exec_limits,
             )
             .await
         }
@@ -217,20 +231,21 @@ pub async fn process_exec_tool_call_with_managed_network(
                 env,
                 ..
             } = params;
-            let child = spawn_command_under_seatbelt(
+            let child = spawn_command_under_seatbelt_with_limits(
                 command,
                 command_cwd,
                 sandbox_policy,
                 sandbox_cwd,
                 StdioPolicy::RedirectForShellTool,
                 enforce_managed_network,
+                exec_limits,
                 env,
             )
             .await?;
             if let Some(after_spawn) = after_spawn.take() {
                 after_spawn();
             }
-            consume_truncated_output(child, timeout_duration, stdout_stream.clone()).await
+            consume_truncated_output(child, timeout_duration, stdout_stream.clone(), exec_limits).await
         }
         SandboxType::LinuxSeccomp => {
             let ExecParams {
@@ -243,13 +258,14 @@ pub async fn process_exec_tool_call_with_managed_network(
             let code_linux_sandbox_exe = code_linux_sandbox_exe
                 .as_ref()
                 .ok_or(CodexErr::LandlockSandboxExecutableNotProvided)?;
-            let child = spawn_command_under_linux_sandbox(
+            let child = spawn_command_under_linux_sandbox_with_limits(
                 code_linux_sandbox_exe,
                 command,
                 command_cwd,
                 sandbox_policy,
                 sandbox_cwd,
                 StdioPolicy::RedirectForShellTool,
+                exec_limits,
                 env,
             )
             .await?;
@@ -257,7 +273,7 @@ pub async fn process_exec_tool_call_with_managed_network(
                 after_spawn();
             }
 
-            consume_truncated_output(child, timeout_duration, stdout_stream).await
+            consume_truncated_output(child, timeout_duration, stdout_stream, exec_limits).await
         }
         SandboxType::WindowsRestrictedToken => {
             return Err(CodexErr::UnsupportedOperation(
@@ -309,13 +325,21 @@ pub async fn process_exec_tool_call_with_managed_network(
                 }));
             }
 
+            if raw_output.oom_killed {
+                return Err(CodexErr::Sandbox(SandboxErr::OutOfMemory {
+                    output: Box::new(exec_output),
+                    memory_max_bytes: raw_output.cgroup_memory_max_bytes,
+                }));
+            }
+
+            if raw_output.pids_limit_hit {
+                return Err(CodexErr::Sandbox(SandboxErr::PidsLimit {
+                    output: Box::new(exec_output),
+                    pids_max: raw_output.cgroup_pids_max,
+                }));
+            }
+
             if let Some(signal) = exit_signal {
-                if raw_output.oom_killed {
-                    return Err(CodexErr::Sandbox(SandboxErr::OutOfMemory {
-                        output: Box::new(exec_output),
-                        memory_max_bytes: raw_output.cgroup_memory_max_bytes,
-                    }));
-                }
                 return Err(CodexErr::Sandbox(SandboxErr::Signal(signal)));
             }
 
@@ -359,6 +383,8 @@ struct RawExecToolCallOutput {
     pub timed_out: bool,
     pub oom_killed: bool,
     pub cgroup_memory_max_bytes: Option<u64>,
+    pub pids_limit_hit: bool,
+    pub cgroup_pids_max: Option<u64>,
 }
 
 impl StreamOutput<String> {
@@ -396,6 +422,7 @@ async fn exec(
     sandbox_policy: &SandboxPolicy,
     stdout_stream: Option<StdoutStream>,
     after_spawn: Option<Box<dyn FnOnce() + Send>>,
+    exec_limits: crate::cgroup::ExecCgroupLimits,
 ) -> Result<RawExecToolCallOutput> {
     let timeout = params.maybe_timeout_duration();
     let ExecParams {
@@ -411,20 +438,21 @@ async fn exec(
         ))
     })?;
     let arg0 = None;
-    let child = spawn_child_async(
+    let child = spawn_child_async_with_limits(
         PathBuf::from(program),
         args.into(),
         arg0,
         cwd,
         sandbox_policy,
         StdioPolicy::RedirectForShellTool,
+        exec_limits,
         env,
     )
     .await?;
     if let Some(after_spawn) = after_spawn {
         after_spawn();
     }
-    consume_truncated_output(child, timeout, stdout_stream).await
+    consume_truncated_output(child, timeout, stdout_stream, exec_limits).await
 }
 
 fn preflight_exec(command: &[String], cwd: &Path, env: &HashMap<String, String>) -> io::Result<()> {
@@ -519,6 +547,7 @@ async fn consume_truncated_output(
     child: Child,
     timeout: Option<Duration>,
     stdout_stream: Option<StdoutStream>,
+    exec_limits: crate::cgroup::ExecCgroupLimits,
 ) -> Result<RawExecToolCallOutput> {
     // Both stdout and stderr were configured with `Stdio::piped()`
     // above, therefore `take()` should normally return `Some`.  If it doesn't
@@ -542,7 +571,7 @@ async fn consume_truncated_output(
 
     #[cfg(target_os = "linux")]
     let fallback_memory_watchdog = pid
-        .zip(crate::cgroup::default_exec_memory_max_bytes())
+        .zip(exec_limits.memory_max_bytes)
         .and_then(|(pid, memory_max_bytes)| {
             crate::cgroup::spawn_exec_memory_watchdog_if_needed(pid, memory_max_bytes)
         });
@@ -731,7 +760,7 @@ async fn consume_truncated_output(
         combined_handle.await.map_err(CodexErr::from)?
     };
 
-    let (oom_killed, cgroup_memory_max_bytes) = {
+    let (oom_killed, cgroup_memory_max_bytes, pids_limit_hit, cgroup_pids_max) = {
         #[cfg(target_os = "linux")]
         {
             let fallback_memory_limit_exceeded = fallback_memory_watchdog
@@ -751,14 +780,25 @@ async fn consume_truncated_output(
                     }
                 }
             }
+            let mut pids_limit_hit = false;
+            let mut cgroup_pids_max = None;
             if let Some(pid) = pid {
+                pids_limit_hit = crate::cgroup::exec_cgroup_pids_limit_hit(pid).unwrap_or(false);
+                if pids_limit_hit {
+                    cgroup_pids_max = crate::cgroup::exec_cgroup_pids_max(pid);
+                }
                 crate::cgroup::best_effort_cleanup_exec_cgroup(pid);
             }
-            (oom_killed, cgroup_memory_max_bytes)
+            (
+                oom_killed,
+                cgroup_memory_max_bytes,
+                pids_limit_hit,
+                cgroup_pids_max,
+            )
         }
         #[cfg(not(target_os = "linux"))]
         {
-            (false, None)
+            (false, None, false, None)
         }
     };
 
@@ -770,6 +810,8 @@ async fn consume_truncated_output(
         timed_out,
         oom_killed,
         cgroup_memory_max_bytes,
+        pids_limit_hit,
+        cgroup_pids_max,
     })
 }
 

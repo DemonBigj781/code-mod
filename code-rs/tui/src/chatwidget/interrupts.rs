@@ -6,6 +6,7 @@ use code_core::protocol::ExecCommandEndEvent;
 use code_core::protocol::McpToolCallEndEvent;
 use code_core::protocol::PatchApplyEndEvent;
 use code_core::protocol::RequestPermissionsEvent;
+use code_core::protocol::RequestResourcesEvent;
 
 use super::ChatWidget;
 use super::tools;
@@ -14,6 +15,7 @@ use super::tools;
 pub(crate) enum QueuedInterrupt {
     ExecApproval { seq: u64, id: String, ev: ExecApprovalRequestEvent },
     RequestPermissions { seq: u64, id: String, ev: RequestPermissionsEvent },
+    RequestResources { seq: u64, id: String, ev: RequestResourcesEvent },
     ApplyPatchApproval { seq: u64, id: String, ev: ApplyPatchApprovalRequestEvent },
     ExecEnd { seq: u64, ev: ExecCommandEndEvent, order: Option<code_core::protocol::OrderMeta> },
     McpEnd { seq: u64, ev: McpToolCallEndEvent, order: Option<code_core::protocol::OrderMeta> },
@@ -38,6 +40,15 @@ impl InterruptManager {
 
     pub(crate) fn push_request_permissions(&mut self, seq: u64, id: String, ev: RequestPermissionsEvent) {
         self.queue.push(QueuedInterrupt::RequestPermissions { seq, id, ev });
+    }
+
+    pub(crate) fn push_request_resources(
+        &mut self,
+        seq: u64,
+        id: String,
+        ev: RequestResourcesEvent,
+    ) {
+        self.queue.push(QueuedInterrupt::RequestResources { seq, id, ev });
     }
 
     pub(crate) fn push_apply_patch_approval(
@@ -74,6 +85,9 @@ impl InterruptManager {
             match q {
                 QueuedInterrupt::ExecApproval { id, ev, .. } => chat.handle_exec_approval_now(id, ev),
                 QueuedInterrupt::RequestPermissions { id, ev, .. } => chat.handle_request_permissions_now(id, ev),
+                QueuedInterrupt::RequestResources { id, ev, .. } => {
+                    chat.handle_request_resources_now(id, ev)
+                }
                 QueuedInterrupt::ApplyPatchApproval { seq: _, id, ev } => {
                     chat.handle_apply_patch_approval_now(id, ev);
                 }
@@ -105,6 +119,7 @@ impl InterruptManager {
         match q {
             QueuedInterrupt::ExecApproval { seq, .. }
         | QueuedInterrupt::RequestPermissions { seq, .. }
+        | QueuedInterrupt::RequestResources { seq, .. }
         | QueuedInterrupt::ApplyPatchApproval { seq, .. }
         | QueuedInterrupt::ExecEnd { seq, .. }
         | QueuedInterrupt::McpEnd { seq, .. }

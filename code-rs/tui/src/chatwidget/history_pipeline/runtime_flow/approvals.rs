@@ -1,5 +1,6 @@
 use super::*;
 use code_core::protocol::RequestPermissionsEvent;
+use code_core::protocol::RequestResourcesEvent;
 
 impl ChatWidget<'_> {
     /// Clear memoized cell heights (called when history/content changes)
@@ -37,6 +38,21 @@ impl ChatWidget<'_> {
             id: ev.call_id,
             reason: ev.reason,
             permissions: ev.permissions,
+        };
+        let ticket = self.make_background_before_next_output_ticket();
+        self.bottom_pane.push_approval_request(request, ticket);
+    }
+
+    pub(in super::super::super) fn handle_request_resources_now(
+        &mut self,
+        _id: String,
+        ev: RequestResourcesEvent,
+    ) {
+        let request = ApprovalRequest::Resources {
+            id: ev.call_id,
+            reason: ev.reason,
+            current: ev.current,
+            requested: ev.requested,
         };
         let ticket = self.make_background_before_next_output_ticket();
         self.bottom_pane.push_approval_request(request, ticket);

@@ -151,6 +151,17 @@ impl ManagedUnifiedExecSession {
     fn has_exited(&self) -> bool {
         self.session.has_exited()
     }
+
+    fn resource_limit_failure(&self) -> Option<String> {
+        if let Some(memory_max_bytes) = self.session.exceeded_memory_limit() {
+            return Some(crate::resource_grants::memory_limit_failure_message(
+                memory_max_bytes,
+            ));
+        }
+        self.session
+            .exceeded_pids_limit()
+            .map(crate::resource_grants::pids_limit_failure_message)
+    }
 }
 
 impl Drop for ManagedUnifiedExecSession {
@@ -163,6 +174,20 @@ impl UnifiedExecSessionManager {
     pub async fn handle_request(
         &self,
         request: UnifiedExecRequest<'_>,
+    ) -> Result<UnifiedExecResult, UnifiedExecError> {
+        self.handle_request_with_limits(
+            request,
+            crate::resource_grants::to_exec_cgroup_limits(
+                crate::resource_grants::configured_resource_limits(),
+            ),
+        )
+        .await
+    }
+
+    pub async fn handle_request_with_limits(
+        &self,
+        request: UnifiedExecRequest<'_>,
+        exec_limits: crate::cgroup::ExecCgroupLimits,
     ) -> Result<UnifiedExecResult, UnifiedExecError> {
         let (timeout_ms, timeout_warning) = match request.timeout_ms {
             Some(requested) if requested > MAX_TIMEOUT_MS => (
@@ -207,7 +232,8 @@ impl UnifiedExecSessionManager {
         } else {
             let command = request.input_chunks.to_vec();
             let new_id = self.next_session_id.fetch_add(1, Ordering::SeqCst);
-            let (session, initial_output_rx) = create_unified_exec_session(&command).await?;
+            let (session, initial_output_rx) =
+                create_unified_exec_session(&command, exec_limits).await?;
             let managed_session = ManagedUnifiedExecSession::new(session, initial_output_rx);
             let (buffer, notify) = managed_session.output_handles();
             writer_tx = managed_session.writer_sender();
@@ -268,11 +294,26 @@ impl UnifiedExecSessionManager {
             &String::from_utf8_lossy(&collected),
             UNIFIED_EXEC_OUTPUT_MAX_BYTES,
         );
-        let output = if let Some(warning) = timeout_warning {
+        let mut output = if let Some(warning) = timeout_warning {
             format!("{warning}{output}")
         } else {
             output
         };
+
+        let resource_limit_failure = if let Some(session) = new_session.as_ref() {
+            session.resource_limit_failure()
+        } else if request.session_id.is_some() {
+            self.sessions
+                .lock()
+                .await
+                .get(&session_id)
+                .and_then(ManagedUnifiedExecSession::resource_limit_failure)
+        } else {
+            None
+        };
+        if let Some(failure) = resource_limit_failure {
+            output = format!("{failure}\n{output}");
+        }
 
         let should_store_session = if let Some(session) = new_session.as_ref() {
             !session.has_exited()
@@ -311,6 +352,7 @@ impl UnifiedExecSessionManager {
 
 async fn create_unified_exec_session(
     command: &[String],
+    exec_limits: crate::cgroup::ExecCgroupLimits,
 ) -> Result<
     (
         ExecCommandSession,
@@ -325,7 +367,7 @@ async fn create_unified_exec_session(
     #[cfg(all(test, unix))]
     if FORCE_PTY_FAILURE.load(Ordering::SeqCst) {
         tracing::warn!("forcing PTY failure for tests; using pipe fallback");
-        return create_unified_exec_session_pipe(command).await;
+        return create_unified_exec_session_pipe(command, exec_limits).await;
     }
 
     let pty_system = native_pty_system();
@@ -341,7 +383,7 @@ async fn create_unified_exec_session(
             #[cfg(unix)]
             {
                 tracing::warn!(error = %err, "failed to open PTY; using pipe fallback");
-                return create_unified_exec_session_pipe(command).await;
+                return create_unified_exec_session_pipe(command, exec_limits).await;
             }
             #[cfg(not(unix))]
             {
@@ -364,10 +406,7 @@ async fn create_unified_exec_session(
     #[cfg(unix)]
     let process_group_id = child.process_id();
     #[cfg(target_os = "linux")]
-    let limits = crate::cgroup::ExecCgroupLimits {
-        memory_max_bytes: crate::cgroup::default_exec_memory_max_bytes(),
-        pids_max: crate::cgroup::default_exec_pids_max(),
-    };
+    let limits = exec_limits;
     #[cfg(target_os = "linux")]
     if let Some(pid) = process_group_id
         && (limits.memory_max_bytes.is_some() || limits.pids_max.is_some())
@@ -486,6 +525,7 @@ impl portable_pty::ChildKiller for PipeChildKiller {
 #[cfg(unix)]
 async fn create_unified_exec_session_pipe(
     command: &[String],
+    exec_limits: crate::cgroup::ExecCgroupLimits,
 ) -> Result<
     (
         ExecCommandSession,
@@ -530,10 +570,7 @@ async fn create_unified_exec_session_pipe(
         .map_err(UnifiedExecError::create_session)?;
 
     #[cfg(target_os = "linux")]
-    let limits = crate::cgroup::ExecCgroupLimits {
-        memory_max_bytes: crate::cgroup::default_exec_memory_max_bytes(),
-        pids_max: crate::cgroup::default_exec_pids_max(),
-    };
+    let limits = exec_limits;
     #[cfg(target_os = "linux")]
     if limits.memory_max_bytes.is_some() || limits.pids_max.is_some() {
         crate::cgroup::best_effort_attach_pid_to_exec_cgroup(pid, limits);

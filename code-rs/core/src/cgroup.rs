@@ -50,8 +50,7 @@ impl Drop for ExecMemoryWatchdog {
     }
 }
 
-#[cfg(target_os = "linux")]
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ExecCgroupLimits {
     pub(crate) memory_max_bytes: Option<u64>,
     pub(crate) pids_max: Option<u64>,
@@ -219,6 +218,50 @@ fn current_cgroup_relative() -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
+pub(crate) fn outer_cgroup_limits() -> ExecCgroupLimits {
+    let Some(relative) = current_cgroup_relative() else {
+        return ExecCgroupLimits::default();
+    };
+
+    let mut memory_max_bytes = None;
+    let mut pids_max = None;
+    let mut current = Some(Path::new(CGROUP_MOUNT).join(relative));
+    while let Some(path) = current {
+        memory_max_bytes = min_finite_limit(memory_max_bytes, read_limit(&path.join("memory.max")));
+        pids_max = min_finite_limit(pids_max, read_limit(&path.join("pids.max")));
+        if path == Path::new(CGROUP_MOUNT) {
+            break;
+        }
+        current = path.parent().map(Path::to_path_buf);
+    }
+
+    ExecCgroupLimits {
+        memory_max_bytes,
+        pids_max,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_limit(path: &Path) -> Option<u64> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value = raw.trim();
+    if value == "max" {
+        None
+    } else {
+        value.parse::<u64>().ok()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn min_finite_limit(current: Option<u64>, candidate: Option<u64>) -> Option<u64> {
+    match (current, candidate) {
+        (Some(current), Some(candidate)) => Some(current.min(candidate)),
+        (None, candidate) => candidate,
+        (current, None) => current,
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn exec_cgroup_parent_abs() -> Option<PathBuf> {
     if !is_cgroup_v2() {
         return None;
@@ -327,21 +370,7 @@ pub(crate) fn best_effort_attach_pid_to_exec_cgroup(pid: u32, limits: ExecCgroup
 pub(crate) fn exec_cgroup_oom_killed(pid: u32) -> Option<bool> {
     let dir = exec_cgroup_abs_for_pid(pid)?;
     let contents = std::fs::read_to_string(dir.join("memory.events")).ok()?;
-    for line in contents.lines() {
-        let mut parts = line.split_whitespace();
-        let Some(key) = parts.next() else {
-            continue;
-        };
-        let Some(val) = parts.next() else {
-            continue;
-        };
-        if key == "oom_kill" {
-            if let Ok(parsed) = val.parse::<u64>() {
-                return Some(parsed > 0);
-            }
-        }
-    }
-    None
+    parse_cgroup_event_counter(&contents, "oom_kill").map(|count| count > 0)
 }
 
 #[cfg(target_os = "linux")]
@@ -353,6 +382,29 @@ pub(crate) fn exec_cgroup_memory_max_bytes(pid: u32) -> Option<u64> {
         return None;
     }
     trimmed.parse::<u64>().ok()
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn exec_cgroup_pids_limit_hit(pid: u32) -> Option<bool> {
+    let dir = exec_cgroup_abs_for_pid(pid)?;
+    let contents = std::fs::read_to_string(dir.join("pids.events")).ok()?;
+    parse_cgroup_event_counter(&contents, "max").map(|count| count > 0)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn exec_cgroup_pids_max(pid: u32) -> Option<u64> {
+    let dir = exec_cgroup_abs_for_pid(pid)?;
+    read_limit(&dir.join("pids.max"))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_cgroup_event_counter(contents: &str, wanted_key: &str) -> Option<u64> {
+    contents.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        let key = parts.next()?;
+        let value = parts.next()?;
+        (key == wanted_key).then(|| value.parse::<u64>().ok())?
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -506,6 +558,14 @@ mod tests {
     fn parses_process_group_after_a_complex_proc_stat_name() {
         let stat = "123 (worker name with ) paren) S 45 678 9 10";
         assert_eq!(process_group_id_from_stat(stat), Some(678));
+    }
+
+    #[test]
+    fn parses_named_cgroup_event_counter() {
+        let events = "max 3\noom 2\noom_kill 1\n";
+        assert_eq!(parse_cgroup_event_counter(events, "max"), Some(3));
+        assert_eq!(parse_cgroup_event_counter(events, "oom_kill"), Some(1));
+        assert_eq!(parse_cgroup_event_counter(events, "missing"), None);
     }
 
     #[tokio::test]

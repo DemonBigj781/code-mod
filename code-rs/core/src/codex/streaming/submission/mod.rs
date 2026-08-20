@@ -220,6 +220,13 @@ pub(in crate::codex) async fn submission_loop(
                 };
                 sess.notify_request_permissions_response(&id, response);
             }
+            Op::RequestResourcesResponse { id, response } => {
+                let Some(sess) = sess.as_ref() else {
+                    send_no_session_event(sub.id).await;
+                    continue;
+                };
+                sess.notify_request_resources_response(&id, response);
+            }
             Op::ResolveMcpElicitation {
                 server_name,
                 id,

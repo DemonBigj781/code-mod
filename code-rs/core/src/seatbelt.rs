@@ -14,7 +14,6 @@ use url::Url;
 use crate::protocol::SandboxPolicy;
 use crate::spawn::CODEX_SANDBOX_ENV_VAR;
 use crate::spawn::StdioPolicy;
-use crate::spawn::spawn_child_async;
 
 const MACOS_SEATBELT_BASE_POLICY: &str = include_str!("seatbelt_base_policy.sbpl");
 const MACOS_SEATBELT_NETWORK_POLICY: &str = include_str!("seatbelt_network_policy.sbpl");
@@ -56,6 +55,31 @@ pub async fn spawn_command_under_seatbelt(
     sandbox_policy_cwd: &Path,
     stdio_policy: StdioPolicy,
     enforce_managed_network: bool,
+    env: HashMap<String, String>,
+) -> std::io::Result<Child> {
+    spawn_command_under_seatbelt_with_limits(
+        command,
+        command_cwd,
+        sandbox_policy,
+        sandbox_policy_cwd,
+        stdio_policy,
+        enforce_managed_network,
+        crate::resource_grants::to_exec_cgroup_limits(
+            crate::resource_grants::configured_resource_limits(),
+        ),
+        env,
+    )
+    .await
+}
+
+pub(crate) async fn spawn_command_under_seatbelt_with_limits(
+    command: Vec<String>,
+    command_cwd: PathBuf,
+    sandbox_policy: &SandboxPolicy,
+    sandbox_policy_cwd: &Path,
+    stdio_policy: StdioPolicy,
+    enforce_managed_network: bool,
+    exec_limits: crate::cgroup::ExecCgroupLimits,
     mut env: HashMap<String, String>,
 ) -> std::io::Result<Child> {
     let args = create_seatbelt_command_args(
@@ -67,13 +91,14 @@ pub async fn spawn_command_under_seatbelt(
     );
     let arg0 = None;
     env.insert(CODEX_SANDBOX_ENV_VAR.to_owned(), "seatbelt".to_owned());
-    spawn_child_async(
+    crate::spawn::spawn_child_async_with_limits(
         PathBuf::from(MACOS_PATH_TO_SEATBELT_EXECUTABLE),
         args,
         arg0,
         command_cwd,
         sandbox_policy,
         stdio_policy,
+        exec_limits,
         env,
     )
     .await

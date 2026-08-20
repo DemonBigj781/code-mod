@@ -327,13 +327,16 @@ impl ToolHandler for ExecCommandToolHandler {
                     };
 
                     let output = crate::exec_command::result_into_payload(
-                        mgr.handle_exec_command_request(
+                        mgr.handle_exec_command_request_with_limits(
                             params,
                             env_overrides,
                             network_attempt_guard,
                             sandbox_policy,
                             sandbox_policy_cwd,
                             enforce_managed_network,
+                            crate::resource_grants::to_exec_cgroup_limits(
+                                sess.take_resource_limits_for_spawn(),
+                            ),
                         )
                         .await,
                     );

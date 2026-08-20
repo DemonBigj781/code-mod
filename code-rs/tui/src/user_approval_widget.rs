@@ -36,6 +36,9 @@ use crate::slash_command::SlashCommand;
 use code_core::protocol::ApprovedCommandMatchKind;
 use code_core::protocol::NetworkApprovalProtocol;
 use code_core::protocol::PermissionGrantScope;
+use code_core::protocol::RequestResourcesResponse;
+use code_core::protocol::ResourceGrantScope;
+use code_core::protocol::ResourceRequestProfile;
 use code_protocol::models::PermissionProfile;
 use code_protocol::request_permissions::RequestPermissionProfile;
 use code_core::protocol::RequestPermissionsResponse;
@@ -59,6 +62,12 @@ pub(crate) enum ApprovalRequest {
         id: String,
         reason: Option<String>,
         permissions: RequestPermissionProfile,
+    },
+    Resources {
+        id: String,
+        reason: Option<String>,
+        current: ResourceRequestProfile,
+        requested: ResourceRequestProfile,
     },
     ApplyPatch {
         id: String,
@@ -312,6 +321,43 @@ impl UserApprovalWidget<'_> {
 
                 Paragraph::new(contents).wrap(Wrap { trim: false })
             }
+            ApprovalRequest::Resources {
+                reason,
+                current,
+                requested,
+                ..
+            } => {
+                let requested_memory = requested.memory_max_mb.or(current.memory_max_mb);
+                let requested_pids = requested.pids_max.or(current.pids_max);
+                let mut contents = vec![
+                    Line::from(""),
+                    Line::from(vec![
+                        "? ".fg(c_info),
+                        "Code wants to increase execution resources".bold(),
+                    ]),
+                    Line::from(""),
+                ];
+                if let Some(reason) = reason {
+                    contents.push(Line::from(reason.clone().italic()));
+                    contents.push(Line::from(""));
+                }
+                contents.push(Line::from(format!(
+                    "Memory: {} -> {}",
+                    format_memory_limit(current.memory_max_mb),
+                    format_memory_limit(requested_memory)
+                )));
+                contents.push(Line::from(format!(
+                    "Processes: {} -> {}",
+                    format_process_limit(current.pids_max),
+                    format_process_limit(requested_pids)
+                )));
+                contents.push(Line::from(""));
+                contents.push(Line::from(Span::styled(
+                    "Approval changes only Code's own limits; host and container limits still apply.",
+                    s_text_dim,
+                )));
+                Paragraph::new(contents).wrap(Wrap { trim: false })
+            }
             ApprovalRequest::ApplyPatch {
                 reason, grant_root, ..
             } => {
@@ -353,6 +399,7 @@ impl UserApprovalWidget<'_> {
             ApprovalRequest::Exec { command, .. } => build_exec_select_options(command),
             ApprovalRequest::Network { .. } => build_network_select_options(),
             ApprovalRequest::Permissions { .. } => build_permissions_select_options(),
+            ApprovalRequest::Resources { .. } => build_resources_select_options(),
             ApprovalRequest::ApplyPatch { .. } => build_patch_select_options(),
             ApprovalRequest::TerminalCommand { .. } => build_terminal_select_options(),
         };
@@ -503,6 +550,14 @@ impl UserApprovalWidget<'_> {
                 ReviewDecision::Denied => "did not grant additional permissions".to_owned(),
                 ReviewDecision::Abort => "canceled permissions request".to_owned(),
             },
+            ApprovalRequest::Resources { .. } => match decision {
+                ReviewDecision::Approved => "granted execution resources (next command)".to_owned(),
+                ReviewDecision::ApprovedForSession => {
+                    "granted execution resources (this session)".to_owned()
+                }
+                ReviewDecision::Denied => "did not grant execution resources".to_owned(),
+                ReviewDecision::Abort => "canceled resource request".to_owned(),
+            },
             ApprovalRequest::ApplyPatch { .. } => {
                 format!("patch approval decision: {decision:?}")
             }
@@ -559,6 +614,34 @@ impl UserApprovalWidget<'_> {
                     id: id.clone(),
                     response: RequestPermissionsResponse {
                         permissions: granted_permissions,
+                        scope,
+                    },
+                }
+            }
+            ApprovalRequest::Resources {
+                id,
+                requested,
+                ..
+            } => {
+                let granted_resources = match decision {
+                    ReviewDecision::Approved | ReviewDecision::ApprovedForSession => {
+                        requested.clone()
+                    }
+                    ReviewDecision::Denied | ReviewDecision::Abort => {
+                        ResourceRequestProfile::default()
+                    }
+                };
+                let scope = if matches!(decision, ReviewDecision::ApprovedForSession) {
+                    ResourceGrantScope::Session
+                } else {
+                    ResourceGrantScope::NextCommand
+                };
+                Op::RequestResourcesResponse {
+                    id: id.clone(),
+                    response: RequestResourcesResponse {
+                        resources: granted_resources,
+                        effective_resources: ResourceRequestProfile::default(),
+                        clamp_reason: None,
                         scope,
                     },
                 }
@@ -804,6 +887,41 @@ fn build_permissions_select_options() -> Vec<SelectOption> {
     ]
 }
 
+fn build_resources_select_options() -> Vec<SelectOption> {
+    vec![
+        SelectOption {
+            label: "Allow for next command".to_owned(),
+            description: "Use these limits for exactly one process execution".to_owned(),
+            hotkey: KeyCode::Char('y'),
+            action: SelectAction::ApproveOnce,
+        },
+        SelectOption {
+            label: "Allow for session".to_owned(),
+            description: "Use these limits for subsequent commands in this session".to_owned(),
+            hotkey: KeyCode::Char('s'),
+            action: SelectAction::ApproveForSession,
+        },
+        SelectOption {
+            label: "Deny".to_owned(),
+            description: "Keep the current execution limits".to_owned(),
+            hotkey: KeyCode::Char('n'),
+            action: SelectAction::Deny,
+        },
+    ]
+}
+
+fn format_memory_limit(value: Option<u64>) -> String {
+    value
+        .map(|value| format!("{value} MiB"))
+        .unwrap_or_else(|| "unlimited".to_owned())
+}
+
+fn format_process_limit(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unlimited".to_owned())
+}
+
 fn build_patch_select_options() -> Vec<SelectOption> {
     vec![
         SelectOption {
@@ -875,5 +993,115 @@ fn hotkey_suffix(key: KeyCode) -> String {
     match key {
         KeyCode::Char(c) => format!(" ({})", c.to_ascii_lowercase()),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::Receiver;
+
+    fn resource_widget() -> (UserApprovalWidget<'static>, Receiver<AppEvent>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let widget = UserApprovalWidget::new(
+            ApprovalRequest::Resources {
+                id: "resource-call".to_owned(),
+                reason: Some("The build needs more headroom.".to_owned()),
+                current: ResourceRequestProfile {
+                    memory_max_mb: Some(512),
+                    pids_max: Some(256),
+                },
+                requested: ResourceRequestProfile {
+                    memory_max_mb: Some(2048),
+                    pids_max: Some(768),
+                },
+            },
+            BackgroundOrderTicket::test_ticket(1),
+            AppEventSender::new(tx),
+        );
+        (widget, rx)
+    }
+
+    fn resource_response_for_decision(
+        decision: ReviewDecision,
+    ) -> RequestResourcesResponse {
+        let (mut widget, rx) = resource_widget();
+        widget.send_decision(decision);
+
+        rx.try_iter()
+            .find_map(|event| match event {
+                AppEvent::CodexOp(op) => match *op {
+                    Op::RequestResourcesResponse { id, response } => {
+                        assert_eq!(id, "resource-call");
+                        Some(response)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("resource decision should emit a response operation")
+    }
+
+    fn rendered_text(widget: &UserApprovalWidget<'_>) -> String {
+        let width = 88;
+        let area = Rect::new(0, 0, width, widget.desired_height(width));
+        let mut buffer = Buffer::empty(area);
+        widget.render_ref(area, &mut buffer);
+
+        let mut lines = Vec::with_capacity(area.height as usize);
+        for y in area.y..area.y + area.height {
+            let mut line = String::with_capacity(area.width as usize);
+            for x in area.x..area.x + area.width {
+                line.push(buffer[(x, y)].symbol().chars().next().unwrap_or(' '));
+            }
+            lines.push(line.trim_end().to_owned());
+        }
+        lines.join("\n")
+    }
+
+    #[test]
+    fn request_resources_approval_renders_limits_and_choices() {
+        let (widget, _rx) = resource_widget();
+        let text = rendered_text(&widget);
+
+        assert!(text.contains("Memory: 512 MiB -> 2048 MiB"));
+        assert!(text.contains("Processes: 256 -> 768"));
+        assert!(text.contains("Allow for next command"));
+        assert!(text.contains("Allow for session"));
+        assert!(text.contains("Deny"));
+        assert!(text.contains("host and container limits still apply"));
+    }
+
+    #[test]
+    fn request_resources_approval_maps_next_command_response() {
+        let response = resource_response_for_decision(ReviewDecision::Approved);
+
+        assert_eq!(response.scope, ResourceGrantScope::NextCommand);
+        assert_eq!(response.resources.memory_max_mb, Some(2048));
+        assert_eq!(response.resources.pids_max, Some(768));
+        assert!(response.effective_resources.is_empty());
+        assert_eq!(response.clamp_reason, None);
+    }
+
+    #[test]
+    fn request_resources_approval_maps_session_response() {
+        let response = resource_response_for_decision(ReviewDecision::ApprovedForSession);
+
+        assert_eq!(response.scope, ResourceGrantScope::Session);
+        assert_eq!(response.resources.memory_max_mb, Some(2048));
+        assert_eq!(response.resources.pids_max, Some(768));
+        assert!(response.effective_resources.is_empty());
+        assert_eq!(response.clamp_reason, None);
+    }
+
+    #[test]
+    fn request_resources_approval_maps_denial_to_empty_response() {
+        for decision in [ReviewDecision::Denied, ReviewDecision::Abort] {
+            let response = resource_response_for_decision(decision);
+            assert_eq!(response.scope, ResourceGrantScope::NextCommand);
+            assert!(response.resources.is_empty());
+            assert!(response.effective_resources.is_empty());
+            assert_eq!(response.clamp_reason, None);
+        }
     }
 }

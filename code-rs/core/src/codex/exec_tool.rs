@@ -1798,8 +1798,8 @@ pub(crate) async fn handle_container_exec_with_params(
     let zsh_fork_exec_config = compute_zsh_fork_exec_config(sess, sandbox_type, &params.command);
     let sess_for_escalation = sess_for_hooks.clone();
     let task_handle = tokio::spawn(async move {
-        // Build stdout stream with tail capture. We cannot stamp via `Session` here,
-        // but deltas will be delivered with neutral ordering which the UI tolerates.
+        // Keep the session attached so the next approved resource grant is consumed
+        // immediately before this command is spawned.
         let stdout_stream = if exec_ctx_for_task.apply_patch.is_some() {
             None
         } else {
@@ -1807,7 +1807,7 @@ pub(crate) async fn handle_container_exec_with_params(
                 sub_id: sub_id_for_events.clone(),
                 call_id: call_id_for_events.clone(),
                 tx_event: tx_event.clone(),
-                session: None,
+                session: sess_for_hooks.clone(),
                 tail_buf: Some(tail_buf_task.clone()),
                 order: Some(order_meta_for_deltas.clone()),
                 spool_dir: exec_spool_dir_for_task.clone(),
