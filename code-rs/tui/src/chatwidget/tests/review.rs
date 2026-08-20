@@ -3178,6 +3178,301 @@
     }
 
     #[test]
+    fn task_complete_keeps_final_answer_after_search_card() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(reset_history);
+
+    let turn_id = "turn-search-order".to_string();
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 0,
+        msg: EventMsg::TaskStarted,
+        order: None,
+    });
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 1,
+        msg: EventMsg::WebSearchBegin(code_core::protocol::WebSearchBeginEvent {
+            call_id: "search-1".to_string(),
+            query: Some("turn completion ordering".to_string()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        }),
+    });
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 2,
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Final answer".to_string(),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(0),
+        }),
+    });
+    harness.flush_into_widget();
+
+    harness.handle_event(Event {
+        id: turn_id,
+        event_seq: 3,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: Some("Final answer".to_string()),
+        }),
+        order: None,
+    });
+    harness.flush_into_widget();
+
+    assert!(
+        harness
+            .chat()
+            .history_cells
+            .last()
+            .is_some_and(|cell| cell
+                .as_any()
+                .downcast_ref::<history_cell::AssistantMarkdownCell>()
+                .is_some()),
+        "search finalization must not move activity below the final answer"
+    );
+    }
+
+    #[test]
+    fn task_complete_rejects_late_search_events_for_same_submission() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(reset_history);
+
+    let turn_id = "turn-late-search".to_string();
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 0,
+        msg: EventMsg::TaskStarted,
+        order: None,
+    });
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 1,
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Final answer".to_string(),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        }),
+    });
+    harness.flush_into_widget();
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 2,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: Some("Final answer".to_string()),
+        }),
+        order: None,
+    });
+    harness.flush_into_widget();
+
+    let (history_len, total_height) = {
+        let chat = harness.chat();
+        let mut terminal = Terminal::new(TestBackend::new(50, 10)).expect("terminal");
+        terminal
+            .draw(|frame| frame.render_widget_ref(&*chat, frame.area()))
+            .expect("draw before late event");
+        (chat.history_cells.len(), chat.history_render.last_total_height())
+    };
+
+    harness.handle_event(Event {
+        id: turn_id,
+        event_seq: 3,
+        msg: EventMsg::WebSearchComplete(code_core::protocol::WebSearchCompleteEvent {
+            call_id: "late-search".to_string(),
+            query: Some("this must be ignored after completion".repeat(8)),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(0),
+        }),
+    });
+
+    let chat = harness.chat();
+    let mut terminal = Terminal::new(TestBackend::new(50, 10)).expect("terminal");
+    terminal
+        .draw(|frame| frame.render_widget_ref(&*chat, frame.area()))
+        .expect("draw after late event");
+    assert_eq!(chat.history_cells.len(), history_len);
+    assert_eq!(chat.history_render.last_total_height(), total_height);
+    assert!(chat.tools_state.web_search_sessions.is_empty());
+    }
+
+    #[test]
+    fn task_complete_discards_queued_exec_end_for_same_submission() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(reset_history);
+
+    let turn_id = "turn-queued-exec".to_string();
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 0,
+        msg: EventMsg::TaskStarted,
+        order: None,
+    });
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 1,
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Final answer".to_string(),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        }),
+    });
+    harness.handle_event(Event {
+        id: turn_id.clone(),
+        event_seq: 2,
+        msg: EventMsg::ExecCommandEnd(code_core::protocol::ExecCommandEndEvent {
+            call_id: "late-exec".to_string(),
+            stdout: "late output".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration: std::time::Duration::from_millis(10),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(0),
+        }),
+    });
+    assert!(harness.chat().interrupts.has_queued());
+
+    harness.handle_event(Event {
+        id: turn_id,
+        event_seq: 3,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: Some("Final answer".to_string()),
+        }),
+        order: None,
+    });
+
+    let chat = harness.chat();
+    assert!(!chat.interrupts.has_queued());
+    assert!(
+        chat.exec.pending_exec_ends.is_empty(),
+        "a queued end from a finalized submission must not be reintroduced as a late fallback"
+    );
+    }
+
+    #[test]
+    fn task_complete_preserves_queued_exec_end_for_other_submission() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(reset_history);
+
+    let completed_id = "turn-completed".to_string();
+    harness.handle_event(Event {
+        id: completed_id.clone(),
+        event_seq: 0,
+        msg: EventMsg::TaskStarted,
+        order: None,
+    });
+    harness.handle_event(Event {
+        id: completed_id.clone(),
+        event_seq: 1,
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Final answer".to_string(),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        }),
+    });
+    harness.handle_event(Event {
+        id: "turn-later".to_string(),
+        event_seq: 2,
+        msg: EventMsg::ExecCommandEnd(code_core::protocol::ExecCommandEndEvent {
+            call_id: "other-exec".to_string(),
+            stdout: "other output".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration: std::time::Duration::from_millis(10),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 2,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        }),
+    });
+    assert!(harness.chat().interrupts.has_queued());
+
+    harness.handle_event(Event {
+        id: completed_id,
+        event_seq: 3,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: Some("Final answer".to_string()),
+        }),
+        order: None,
+    });
+
+    let chat = harness.chat();
+    assert!(!chat.interrupts.has_queued());
+    assert_eq!(chat.exec.pending_exec_ends.len(), 1);
+    }
+
+    #[test]
+    fn completed_submission_history_is_bounded_and_reused_ids_reopen() {
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    harness.with_chat(reset_history);
+
+    for index in 0..65 {
+        let id = format!("completed-turn-{index}");
+        harness.handle_event(Event {
+            id: id.clone(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+        harness.handle_event(Event {
+            id,
+            event_seq: 1,
+            msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                last_agent_message: None,
+            }),
+            order: None,
+        });
+    }
+
+    {
+        let completed = &harness.chat().completed_submission_ids;
+        assert_eq!(completed.len(), 64);
+        assert_eq!(completed.front().map(String::as_str), Some("completed-turn-1"));
+        assert_eq!(completed.back().map(String::as_str), Some("completed-turn-64"));
+    }
+
+    harness.handle_event(Event {
+        id: "completed-turn-1".to_string(),
+        event_seq: 2,
+        msg: EventMsg::TaskStarted,
+        order: None,
+    });
+    assert!(
+        !harness
+            .chat()
+            .completed_submission_ids
+            .iter()
+            .any(|id| id == "completed-turn-1")
+    );
+    }
+
+    #[test]
     fn stale_reasoning_height_cache_recovers_without_panicking() {
     let _rt = enter_test_runtime_guard();
     let mut harness = ChatWidgetHarness::new();

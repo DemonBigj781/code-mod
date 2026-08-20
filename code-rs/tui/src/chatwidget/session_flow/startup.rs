@@ -275,6 +275,7 @@ impl ChatWidget<'_> {
             },
             session_id: None,
             active_task_ids: HashSet::new(),
+            completed_submission_ids: VecDeque::new(),
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,

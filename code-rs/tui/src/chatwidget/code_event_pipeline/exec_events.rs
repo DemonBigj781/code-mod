@@ -158,16 +158,22 @@ impl ChatWidget<'_> {
         let _ = self.history_insert_with_key_global(Box::new(cell), ok);
     }
 
-    pub(super) fn handle_patch_apply_end_event(&mut self, ev: PatchApplyEndEvent, seq: u64) {
+    pub(super) fn handle_patch_apply_end_event(
+        &mut self,
+        id: String,
+        ev: PatchApplyEndEvent,
+        seq: u64,
+    ) {
         let ev2 = ev.clone();
         self.defer_or_handle(
-            move |interrupts| interrupts.push_patch_end(seq, ev),
+            move |interrupts| interrupts.push_patch_end(seq, id, ev),
             |this| this.handle_patch_apply_end_now(ev2),
         );
     }
 
     pub(super) fn handle_exec_command_end_event(
         &mut self,
+        id: String,
         ev: ExecCommandEndEvent,
         order: Option<OrderMeta>,
         seq: u64,
@@ -183,7 +189,7 @@ impl ChatWidget<'_> {
         });
         let om_for_send = order_meta_end.clone();
         self.defer_or_handle(
-            move |interrupts| interrupts.push_exec_end(seq, ev, Some(om_for_send)),
+            move |interrupts| interrupts.push_exec_end(seq, id, ev, Some(om_for_send)),
             move |this| {
                 tracing::info!("[order] ExecCommandEnd call_id={} seq={}", ev2.call_id, seq);
                 this.enqueue_or_handle_exec_end(ev2, order_meta_end);
@@ -212,6 +218,7 @@ impl ChatWidget<'_> {
 
     pub(super) fn handle_mcp_tool_call_end_event(
         &mut self,
+        id: String,
         ev: McpToolCallEndEvent,
         order: Option<OrderMeta>,
         seq: u64,
@@ -222,7 +229,7 @@ impl ChatWidget<'_> {
             self.next_internal_key()
         };
         self.defer_or_handle(
-            move |interrupts| interrupts.push_mcp_end(seq, ev, order),
+            move |interrupts| interrupts.push_mcp_end(seq, id, ev, order),
             |this| {
                 tracing::info!("[order] McpToolCallEnd call_id={} seq={}", ev2.call_id, seq);
                 tools::mcp_end(this, ev2, order_ok);

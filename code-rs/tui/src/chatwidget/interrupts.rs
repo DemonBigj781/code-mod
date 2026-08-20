@@ -17,9 +17,19 @@ pub(crate) enum QueuedInterrupt {
     RequestPermissions { seq: u64, id: String, ev: RequestPermissionsEvent },
     RequestResources { seq: u64, id: String, ev: RequestResourcesEvent },
     ApplyPatchApproval { seq: u64, id: String, ev: ApplyPatchApprovalRequestEvent },
-    ExecEnd { seq: u64, ev: ExecCommandEndEvent, order: Option<code_core::protocol::OrderMeta> },
-    McpEnd { seq: u64, ev: McpToolCallEndEvent, order: Option<code_core::protocol::OrderMeta> },
-    PatchEnd { seq: u64, ev: PatchApplyEndEvent },
+    ExecEnd {
+        seq: u64,
+        id: String,
+        ev: ExecCommandEndEvent,
+        order: Option<code_core::protocol::OrderMeta>,
+    },
+    McpEnd {
+        seq: u64,
+        id: String,
+        ev: McpToolCallEndEvent,
+        order: Option<code_core::protocol::OrderMeta>,
+    },
+    PatchEnd { seq: u64, id: String, ev: PatchApplyEndEvent },
 }
 
 #[derive(Default)]
@@ -60,20 +70,39 @@ impl InterruptManager {
         self.queue.push(QueuedInterrupt::ApplyPatchApproval { seq, id, ev });
     }
 
-    pub(crate) fn push_exec_end(&mut self, seq: u64, ev: ExecCommandEndEvent, order: Option<code_core::protocol::OrderMeta>) {
-        self.queue.push(QueuedInterrupt::ExecEnd { seq, ev, order });
+    pub(crate) fn push_exec_end(
+        &mut self,
+        seq: u64,
+        id: String,
+        ev: ExecCommandEndEvent,
+        order: Option<code_core::protocol::OrderMeta>,
+    ) {
+        self.queue
+            .push(QueuedInterrupt::ExecEnd { seq, id, ev, order });
     }
 
-    pub(crate) fn push_mcp_end(&mut self, seq: u64, ev: McpToolCallEndEvent, order: Option<code_core::protocol::OrderMeta>) {
-        self.queue.push(QueuedInterrupt::McpEnd { seq, ev, order });
+    pub(crate) fn push_mcp_end(
+        &mut self,
+        seq: u64,
+        id: String,
+        ev: McpToolCallEndEvent,
+        order: Option<code_core::protocol::OrderMeta>,
+    ) {
+        self.queue
+            .push(QueuedInterrupt::McpEnd { seq, id, ev, order });
     }
 
-    pub(crate) fn push_patch_end(&mut self, seq: u64, ev: PatchApplyEndEvent) {
-        self.queue.push(QueuedInterrupt::PatchEnd { seq, ev });
+    pub(crate) fn push_patch_end(&mut self, seq: u64, id: String, ev: PatchApplyEndEvent) {
+        self.queue.push(QueuedInterrupt::PatchEnd { seq, id, ev });
     }
 
     pub(crate) fn has_queued(&self) -> bool {
         !self.queue.is_empty()
+    }
+
+    pub(crate) fn discard_submission(&mut self, submission_id: &str) {
+        self.queue
+            .retain(|queued| queued.submission_id() != submission_id);
     }
 
     // Plan updates are inserted near-time immediately; no interrupt queue entry needed.
@@ -106,7 +135,7 @@ impl InterruptManager {
                     let ok = if let Some(om) = order.as_ref() { chat.provider_order_key_from_order_meta(om) } else { tracing::warn!("missing OrderMeta in queued McpEnd; using synthetic key"); chat.next_internal_key() };
                     tools::mcp_end(chat, ev, ok);
                 },
-                QueuedInterrupt::PatchEnd { seq: _, ev } => {
+                QueuedInterrupt::PatchEnd { ev, .. } => {
                     chat.handle_patch_apply_end_now(ev);
                 }
                 
@@ -115,9 +144,23 @@ impl InterruptManager {
     }
 }
 
-    fn seq_of(q: &QueuedInterrupt) -> u64 {
-        match q {
-            QueuedInterrupt::ExecApproval { seq, .. }
+impl QueuedInterrupt {
+    fn submission_id(&self) -> &str {
+        match self {
+            Self::ExecApproval { id, .. }
+            | Self::RequestPermissions { id, .. }
+            | Self::RequestResources { id, .. }
+            | Self::ApplyPatchApproval { id, .. }
+            | Self::ExecEnd { id, .. }
+            | Self::McpEnd { id, .. }
+            | Self::PatchEnd { id, .. } => id,
+        }
+    }
+}
+
+fn seq_of(q: &QueuedInterrupt) -> u64 {
+    match q {
+        QueuedInterrupt::ExecApproval { seq, .. }
         | QueuedInterrupt::RequestPermissions { seq, .. }
         | QueuedInterrupt::RequestResources { seq, .. }
         | QueuedInterrupt::ApplyPatchApproval { seq, .. }

@@ -78,6 +78,26 @@ impl ChatWidget<'_> {
             );
             return;
         }
+        if !event.id.is_empty()
+            && !matches!(
+                &event.msg,
+                EventMsg::TaskStarted
+                    | EventMsg::SessionConfigured(_)
+                    | EventMsg::AgentStatusUpdate(_)
+            )
+            && self
+                .completed_submission_ids
+                .iter()
+                .any(|completed_id| completed_id == &event.id)
+        {
+            tracing::warn!(
+                "Ignoring late event {:?} (seq={}) for completed submission {}",
+                &event.msg,
+                event.event_seq,
+                event.id
+            );
+            return;
+        }
         // Strict ordering: all LLM/tool events must carry OrderMeta; internal events use synthetic keys.
         // Track provider order to anchor internal inserts at the bottom of the active request.
         self.note_order(event.order.as_ref());
@@ -258,7 +278,7 @@ impl ChatWidget<'_> {
                 self.handle_task_started_event(id);
             }
             EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
-                self.handle_task_complete_event(id, last_agent_message, event.order.clone());
+                self.handle_task_complete_event(id, last_agent_message);
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
                 delta,
@@ -478,16 +498,16 @@ impl ChatWidget<'_> {
                 self.handle_patch_apply_begin_event(ev, event.order.as_ref());
             }
             EventMsg::PatchApplyEnd(ev) => {
-                self.handle_patch_apply_end_event(ev, event.event_seq);
+                self.handle_patch_apply_end_event(id, ev, event.event_seq);
             }
             EventMsg::ExecCommandEnd(ev) => {
-                self.handle_exec_command_end_event(ev, event.order.clone(), event.event_seq);
+                self.handle_exec_command_end_event(id, ev, event.order.clone(), event.event_seq);
             }
             EventMsg::McpToolCallBegin(ev) => {
                 self.handle_mcp_tool_call_begin_event(ev, event.order.as_ref(), event.event_seq);
             }
             EventMsg::McpToolCallEnd(ev) => {
-                self.handle_mcp_tool_call_end_event(ev, event.order.clone(), event.event_seq);
+                self.handle_mcp_tool_call_end_event(id, ev, event.order.clone(), event.event_seq);
             }
 
             EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {

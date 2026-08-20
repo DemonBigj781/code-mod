@@ -960,6 +960,9 @@ pub(crate) struct ChatWidget<'a> {
     // Track active task ids so we don't drop the working status while any
     // agent/sub‑agent is still running (long‑running sessions can interleave).
     active_task_ids: HashSet<String>,
+    // Bounded terminal-turn guard so delayed provider events cannot mutate
+    // transcript history after their final answer has been committed.
+    completed_submission_ids: VecDeque<String>,
 
     // --- Queued user message support ---
     // Messages typed while a task is running are kept here and rendered

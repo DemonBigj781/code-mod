@@ -1,8 +1,11 @@
 use super::*;
-use code_core::protocol::OrderMeta;
 
 impl ChatWidget<'_> {
+    const COMPLETED_SUBMISSION_HISTORY_LIMIT: usize = 64;
+
     pub(super) fn handle_task_started_event(&mut self, id: String) {
+        self.completed_submission_ids
+            .retain(|completed_id| completed_id != &id);
         // Defensive: if the previous turn never emitted TaskComplete (e.g. dropped event
         // due to reconnect), `active_task_ids` can stay non-empty. That makes every
         // subsequent Answer look like "mid-turn" forever and keeps the footer spinner
@@ -83,12 +86,10 @@ impl ChatWidget<'_> {
         &mut self,
         id: String,
         last_agent_message: Option<String>,
-        order: Option<OrderMeta>,
     ) {
         self.clear_reconnecting();
         self.pending_request_user_input = None;
         self.pending_mcp_elicitation = None;
-        let had_running_execs = !self.exec.running_commands.is_empty();
         // Finalize any active streams.
         let finalizing_streams = self.stream.is_write_cycle_active();
         if finalizing_streams {
@@ -98,6 +99,18 @@ impl ChatWidget<'_> {
         }
         // Remove this id from the active set (it may be a sub-agent).
         self.active_task_ids.remove(&id);
+        if !id.is_empty()
+            && !self
+                .completed_submission_ids
+                .iter()
+                .any(|completed_id| completed_id == &id)
+        {
+            self.completed_submission_ids.push_back(id.clone());
+            while self.completed_submission_ids.len() > Self::COMPLETED_SUBMISSION_HISTORY_LIMIT {
+                self.completed_submission_ids.pop_front();
+            }
+        }
+        self.interrupts.discard_submission(&id);
         if self.active_task_ids.is_empty() {
             self.turn_sleep_inhibitor.set_turn_running(false);
         }
@@ -117,13 +130,6 @@ impl ChatWidget<'_> {
         self.finalize_all_running_due_to_answer();
         // Mark any running web searches as completed.
         web_search_sessions::finalize_all_failed(self, "Search cancelled before completion");
-        if had_running_execs {
-            self.insert_background_event_with_placement(
-                "Running commands finalized after turn end.".to_owned(),
-                BackgroundPlacement::Tail,
-                order,
-            );
-        }
         // Now that streaming is complete, flush any queued interrupts.
         self.flush_interrupt_queue();
 

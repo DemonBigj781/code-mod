@@ -148,3 +148,11 @@ jobs:
       - name: Test MCP settings action labels
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         run: cargo test --frozen --locked -j1 -p code-tui bottom_pane::settings_pages::mcp::tests::mcp_reload_labels_describe_live_reload_and_status_queue -- --exact
+
+      - name: Test terminal event ordering
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
+          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::task_complete_
+          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::completed_submission_history_is_bounded_and_reused_ids_reopen -- --exact

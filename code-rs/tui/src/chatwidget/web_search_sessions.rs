@@ -171,7 +171,6 @@ pub(super) fn finalize_all_failed(chat: &mut ChatWidget<'_>, message: &str) {
     chat.tools_state.web_search_by_call.clear();
     chat.tools_state.web_search_by_order.clear();
     for (_, mut tracker) in trackers.drain() {
-        tracker.slot.set_order_key(chat.next_internal_key());
         let elapsed = tracker.started_at.elapsed();
         tracker
             .cell
@@ -189,7 +188,6 @@ pub(super) fn finalize_all_completed(chat: &mut ChatWidget<'_>, message: &str) {
     chat.tools_state.web_search_by_call.clear();
     chat.tools_state.web_search_by_order.clear();
     for (_, mut tracker) in trackers.drain() {
-        tracker.slot.set_order_key(chat.next_internal_key());
         let elapsed = tracker.started_at.elapsed();
         tracker
             .cell
