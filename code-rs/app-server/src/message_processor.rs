@@ -868,7 +868,7 @@ impl MessageProcessor {
         let mut root = if current_contents.trim().is_empty() {
             TomlValue::Table(Map::default())
         } else {
-            current_contents.parse::<TomlValue>().map_err(|err| {
+            toml::from_str::<TomlValue>(&current_contents).map_err(|err| {
                 config_write_error(
                     ConfigWriteErrorCode::ConfigValidationError,
                     format!("Invalid TOML in config file: {err}"),
@@ -1321,6 +1321,51 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(temp_code_home);
+    }
+
+    #[test]
+    fn config_write_preserves_existing_table_config() {
+        let (outgoing_tx, _outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(8);
+        let outgoing = Arc::new(OutgoingMessageSender::new_with_routed_sender(outgoing_tx));
+        let code_home = tempfile::tempdir().expect("create temp code home");
+        std::fs::write(
+            code_home.path().join("config.toml"),
+            r#"[profiles.existing]
+model = "gpt-5.4"
+"#,
+        )
+        .expect("write existing config");
+
+        let mut config =
+            Config::load_with_cli_overrides(Vec::new(), code_core::config::ConfigOverrides::default())
+                .expect("load default config");
+        config.code_home = code_home.path().to_path_buf();
+        let processor = MessageProcessor::new(
+            outgoing,
+            None,
+            Arc::new(config),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        processor
+            .apply_config_value_write(ConfigValueWriteParams {
+                key_path: "model".to_string(),
+                value: json!("o3"),
+                merge_strategy: MergeStrategy::Replace,
+                file_path: None,
+                expected_version: None,
+            })
+            .expect("write config value");
+
+        let contents = std::fs::read_to_string(code_home.path().join("config.toml"))
+            .expect("read updated config");
+        let value = toml::from_str::<TomlValue>(&contents).expect("parse updated config");
+        assert_eq!(value["model"].as_str(), Some("o3"));
+        assert_eq!(
+            value["profiles"]["existing"]["model"].as_str(),
+            Some("gpt-5.4")
+        );
     }
 
     #[tokio::test]

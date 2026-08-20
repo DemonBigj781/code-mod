@@ -297,7 +297,7 @@ impl ConfigService {
         let mut root = if current_contents.trim().is_empty() {
             TomlValue::Table(Map::default())
         } else {
-            current_contents.parse::<TomlValue>().map_err(|err| {
+            toml::from_str::<TomlValue>(&current_contents).map_err(|err| {
                 ConfigServiceError::write(
                     ConfigWriteErrorCode::ConfigValidationError,
                     format!("Invalid TOML in config file: {err}"),
