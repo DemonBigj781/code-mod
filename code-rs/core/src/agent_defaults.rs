@@ -38,6 +38,9 @@ const MODELS_MANIFEST: &str = include_str!("../../../codex-rs/models-manager/mod
 /// CLI-name lookups.
 pub const DEFAULT_AGENT_NAMES: &[&str] = &[
     // Frontline for moderate/challenging tasks
+    "code-gpt-5.6-sol",
+    "code-gpt-5.6-terra",
+    "code-gpt-5.6-luna",
     "code-gpt-5.4",
     "code-gpt-5.4-mini",
     "code-gpt-5.3-codex",
@@ -91,6 +94,48 @@ impl AgentModelSpec {
 }
 
 const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
+    AgentModelSpec {
+        slug: "code-gpt-5.6-sol",
+        family: "code",
+        cli: "coder",
+        read_only_args: CODE_GPT5_READ_ONLY,
+        write_args: CODE_GPT5_WRITE,
+        model_args: &["--model", "gpt-5.6-sol"],
+        description: "GPT-5.6 Sol for delegated Code tasks.",
+        enabled_by_default: true,
+        aliases: &["gpt-5.6-sol"],
+        gating_env: None,
+        is_frontline: true,
+        pro_only: false,
+    },
+    AgentModelSpec {
+        slug: "code-gpt-5.6-terra",
+        family: "code",
+        cli: "coder",
+        read_only_args: CODE_GPT5_READ_ONLY,
+        write_args: CODE_GPT5_WRITE,
+        model_args: &["--model", "gpt-5.6-terra"],
+        description: "GPT-5.6 Terra for delegated Code tasks.",
+        enabled_by_default: true,
+        aliases: &["gpt-5.6-terra"],
+        gating_env: None,
+        is_frontline: true,
+        pro_only: false,
+    },
+    AgentModelSpec {
+        slug: "code-gpt-5.6-luna",
+        family: "code",
+        cli: "coder",
+        read_only_args: CODE_GPT5_READ_ONLY,
+        write_args: CODE_GPT5_WRITE,
+        model_args: &["--model", "gpt-5.6-luna"],
+        description: "GPT-5.6 Luna for delegated Code tasks.",
+        enabled_by_default: true,
+        aliases: &["gpt-5.6-luna"],
+        gating_env: None,
+        is_frontline: true,
+        pro_only: false,
+    },
     AgentModelSpec {
         slug: "code-gpt-5.4",
         family: "code",
@@ -758,6 +803,21 @@ mod tests {
                 .map(|arg| (*arg).to_string())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn gpt_5_6_variants_are_builtin_agents() {
+        for (model, slug) in [
+            ("gpt-5.6-sol", "code-gpt-5.6-sol"),
+            ("gpt-5.6-terra", "code-gpt-5.6-terra"),
+            ("gpt-5.6-luna", "code-gpt-5.6-luna"),
+        ] {
+            let spec = agent_model_spec(model).expect("GPT-5.6 agent spec should be present");
+            assert_eq!(spec.slug, slug);
+            assert_eq!(spec.cli, "coder");
+            assert_eq!(spec.model_args, &["--model", model]);
+            assert!(DEFAULT_AGENT_NAMES.contains(&slug));
+        }
     }
 
     #[test]

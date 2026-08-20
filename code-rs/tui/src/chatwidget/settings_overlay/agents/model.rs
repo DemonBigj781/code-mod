@@ -98,5 +98,12 @@ impl AgentsSettingsContent {
     pub(crate) fn is_agent_editor_active(&self) -> bool {
         matches!(self.pane, AgentsPane::Agent(_))
     }
-}
 
+    #[cfg(test)]
+    pub(crate) fn overview_agent_names(&self) -> Vec<&str> {
+        match &self.pane {
+            AgentsPane::Overview(state) => state.rows.iter().map(|row| row.name.as_str()).collect(),
+            AgentsPane::Subagent(_) | AgentsPane::Agent(_) => Vec::new(),
+        }
+    }
+}

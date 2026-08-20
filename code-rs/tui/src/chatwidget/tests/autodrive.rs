@@ -576,18 +576,144 @@
         overlay.overview_sections()
     };
 
-    assert_eq!(
-        sections,
-        {
-            let chat = harness.chat();
-            SettingsSection::ALL
-                .iter()
-                .copied()
-                .filter(|s| s.is_visible(&chat.config.features_effective))
-                .collect::<Vec<_>>()
-        },
-        "expected /settings overview to include every visible settings section",
-    );
+    let expected = vec![
+        SettingsSection::Model,
+        SettingsSection::Theme,
+        SettingsSection::Interface,
+        SettingsSection::Shell,
+        SettingsSection::ShellEscalation,
+        SettingsSection::ShellProfiles,
+        SettingsSection::ExecLimits,
+        SettingsSection::Updates,
+        SettingsSection::Accounts,
+        SettingsSection::Secrets,
+        SettingsSection::Apps,
+        SettingsSection::Agents,
+        SettingsSection::Memories,
+        SettingsSection::Prompts,
+        SettingsSection::Personality,
+        SettingsSection::Skills,
+        SettingsSection::Plugins,
+        SettingsSection::AutoDrive,
+        SettingsSection::Review,
+        SettingsSection::Planning,
+        SettingsSection::Validation,
+        #[cfg(all(feature = "browser-automation", not(target_os = "android")))]
+        SettingsSection::Chrome,
+        SettingsSection::Mcp,
+        SettingsSection::Repl,
+        #[cfg(feature = "managed-network-proxy")]
+        SettingsSection::Network,
+        SettingsSection::Notifications,
+        SettingsSection::Limits,
+    ];
+
+    assert_eq!(SettingsSection::ALL, expected.as_slice());
+    assert_eq!(sections, expected);
+    }
+
+    #[test]
+    fn every_registered_settings_section_opens_in_overlay() {
+    let _guard = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    use crate::bottom_pane::SettingsSection;
+    use code_core::config_types::{SettingsMenuConfig, SettingsMenuOpenMode};
+
+    harness.chat().apply_tui_settings_menu(SettingsMenuConfig {
+        open_mode: SettingsMenuOpenMode::Overlay,
+        overlay_min_width: 80,
+        ..SettingsMenuConfig::default()
+    });
+
+    for section in SettingsSection::ALL.iter().copied() {
+        harness.chat().show_settings_overlay(Some(section));
+        harness.flush_into_widget();
+
+        let overlay = harness
+            .chat()
+            .settings
+            .overlay
+            .as_ref()
+            .unwrap_or_else(|| panic!("expected {section:?} settings to open"));
+        assert_eq!(overlay.active_section(), section);
+        assert!(
+            overlay.active_content().is_some(),
+            "expected {section:?} settings content to be accessible",
+        );
+    }
+    }
+
+    #[test]
+    fn every_registered_settings_section_opens_from_bottom_mode() {
+    let _guard = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    use crate::bottom_pane::SettingsSection;
+    use code_core::config_types::{SettingsMenuConfig, SettingsMenuOpenMode};
+
+    harness.chat().apply_tui_settings_menu(SettingsMenuConfig {
+        open_mode: SettingsMenuOpenMode::Bottom,
+        overlay_min_width: 80,
+        ..SettingsMenuConfig::default()
+    });
+
+    for section in SettingsSection::ALL.iter().copied() {
+        let chat = harness.chat();
+        chat.show_settings_overlay(Some(section));
+
+        if let Some(overlay) = chat.settings.overlay.as_ref() {
+            assert_eq!(
+                overlay.active_section(),
+                section,
+                "expected {section:?} to use its overlay fallback",
+            );
+        } else {
+            assert_eq!(
+                chat.settings.bottom_route,
+                Some(Some(section)),
+                "expected {section:?} to open in the bottom pane",
+            );
+            assert!(
+                chat.bottom_pane.has_active_view(),
+                "expected an active bottom-pane view for {section:?}",
+            );
+        }
+    }
+    }
+
+    #[test]
+    fn agents_settings_lists_gpt_5_6_variants() {
+    let _guard = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    use crate::bottom_pane::SettingsSection;
+    use code_core::config_types::{SettingsMenuConfig, SettingsMenuOpenMode};
+
+    {
+        let chat = harness.chat();
+        chat.apply_tui_settings_menu(SettingsMenuConfig {
+            open_mode: SettingsMenuOpenMode::Overlay,
+            overlay_min_width: 80,
+            ..SettingsMenuConfig::default()
+        });
+        chat.show_settings_overlay(Some(SettingsSection::Agents));
+    }
+    harness.flush_into_widget();
+
+    let names = harness
+        .chat()
+        .settings
+        .overlay
+        .as_ref()
+        .and_then(|overlay| overlay.agents_content())
+        .expect("expected Agents settings content")
+        .overview_agent_names();
+
+    for expected in [
+        "code-gpt-5.6-sol",
+        "code-gpt-5.6-terra",
+        "code-gpt-5.6-luna",
+    ] {
+        assert!(names.contains(&expected), "missing {expected} in Agents settings");
+    }
     }
 
     #[test]

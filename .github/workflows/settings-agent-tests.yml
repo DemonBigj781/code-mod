@@ -1,0 +1,125 @@
+name: Settings and Agent Regression Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "code-rs/**"
+      - ".github/workflows/settings-agent-tests.yml"
+
+concurrency:
+  group: settings-agent-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test settings and agent catalogs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      CARGO_INCREMENTAL: "0"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
+      RUST_WORKSPACE_DIR: code-rs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read Rust toolchain
+        id: rust_toolchain
+        shell: sh
+        run: |
+          set -eu
+          channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' code-rs/rust-toolchain.toml | head -n 1)
+          if [ -z "$channel" ]; then
+            echo "Unable to read the Rust channel from code-rs/rust-toolchain.toml" >&2
+            exit 1
+          fi
+          printf 'channel=%s\n' "$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust_toolchain.outputs.channel }}
+
+      - name: Cache Rust tests
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          prefix-key: code-settings-agent-tests
+          shared-key: rust-${{ steps.rust_toolchain.outputs.channel }}
+          workspaces: code-rs -> target
+          cache-targets: true
+          cache-workspace-crates: true
+          cache-on-failure: true
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure compiler cache
+        shell: sh
+        run: |
+          set -eu
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'RUSTC_WRAPPER=sccache'
+            echo 'SCCACHE_IDLE_TIMEOUT=1800'
+            echo 'SCCACHE_CACHE_SIZE=10G'
+          } >> "$GITHUB_ENV"
+
+      - name: Install Linux test dependencies
+        shell: sh
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            libssl-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+          {
+            echo 'CC=clang'
+            echo 'CXX=clang++'
+            echo 'OPENSSL_NO_VENDOR=1'
+          } >> "$GITHUB_ENV"
+
+      - name: Prefetch dependencies
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo fetch --locked
+
+      - name: Test built-in GPT-5.6 agents
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -p code-core agent_defaults::tests::gpt_5_6_variants_are_builtin_agents -- --exact
+
+      - name: Test settings catalog
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -p code-tui chatwidget::tests::settings_overlay_overview_includes_all_sections -- --exact
+
+      - name: Test settings accessibility
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
+          cargo test --frozen --locked -p code-tui chatwidget::tests::every_registered_settings_section_opens_in_overlay -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::tests::every_registered_settings_section_opens_from_bottom_mode -- --exact
+
+      - name: Test GPT-5.6 agents in settings
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -p code-tui chatwidget::tests::agents_settings_lists_gpt_5_6_variants -- --exact
