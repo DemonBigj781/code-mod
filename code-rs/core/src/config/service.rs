@@ -726,7 +726,7 @@ model = "gpt-5.4"
             code_home.path().join(crate::config::CONFIG_TOML_FILE),
         )
         .expect("read config");
-        let value: toml::Value = contents.parse().expect("parse config");
+        let value = toml::from_str::<toml::Value>(&contents).expect("parse config");
         assert_eq!(value["profiles"]["existing"]["model"].as_str(), Some("gpt-5.4"));
         assert_eq!(
             value["model_providers"][provider_id.as_str()]["base_url"].as_str(),
