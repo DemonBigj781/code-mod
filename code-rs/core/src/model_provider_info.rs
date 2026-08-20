@@ -579,14 +579,26 @@ impl ModelProviderInfo {
         code_home: &Path,
         cwd: &Path,
     ) -> crate::error::Result<Option<String>> {
+        let secrets = code_secrets::SecretsManager::new(
+            code_home.to_path_buf(),
+            code_secrets::SecretsBackendKind::Local,
+        );
+        self.api_key_with_secrets_manager(cwd, &secrets)
+    }
+
+    pub fn api_key_with_secrets_manager(
+        &self,
+        cwd: &Path,
+        secrets: &code_secrets::SecretsManager,
+    ) -> crate::error::Result<Option<String>> {
         let Some(env_key) = self.env_key.as_ref() else {
             return Ok(None);
         };
 
-        let outcome = crate::secrets_resolver::resolve_secret_env_or_store_for_code_home(
+        let outcome = crate::secrets_resolver::resolve_secret_env_or_store(
             env_key,
-            code_home,
             cwd,
+            Some(secrets),
         );
         if let Some(secret) = outcome.resolved {
             return Ok(Some(secret.value));
@@ -996,8 +1008,10 @@ mod tests {
     use super::*;
     use code_utils_absolute_path::AbsolutePathBuf;
     use code_utils_absolute_path::AbsolutePathBufGuard;
+    use code_keyring_store::tests::MockKeyringStore;
     use pretty_assertions::assert_eq;
     use std::num::NonZeroU64;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     #[test]
@@ -1043,9 +1057,10 @@ mod tests {
         let code_home = tempdir().expect("code home");
         let cwd = tempdir().expect("cwd");
         let secret_name = "CODE_MODEL_PROVIDER_DIRECT_TEST_API_KEY";
-        let manager = code_secrets::SecretsManager::new(
+        let manager = code_secrets::SecretsManager::new_with_keyring_store(
             code_home.path().to_path_buf(),
             code_secrets::SecretsBackendKind::Local,
+            Arc::new(MockKeyringStore::default()),
         );
         manager
             .set(
@@ -1063,7 +1078,7 @@ mod tests {
 
         assert_eq!(
             provider
-                .api_key_with_context(code_home.path(), cwd.path())
+                .api_key_with_secrets_manager(cwd.path(), &manager)
                 .expect("resolve key")
                 .as_deref(),
             Some("encrypted-secret-value")

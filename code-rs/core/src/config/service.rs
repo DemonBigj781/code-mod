@@ -699,7 +699,9 @@ mod direct_model_provider_tests {
         let cwd = tempfile::tempdir().expect("cwd");
         std::fs::write(
             code_home.path().join(crate::config::CONFIG_TOML_FILE),
-            "[profiles.existing]\nmodel = \"gpt-5.4\"\n",
+            r#"[profiles.existing]
+model = "gpt-5.4"
+"#,
         )
         .expect("seed config");
         let service = ConfigService::new_with_defaults(
