@@ -79,6 +79,50 @@
     }
 
     #[test]
+    fn mcp_reload_labels_describe_live_reload_and_status_queue() {
+        let view = make_view(vec![make_server_row("server_a")]);
+        let list_text = view
+            .list_lines(80)
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let summary_text = view
+            .summary_lines()
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tools_text = view
+            .tools_lines_for_entries(80, &[])
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(list_text.contains("Reload servers/status"));
+        assert!(summary_text.contains("R reloads MCP servers"));
+        assert!(summary_text.contains("S queues /mcp status diagnostics"));
+        assert!(tools_text.contains("R to reload servers"));
+        assert!(tools_text.contains("S for /mcp status"));
+    }
+
+    #[test]
     fn server_scheduling_editor_emits_app_event() {
         let (mut view, rx) = make_view_with_rx(vec![make_server_row("server_a")]);
 

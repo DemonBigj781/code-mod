@@ -28,7 +28,7 @@ impl McpSettingsView {
                 dim_style,
             )]));
             lines.push(Line::from(vec![Span::styled(
-                "Press R to refresh or S for /mcp status.",
+                "Press R to reload servers or S for /mcp status.",
                 dim_style,
             )]));
             return lines;
@@ -120,4 +120,3 @@ impl McpSettingsView {
         lines
     }
 }
-

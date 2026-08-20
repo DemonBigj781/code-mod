@@ -322,7 +322,7 @@ impl McpSettingsView {
                             }
                             None => {
                                 lines.push(Line::from(vec![Span::styled(
-                                    "No metadata reported yet for this tool. Press R to refresh.",
+                                    "No metadata reported yet for this tool. Press R to reload.",
                                     dim_style,
                                 )]));
                             }
@@ -332,7 +332,7 @@ impl McpSettingsView {
 
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![Span::styled(
-                    "Tip: R refreshes MCP listing, S queues /mcp status diagnostics.",
+                    "Tip: R reloads MCP servers, S queues /mcp status diagnostics.",
                     dim_style,
                 )]));
             }
@@ -347,4 +347,3 @@ impl McpSettingsView {
         lines
     }
 }
-

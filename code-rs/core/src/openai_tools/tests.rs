@@ -264,6 +264,22 @@
         assert_eq!(resource_required.as_ref(), Some(&Vec::<String>::new()));
         assert!(resource_properties.contains_key("memory_max_mb"));
         assert!(resource_properties.contains_key("pids_max"));
+
+        let description_for = |name: &str| {
+            let Some(JsonSchema::Number { description }) = resource_properties.get(name) else {
+                panic!("{name} should use a numeric schema");
+            };
+            description.as_deref().unwrap_or_default()
+        };
+        assert_eq!(
+            description_for("memory_max_mb"),
+            "Positive requested memory limit for subsequent tool commands, in MiB. At least one resource field is required."
+        );
+        assert_eq!(
+            description_for("pids_max"),
+            "Positive requested maximum number of processes for subsequent tool commands. At least one resource field is required."
+        );
+
         for property in resource_properties.values() {
             let JsonSchema::Number { description } = property else {
                 panic!("resource limits should use numeric schemas");

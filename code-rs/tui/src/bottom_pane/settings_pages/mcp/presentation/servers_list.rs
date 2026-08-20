@@ -90,7 +90,7 @@ impl McpSettingsView {
             refresh_hover,
             Style::default(),
             crate::text_formatting::truncate_to_display_width_with_suffix(
-                "Refresh tools/status",
+                "Reload servers/status",
                 label_width,
                 "…",
             ),
@@ -142,4 +142,3 @@ impl McpSettingsView {
         lines
     }
 }
-

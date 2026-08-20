@@ -2396,4 +2396,40 @@ command = "missing-startup-disabled-command"
 
         assert_eq!(manager.list_server_names(), vec!["Alpha", "beta", "zeta"]);
     }
+
+    #[test]
+    fn disabled_tool_snapshot_includes_sorted_entries_and_active_servers() {
+        let manager = McpConnectionManager::default();
+        let config = |command: &str, disabled_tools: Vec<&str>| McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: command.to_owned(),
+                args: Vec::new(),
+                env: None,
+            },
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            disabled_tools: disabled_tools.into_iter().map(str::to_owned).collect(),
+            scheduling: crate::config_types::McpServerSchedulingToml::default(),
+            tool_scheduling: std::collections::BTreeMap::new(),
+        };
+
+        manager.replace_server_configs(HashMap::from([
+            ("alpha".to_owned(), config("alpha", Vec::new())),
+            (
+                "beta".to_owned(),
+                config("beta", vec!["z_tool", "a_tool", "a_tool"]),
+            ),
+        ]));
+
+        assert_eq!(
+            manager.list_disabled_tools_by_server(),
+            HashMap::from([
+                ("alpha".to_owned(), Vec::new()),
+                (
+                    "beta".to_owned(),
+                    vec!["a_tool".to_owned(), "z_tool".to_owned()],
+                ),
+            ])
+        );
+    }
 }

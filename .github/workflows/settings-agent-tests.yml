@@ -144,3 +144,7 @@ jobs:
           cargo test --frozen --locked -j1 -p code-tui edit_mode_tab_switches_focus_and_enter_activates_back_action
           cargo test --frozen --locked -j1 -p code-tui edit_mode_apply_action_submits_and_closes
           cargo test --frozen --locked -j1 -p code-tui interface_icon_mode_change_stays_pending_when_returning_to_overview
+
+      - name: Test MCP settings action labels
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-tui bottom_pane::settings_pages::mcp::tests::mcp_reload_labels_describe_live_reload_and_status_queue -- --exact
