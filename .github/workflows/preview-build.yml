@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 90
     env:
       ARTIFACT_NAME: code-linux-x86_64-${{ github.run_number }}
+      CARGO_BUILD_JOBS: "1"
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       CARGO_INCREMENTAL: "0"
       CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
@@ -110,7 +111,7 @@ jobs:
 
       - name: Build release binary
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
-        run: cargo build --release --frozen --locked --target "$TARGET" --bin code
+        run: cargo build --release --frozen --locked -j1 --target "$TARGET" --bin code
 
       - name: Smoke test binary
         shell: sh
