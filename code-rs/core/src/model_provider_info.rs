@@ -12,6 +12,8 @@ use code_protocol::config_types::ModelProviderAuthInfo;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use sha2::Digest;
+use sha2::Sha256;
 use std::collections::{BTreeMap, HashMap};
 use std::env::VarError;
 use std::io;
@@ -40,6 +42,9 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 pub(crate) const OPENAI_API_BASE_URL: &str = "https://api.openai.com/v1";
 pub(crate) const OPENAI_API_PROBE_URL: &str = "https://api.openai.com";
 pub(crate) const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+
+const DIRECT_PROVIDER_ID_PREFIX: &str = "direct";
+const DIRECT_PROVIDER_SECRET_PREFIX: &str = "CODE_MODEL_PROVIDER";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ProviderAuthCacheKey {
@@ -232,6 +237,32 @@ pub struct OpenRouterMaxPrice {
 }
 
 impl ModelProviderInfo {
+    pub fn direct_openai_compatible(
+        name: impl Into<String>,
+        base_url: impl Into<String>,
+        env_key: Option<String>,
+        wire_api: WireApi,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            base_url: Some(base_url.into()),
+            env_key,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            wire_api,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            openrouter: None,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn validate(&self) -> std::result::Result<(), String> {
         let Some(auth) = self.auth.as_ref() else {
@@ -525,30 +556,51 @@ impl ModelProviderInfo {
         builder
     }
 
-    /// If `env_key` is Some, returns the API key for this provider if present
-    /// (and non-empty) in the environment. If `env_key` is required but
-    /// cannot be found, returns an error.
+    /// If `env_key` is Some, resolves the API key from the environment or the
+    /// encrypted secrets store. If the referenced key cannot be found, returns
+    /// an error without exposing any stored value.
     pub fn api_key(&self) -> crate::error::Result<Option<String>> {
         match &self.env_key {
             Some(env_key) => {
-                let env_value = std::env::var(env_key);
-                env_value
-                    .and_then(|v| {
-                        if v.trim().is_empty() {
-                            Err(VarError::NotPresent)
-                        } else {
-                            Ok(Some(v))
-                        }
-                    })
-                    .map_err(|_| {
-                        crate::error::CodexErr::EnvVar(EnvVarError {
-                            var: env_key.clone(),
-                            instructions: self.env_key_instructions.clone(),
-                        })
-                    })
+                let code_home = crate::config::find_code_home().ok();
+                let cwd = std::env::current_dir().ok();
+                if let (Some(code_home), Some(cwd)) = (code_home.as_deref(), cwd.as_deref()) {
+                    return self.api_key_with_context(code_home, cwd);
+                }
+
+                api_key_from_environment(env_key, self.env_key_instructions.clone())
             }
             None => Ok(None),
         }
+    }
+
+    pub fn api_key_with_context(
+        &self,
+        code_home: &Path,
+        cwd: &Path,
+    ) -> crate::error::Result<Option<String>> {
+        let Some(env_key) = self.env_key.as_ref() else {
+            return Ok(None);
+        };
+
+        let outcome = crate::secrets_resolver::resolve_secret_env_or_store_for_code_home(
+            env_key,
+            code_home,
+            cwd,
+        );
+        if let Some(secret) = outcome.resolved {
+            return Ok(Some(secret.value));
+        }
+        if let Some(error) = outcome.error {
+            return Err(CodexErr::ServerError(format!(
+                "failed to resolve API key reference {env_key}: {error}"
+            )));
+        }
+
+        Err(CodexErr::EnvVar(EnvVarError {
+            var: env_key.clone(),
+            instructions: self.env_key_instructions.clone(),
+        }))
     }
 
     /// Effective maximum number of request retries for this provider.
@@ -581,6 +633,103 @@ impl ModelProviderInfo {
             .clone()
             .unwrap_or_else(|| OPENAI_API_PROBE_URL.to_owned())
     }
+}
+
+fn api_key_from_environment(
+    env_key: &str,
+    instructions: Option<String>,
+) -> crate::error::Result<Option<String>> {
+    std::env::var(env_key)
+        .and_then(|value| {
+            if value.trim().is_empty() {
+                Err(VarError::NotPresent)
+            } else {
+                Ok(Some(value))
+            }
+        })
+        .map_err(|_| {
+            CodexErr::EnvVar(EnvVarError {
+                var: env_key.to_owned(),
+                instructions,
+            })
+        })
+}
+
+pub fn normalize_direct_provider_base_url(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("endpoint URL must not be empty".to_owned());
+    }
+
+    let mut url = reqwest::Url::parse(trimmed)
+        .map_err(|error| format!("invalid endpoint URL: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("endpoint URL must use http or https".to_owned());
+    }
+    if url.host_str().is_none() {
+        return Err("endpoint URL must include a host".to_owned());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("endpoint URL must not include credentials".to_owned());
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err("endpoint URL must not include a query or fragment".to_owned());
+    }
+
+    let mut segments: Vec<String> = url
+        .path_segments()
+        .ok_or_else(|| "endpoint URL cannot be used as a base URL".to_owned())?
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_owned)
+        .collect();
+    while segments.last().is_some_and(|segment| segment.eq_ignore_ascii_case("v1")) {
+        segments.pop();
+    }
+    segments.push("v1".to_owned());
+    url.set_path(&format!("/{}", segments.join("/")));
+
+    Ok(url.to_string().trim_end_matches('/').to_owned())
+}
+
+pub fn direct_model_provider_id(display_name: &str, normalized_base_url: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_separator = false;
+    for ch in display_name.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            previous_separator = false;
+        } else if !previous_separator && !slug.is_empty() {
+            slug.push('-');
+            previous_separator = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        slug.push_str("endpoint");
+    }
+
+    let digest = Sha256::digest(normalized_base_url.as_bytes());
+    let suffix = digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{DIRECT_PROVIDER_ID_PREFIX}-{slug}-{suffix}")
+}
+
+pub fn direct_model_provider_secret_name(provider_id: &str) -> String {
+    let normalized_id = provider_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("{DIRECT_PROVIDER_SECRET_PREFIX}_{normalized_id}_API_KEY")
 }
 
 async fn resolve_provider_auth_token(config: &ModelProviderAuthInfo) -> io::Result<String> {
@@ -850,6 +999,76 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::num::NonZeroU64;
     use tempfile::tempdir;
+
+    #[test]
+    fn direct_model_provider_normalizes_one_v1_root() {
+        for input in [
+            "https://example.com",
+            "https://example.com/",
+            "https://example.com/v1",
+            "https://example.com/v1/",
+            "https://example.com/v1/v1/",
+        ] {
+            assert_eq!(
+                normalize_direct_provider_base_url(input).as_deref(),
+                Ok("https://example.com/v1")
+            );
+        }
+        assert!(normalize_direct_provider_base_url("file:///tmp/api").is_err());
+        assert!(normalize_direct_provider_base_url("https://user:secret@example.com/v1").is_err());
+        assert!(normalize_direct_provider_base_url("https://example.com/v1?token=secret").is_err());
+    }
+
+    #[test]
+    fn direct_model_provider_ids_are_stable_and_url_scoped() {
+        let first_url = normalize_direct_provider_base_url("https://one.example/v1")
+            .expect("first URL");
+        let equivalent_url = normalize_direct_provider_base_url("https://one.example/v1/")
+            .expect("equivalent URL");
+        let second_url = normalize_direct_provider_base_url("https://two.example/v1")
+            .expect("second URL");
+
+        let first = direct_model_provider_id("Company Gateway", &first_url);
+        assert_eq!(first, direct_model_provider_id("Company Gateway", &equivalent_url));
+        assert_ne!(first, direct_model_provider_id("Company Gateway", &second_url));
+        assert!(first.starts_with("direct-company-gateway-"));
+        assert_eq!(
+            direct_model_provider_secret_name(&first),
+            format!("CODE_MODEL_PROVIDER_{}_API_KEY", first.replace('-', "_").to_ascii_uppercase())
+        );
+    }
+
+    #[test]
+    fn direct_model_provider_api_key_resolves_from_encrypted_store() {
+        let code_home = tempdir().expect("code home");
+        let cwd = tempdir().expect("cwd");
+        let secret_name = "CODE_MODEL_PROVIDER_DIRECT_TEST_API_KEY";
+        let manager = code_secrets::SecretsManager::new(
+            code_home.path().to_path_buf(),
+            code_secrets::SecretsBackendKind::Local,
+        );
+        manager
+            .set(
+                &code_secrets::SecretScope::Global,
+                &code_secrets::SecretName::new(secret_name).expect("secret name"),
+                "encrypted-secret-value",
+            )
+            .expect("store secret");
+        let provider = ModelProviderInfo::direct_openai_compatible(
+            "Gateway",
+            "https://example.com/v1",
+            Some(secret_name.to_owned()),
+            WireApi::Chat,
+        );
+
+        assert_eq!(
+            provider
+                .api_key_with_context(code_home.path(), cwd.path())
+                .expect("resolve key")
+                .as_deref(),
+            Some("encrypted-secret-value")
+        );
+    }
 
     #[test]
     fn test_deserialize_ollama_model_provider_toml() {

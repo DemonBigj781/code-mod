@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::config::ConfigBuilder;
 use crate::config::ConfigOverrides;
 use crate::config_loader::LoaderOverrides;
+use crate::model_provider_info::ModelProviderInfo;
 use crate::protocol::AskForApproval as CoreAskForApproval;
 use code_app_server_protocol::AskForApproval as V2AskForApproval;
 use code_app_server_protocol::Config as V2Config;
@@ -221,6 +222,41 @@ impl ConfigService {
         params: ConfigBatchWriteParams,
     ) -> Result<ConfigWriteResponse, ConfigServiceError> {
         self.apply_config_edits(params.edits, params.file_path, params.expected_version)
+    }
+
+    pub fn write_model_provider(
+        &self,
+        provider_id: &str,
+        provider: &ModelProviderInfo,
+    ) -> Result<ConfigWriteResponse, ConfigServiceError> {
+        if provider_id.is_empty()
+            || !provider_id
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        {
+            return Err(ConfigServiceError::write(
+                ConfigWriteErrorCode::ConfigValidationError,
+                "model provider ID must contain only ASCII letters, digits, '-' or '_'",
+            ));
+        }
+
+        let provider_toml = TomlValue::try_from(provider).map_err(|error| {
+            ConfigServiceError::write(
+                ConfigWriteErrorCode::ConfigValidationError,
+                format!("failed to serialize model provider: {error}"),
+            )
+        })?;
+        let value = serde_json::to_value(provider_toml)
+            .map_err(|error| ConfigServiceError::json("failed to serialize model provider", error))?;
+        self.apply_config_edits(
+            vec![ConfigEdit {
+                key_path: format!("model_providers.{provider_id}"),
+                value,
+                merge_strategy: MergeStrategy::Replace,
+            }],
+            None,
+            None,
+        )
     }
 
     fn load_effective_config(&self, cwd: Option<PathBuf>) -> std::io::Result<Config> {
@@ -648,4 +684,84 @@ fn write_atomically(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     std::fs::write(tmp.path(), contents)?;
     tmp.persist(path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod direct_model_provider_tests {
+    use super::*;
+    use crate::model_provider_info::WireApi;
+    use crate::model_provider_info::direct_model_provider_id;
+    use crate::model_provider_info::normalize_direct_provider_base_url;
+
+    #[test]
+    fn direct_model_provider_persistence_preserves_profiles() {
+        let code_home = tempfile::tempdir().expect("code home");
+        let cwd = tempfile::tempdir().expect("cwd");
+        std::fs::write(
+            code_home.path().join(crate::config::CONFIG_TOML_FILE),
+            "[profiles.existing]\nmodel = \"gpt-5.4\"\n",
+        )
+        .expect("seed config");
+        let service = ConfigService::new_with_defaults(
+            code_home.path().to_path_buf(),
+            cwd.path().to_path_buf(),
+        );
+        let base_url = normalize_direct_provider_base_url("http://localhost:11434/v1/")
+            .expect("normalize URL");
+        let provider_id = direct_model_provider_id("Local AI", &base_url);
+        let provider = ModelProviderInfo::direct_openai_compatible(
+            "Local AI",
+            base_url,
+            None,
+            WireApi::Chat,
+        );
+
+        service
+            .write_model_provider(&provider_id, &provider)
+            .expect("write provider");
+
+        let contents = std::fs::read_to_string(
+            code_home.path().join(crate::config::CONFIG_TOML_FILE),
+        )
+        .expect("read config");
+        let value: toml::Value = contents.parse().expect("parse config");
+        assert_eq!(value["profiles"]["existing"]["model"].as_str(), Some("gpt-5.4"));
+        assert_eq!(
+            value["model_providers"][provider_id.as_str()]["base_url"].as_str(),
+            Some("http://localhost:11434/v1")
+        );
+        assert!(
+            value["model_providers"][provider_id.as_str()]
+                .get("env_key")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_model_provider_persistence_keeps_only_secret_reference() {
+        let code_home = tempfile::tempdir().expect("code home");
+        let cwd = tempfile::tempdir().expect("cwd");
+        let service = ConfigService::new_with_defaults(
+            code_home.path().to_path_buf(),
+            cwd.path().to_path_buf(),
+        );
+        let provider = ModelProviderInfo::direct_openai_compatible(
+            "Gateway",
+            "https://gateway.example/v1",
+            Some("CODE_MODEL_PROVIDER_GATEWAY_API_KEY".to_owned()),
+            WireApi::Responses,
+        );
+
+        service
+            .write_model_provider("direct-gateway-test", &provider)
+            .expect("write provider");
+
+        let contents = std::fs::read_to_string(
+            code_home.path().join(crate::config::CONFIG_TOML_FILE),
+        )
+        .expect("read config");
+        assert!(contents.contains("CODE_MODEL_PROVIDER_GATEWAY_API_KEY"));
+        assert!(!contents.contains("secret-value"));
+        assert!(!contents.contains("[profiles]"));
+    }
 }
