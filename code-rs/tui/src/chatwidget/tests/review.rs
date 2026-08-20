@@ -31,6 +31,50 @@
     assert!(summary_text.contains("needs work"));
     assert!(summary_text.contains("bug"));
     }
+
+    #[test]
+    fn mcp_reload_parser_accepts_named_and_all_targets() {
+    assert_eq!(
+        ChatWidget::parse_mcp_reload_target("crimson-desert-data".split_whitespace()),
+        Ok(Some("crimson-desert-data".to_owned()))
+    );
+    assert_eq!(
+        ChatWidget::parse_mcp_reload_target("all".split_whitespace()),
+        Ok(None)
+    );
+    }
+
+    #[test]
+    fn mcp_reload_parser_rejects_missing_or_extra_arguments() {
+    let usage = Err("Usage: /mcp reload <name|all>".to_owned());
+    assert_eq!(
+        ChatWidget::parse_mcp_reload_target("".split_whitespace()),
+        usage
+    );
+    assert_eq!(
+        ChatWidget::parse_mcp_reload_target("alpha beta".split_whitespace()),
+        Err("Usage: /mcp reload <name|all>".to_owned())
+    );
+    }
+
+    #[test]
+    fn config_reload_event_requests_disk_reload() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.handle_event(Event {
+        id: "config-watcher".to_owned(),
+        event_seq: 1,
+        msg: EventMsg::ConfigChanged,
+        order: None,
+    });
+
+    let events = harness.drain_events();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, AppEvent::ReloadConfigFromDisk)),
+        "config change should request a startup-override-preserving reload"
+    );
+    }
     
     #[test]
     fn mcp_summary_includes_tools_and_failures() {

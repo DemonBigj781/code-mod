@@ -67,6 +67,18 @@
     }
 
     #[test]
+    fn mcp_reload_refresh_requests_all_servers() {
+        let (view, rx) = make_view_with_rx(vec![make_server_row("server_a")]);
+
+        view.request_refresh();
+
+        match rx.try_recv().expect("expected reload event") {
+            AppEvent::ReloadMcpServers { server } => assert_eq!(server, None),
+            other => panic!("unexpected AppEvent: {other:?}"),
+        }
+    }
+
+    #[test]
     fn server_scheduling_editor_emits_app_event() {
         let (mut view, rx) = make_view_with_rx(vec![make_server_row("server_a")]);
 

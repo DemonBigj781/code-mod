@@ -269,6 +269,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             | EventMsg::BrowserSnapshot(_)
             | EventMsg::ListCustomPromptsResponse(_)
             | EventMsg::ListSkillsResponse(_)
+            | EventMsg::ConfigChanged
             | EventMsg::McpListToolsResponse(_)
             | EventMsg::ViewImageToolCall(_)
             | EventMsg::AutoContextCheck(_)

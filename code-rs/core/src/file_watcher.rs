@@ -27,10 +27,12 @@ use crate::config::Config;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FileWatcherEvent {
     SkillsChanged { paths: Vec<PathBuf> },
+    ConfigChanged,
 }
 
 struct WatchState {
     skills_roots: HashSet<PathBuf>,
+    config_path: PathBuf,
 }
 
 struct FileWatcherInner {
@@ -91,7 +93,7 @@ pub(crate) struct FileWatcher {
 }
 
 impl FileWatcher {
-    pub(crate) fn new(_code_home: PathBuf) -> notify::Result<Self> {
+    pub(crate) fn new(code_home: PathBuf) -> notify::Result<Self> {
         let (raw_tx, raw_rx) = mpsc::unbounded_channel();
         let raw_tx_clone = raw_tx;
         let watcher = notify::recommended_watcher(move |res| {
@@ -106,6 +108,7 @@ impl FileWatcher {
         let (tx, _) = broadcast::channel(128);
         let state = Arc::new(RwLock::new(WatchState {
             skills_roots: HashSet::new(),
+            config_path: code_home.join(crate::config::CONFIG_TOML_FILE),
         }));
         let file_watcher = Self {
             inner: Some(Mutex::new(inner)),
@@ -113,6 +116,7 @@ impl FileWatcher {
             tx: tx.clone(),
         };
         file_watcher.spawn_event_loop(raw_rx, state, tx);
+        file_watcher.watch_path(code_home, RecursiveMode::NonRecursive);
         Ok(file_watcher)
     }
 
@@ -122,6 +126,7 @@ impl FileWatcher {
             inner: None,
             state: Arc::new(RwLock::new(WatchState {
                 skills_roots: HashSet::new(),
+                config_path: PathBuf::new(),
             })),
             tx,
         }
@@ -149,12 +154,16 @@ impl FileWatcher {
             handle.spawn(async move {
                 let now = Instant::now();
                 let mut skills = ThrottledPaths::new(now);
+                let mut config = ThrottledPaths::new(now);
 
                 loop {
                     let now = Instant::now();
-                    let next_deadline = skills.next_deadline(now);
-                    let timer_deadline =
-                        next_deadline.unwrap_or_else(|| now + Duration::from_secs(60 * 60 * 24 * 365));
+                    let next_deadline = [skills.next_deadline(now), config.next_deadline(now)]
+                        .into_iter()
+                        .flatten()
+                        .min();
+                    let timer_deadline = next_deadline
+                        .unwrap_or_else(|| now + Duration::from_secs(60 * 60 * 24 * 365));
                     let timer = sleep_until(timer_deadline);
                     tokio::pin!(timer);
 
@@ -162,12 +171,16 @@ impl FileWatcher {
                         res = raw_rx.recv() => {
                             match res {
                                 Some(Ok(event)) => {
-                                    let skills_paths = classify_event(&event, &state);
+                                    let classified = classify_event(&event, &state);
                                     let now = Instant::now();
-                                    skills.add(skills_paths);
+                                    skills.add(classified.skills_paths);
+                                    config.add(classified.config_paths);
 
                                     if let Some(paths) = skills.take_ready(now) {
                                         let _ = tx.send(FileWatcherEvent::SkillsChanged { paths });
+                                    }
+                                    if config.take_ready(now).is_some() {
+                                        let _ = tx.send(FileWatcherEvent::ConfigChanged);
                                     }
                                 }
                                 Some(Err(err)) => {
@@ -179,6 +192,9 @@ impl FileWatcher {
                                     if let Some(paths) = skills.take_pending(now) {
                                         let _ = tx.send(FileWatcherEvent::SkillsChanged { paths });
                                     }
+                                    if config.take_pending(now).is_some() {
+                                        let _ = tx.send(FileWatcherEvent::ConfigChanged);
+                                    }
                                     break;
                                 }
                             }
@@ -187,6 +203,9 @@ impl FileWatcher {
                             let now = Instant::now();
                             if let Some(paths) = skills.take_ready(now) {
                                 let _ = tx.send(FileWatcherEvent::SkillsChanged { paths });
+                            }
+                            if config.take_ready(now).is_some() {
+                                let _ = tx.send(FileWatcherEvent::ConfigChanged);
                             }
                         }
                     }
@@ -238,30 +257,36 @@ impl FileWatcher {
     }
 }
 
-fn classify_event(event: &Event, state: &RwLock<WatchState>) -> Vec<PathBuf> {
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ClassifiedEvent {
+    skills_paths: Vec<PathBuf>,
+    config_paths: Vec<PathBuf>,
+}
+
+fn classify_event(event: &Event, state: &RwLock<WatchState>) -> ClassifiedEvent {
     if !matches!(
         event.kind,
         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
     ) {
-        return Vec::new();
+        return ClassifiedEvent::default();
     }
 
-    let mut skills_paths = Vec::new();
-    let skills_roots = match state.read() {
-        Ok(state) => state.skills_roots.clone(),
-        Err(err) => {
-            let state = err.into_inner();
-            state.skills_roots.clone()
-        }
+    let state = match state.read() {
+        Ok(state) => state,
+        Err(err) => err.into_inner(),
     };
+    let mut classified = ClassifiedEvent::default();
 
     for path in &event.paths {
-        if is_skills_path(path, &skills_roots) {
-            skills_paths.push(path.clone());
+        if is_skills_path(path, &state.skills_roots) {
+            classified.skills_paths.push(path.clone());
+        }
+        if path == &state.config_path {
+            classified.config_paths.push(path.clone());
         }
     }
 
-    skills_paths
+    classified
 }
 
 fn is_skills_path(path: &Path, roots: &HashSet<PathBuf>) -> bool {
@@ -332,6 +357,7 @@ mod tests {
         let root = path("/tmp/skills");
         let state = RwLock::new(WatchState {
             skills_roots: HashSet::from([root.clone()]),
+            config_path: path("/tmp/code/config.toml"),
         });
         let event = notify_event(
             EventKind::Create(CreateKind::Any),
@@ -342,7 +368,8 @@ mod tests {
         );
 
         let classified = classify_event(&event, &state);
-        assert_eq!(classified, vec![root.join("demo/SKILL.md")]);
+        assert_eq!(classified.skills_paths, vec![root.join("demo/SKILL.md")]);
+        assert!(classified.config_paths.is_empty());
     }
 
     #[test]
@@ -351,6 +378,7 @@ mod tests {
         let root_b = path("/tmp/workspace/.codex/skills");
         let state = RwLock::new(WatchState {
             skills_roots: HashSet::from([root_a.clone(), root_b.clone()]),
+            config_path: path("/tmp/code/config.toml"),
         });
         let event = notify_event(
             EventKind::Modify(ModifyKind::Any),
@@ -363,7 +391,7 @@ mod tests {
 
         let classified = classify_event(&event, &state);
         assert_eq!(
-            classified,
+            classified.skills_paths,
             vec![root_a.join("alpha/SKILL.md"), root_b.join("beta/SKILL.md")]
         );
     }
@@ -373,6 +401,7 @@ mod tests {
         let root = path("/tmp/skills");
         let state = RwLock::new(WatchState {
             skills_roots: HashSet::from([root.clone()]),
+            config_path: path("/tmp/code/config.toml"),
         });
         let path = root.join("demo/SKILL.md");
 
@@ -380,13 +409,22 @@ mod tests {
             EventKind::Access(AccessKind::Open(AccessMode::Any)),
             vec![path.clone()],
         );
-        assert_eq!(classify_event(&access_event, &state), Vec::<PathBuf>::new());
+        assert_eq!(
+            classify_event(&access_event, &state),
+            ClassifiedEvent::default()
+        );
 
         let any_event = notify_event(EventKind::Any, vec![path.clone()]);
-        assert_eq!(classify_event(&any_event, &state), Vec::<PathBuf>::new());
+        assert_eq!(
+            classify_event(&any_event, &state),
+            ClassifiedEvent::default()
+        );
 
         let other_event = notify_event(EventKind::Other, vec![path]);
-        assert_eq!(classify_event(&other_event, &state), Vec::<PathBuf>::new());
+        assert_eq!(
+            classify_event(&other_event, &state),
+            ClassifiedEvent::default()
+        );
     }
 
     #[test]
@@ -437,10 +475,41 @@ mod tests {
                 FileWatcherEvent::SkillsChanged { paths } => {
                     all_paths.extend(paths);
                 }
+                FileWatcherEvent::ConfigChanged => {}
             }
         }
         all_paths.sort_unstable();
-        assert_eq!(all_paths, vec![root.join("a/SKILL.md"), root.join("b/SKILL.md")]);
+        assert_eq!(
+            all_paths,
+            vec![root.join("a/SKILL.md"), root.join("b/SKILL.md")]
+        );
+    }
+
+    #[tokio::test]
+    async fn config_change_emits_reload_signal() {
+        let watcher = FileWatcher::noop();
+        let config_path = path("/tmp/code/config.toml");
+        watcher.state.write().expect("state lock").config_path = config_path.clone();
+
+        let (raw_tx, raw_rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = broadcast::channel(8);
+        watcher.spawn_event_loop(raw_rx, Arc::clone(&watcher.state), tx);
+
+        raw_tx
+            .send(Ok(notify_event(
+                EventKind::Modify(ModifyKind::Any),
+                vec![config_path],
+            )))
+            .expect("send event");
+        drop(raw_tx);
+
+        let mut config_events = 0;
+        while let Ok(event) = rx.recv().await {
+            if matches!(event, FileWatcherEvent::ConfigChanged) {
+                config_events += 1;
+            }
+        }
+        assert_eq!(config_events, 1);
     }
 
     #[test]
@@ -448,6 +517,7 @@ mod tests {
         let root = path("/tmp/skills");
         let state = RwLock::new(WatchState {
             skills_roots: HashSet::from([root.clone()]),
+            config_path: path("/tmp/code/config.toml"),
         });
         let event = notify_event(
             EventKind::Remove(RemoveKind::Any),
@@ -455,7 +525,23 @@ mod tests {
         );
 
         let classified = classify_event(&event, &state);
-        assert_eq!(classified, vec![root.join("demo/SKILL.md")]);
+        assert_eq!(classified.skills_paths, vec![root.join("demo/SKILL.md")]);
+    }
+
+    #[test]
+    fn classify_event_detects_only_the_active_config_file() {
+        let config_path = path("/tmp/code/config.toml");
+        let state = RwLock::new(WatchState {
+            skills_roots: HashSet::new(),
+            config_path: config_path.clone(),
+        });
+        let event = notify_event(
+            EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Any)),
+            vec![config_path.clone(), path("/tmp/code/other.toml")],
+        );
+
+        let classified = classify_event(&event, &state);
+        assert_eq!(classified.config_paths, vec![config_path]);
+        assert!(classified.skills_paths.is_empty());
     }
 }
-

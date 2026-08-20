@@ -134,23 +134,49 @@ impl ChatWidget<'_> {
         match code_core::config::find_code_home() {
             Ok(home) => match code_core::config::set_mcp_server_enabled(&home, name, enable) {
                 Ok(changed) => {
-                    if changed {
-                        if enable {
-                            if let Ok((enabled, _)) = code_core::config::list_mcp_servers(&home)
-                                && let Some((_, cfg)) = enabled.into_iter().find(|(n, _)| n == name)
-                                {
-                                    self.config.mcp_servers.insert(name.to_owned(), cfg);
-                                }
-                        } else {
-                            self.config.mcp_servers.remove(name);
-                        }
-                        let msg = format!(
-                            "{} MCP server '{}'",
-                            if enable { "Enabled" } else { "Disabled" },
-                            name
-                        );
-                        self.push_background_tail(msg);
+                    if !changed {
+                        self.push_background_tail(format!(
+                            "No change: server '{}' was already {}",
+                            name,
+                            if enable { "enabled" } else { "disabled" }
+                        ));
+                        return;
                     }
+
+                    let live_config = if enable {
+                        code_core::config::list_mcp_servers(&home)
+                            .ok()
+                            .and_then(|(enabled, _)| {
+                                enabled.into_iter().find(|(server, _)| server == name)
+                            })
+                            .map(|(_, cfg)| cfg)
+                    } else {
+                        None
+                    };
+
+                    if enable {
+                        let Some(config) = live_config.clone() else {
+                            self.history_push_plain_state(history_cell::new_error_event(format!(
+                                "Enabled MCP server '{name}', but could not reload its configuration"
+                            )));
+                            return;
+                        };
+                        self.config.mcp_servers.insert(name.to_owned(), config);
+                    } else {
+                        self.config.mcp_servers.remove(name);
+                    }
+
+                    self.submit_op(Op::SetMcpServerEnabled {
+                        server: name.to_owned(),
+                        enabled: enable,
+                    });
+
+                    let msg = format!(
+                        "{} MCP server '{}'",
+                        if enable { "Enabled" } else { "Disabled" },
+                        name
+                    );
+                    self.push_background_tail(msg);
                 }
                 Err(e) => {
                     let msg = format!("Failed to update MCP server '{name}': {e}");
@@ -162,6 +188,15 @@ impl ChatWidget<'_> {
                 self.history_push_plain_state(history_cell::new_error_event(msg));
             }
         }
+    }
+
+    pub(crate) fn reload_mcp_servers(&mut self, server: Option<String>) {
+        let label = server
+            .as_deref()
+            .map(|name| format!("MCP server '{name}'"))
+            .unwrap_or_else(|| "all MCP servers".to_owned());
+        self.submit_op(Op::ReloadMcpServers { server });
+        self.push_background_tail(format!("Reloading {label}"));
     }
 
     pub(crate) fn toggle_mcp_server_tool(

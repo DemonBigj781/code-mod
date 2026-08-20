@@ -196,12 +196,6 @@ impl Runner<'_> {
                 excluded_tools.insert((tool.mcp_server.clone(), tool.tool_name.clone()));
             }
         }
-        for (server_name, server_cfg) in &config.mcp_servers {
-            for tool_name in &server_cfg.disabled_tools {
-                excluded_tools.insert((server_name.clone(), tool_name.clone()));
-            }
-        }
-
         // Capture REPL state from the old session so it can be restored in
         // the replacement handles after rebuild (e.g. when Deno permissions
         // change in the TUI settings page).

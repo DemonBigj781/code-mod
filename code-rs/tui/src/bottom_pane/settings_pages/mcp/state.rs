@@ -209,7 +209,7 @@ impl McpSettingsView {
 
     pub(super) fn request_refresh(&self) {
         self.app_event_tx
-            .send(AppEvent::codex_op(code_core::protocol::Op::RefreshMcpTools));
+            .send(AppEvent::ReloadMcpServers { server: None });
     }
 
     pub(super) fn queue_status_report(&self) {

@@ -341,6 +341,15 @@ pub enum Op {
     /// Reply is delivered via `EventMsg::McpListToolsResponse`.
     RefreshMcpTools,
 
+    /// Restart one configured MCP server, or all servers when `server` is absent.
+    ReloadMcpServers { server: Option<String> },
+
+    /// Apply a persisted MCP server enablement change to the live session.
+    SetMcpServerEnabled {
+        server: String,
+        enabled: bool,
+    },
+
     /// Update runtime MCP tool enablement for a specific server/tool pair.
     SetMcpToolEnabled {
         server: String,
@@ -976,6 +985,9 @@ pub enum EventMsg {
 
     /// Ack the client's configure message.
     SessionConfigured(SessionConfiguredEvent),
+
+    /// The active config.toml changed on disk and should be reloaded by the client.
+    ConfigChanged,
 
     /// Lifecycle hook execution started (hooks.json).
     HookStarted(code_protocol::protocol::HookStartedEvent),

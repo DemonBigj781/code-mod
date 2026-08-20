@@ -533,6 +533,12 @@ pub(crate) enum AppEvent {
     /// Enable/disable a specific MCP server
     UpdateMcpServer { name: String, enable: bool },
 
+    /// Restart one MCP server, or all configured servers when `server` is absent.
+    ReloadMcpServers { server: Option<String> },
+
+    /// Reload config.toml while preserving startup-only CLI overrides.
+    ReloadConfigFromDisk,
+
     /// Enable/disable a specific tool exposed by an MCP server.
     UpdateMcpServerTool {
         server_name: String,

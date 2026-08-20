@@ -141,6 +141,9 @@ impl ChatWidget<'_> {
                 self.request_redraw();
                 self.flush_history_snapshot_if_needed(true);
             }
+            EventMsg::ConfigChanged => {
+                self.app_event_tx.send(AppEvent::ReloadConfigFromDisk);
+            }
             EventMsg::WebSearchBegin(ev) => {
                 self.ensure_spinner_for_activity("web-search-begin");
                 // Enforce order presence (tool events should carry it)

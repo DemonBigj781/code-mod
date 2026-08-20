@@ -1,0 +1,150 @@
+name: MCP Reload Regression Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "code-rs/app-server/src/message_processor/v2.rs"
+      - "code-rs/core/src/codex/streaming/submission/**"
+      - "code-rs/core/src/config/**"
+      - "code-rs/core/src/config.rs"
+      - "code-rs/core/src/config_types.rs"
+      - "code-rs/core/src/conversation_manager.rs"
+      - "code-rs/core/src/file_watcher.rs"
+      - "code-rs/core/src/mcp_connection_manager.rs"
+      - "code-rs/core/src/protocol.rs"
+      - "code-rs/core/tests/mcp_reload.rs"
+      - "code-rs/exec/src/event_processor_with_human_output.rs"
+      - "code-rs/mcp-server/src/code_tool_runner.rs"
+      - "code-rs/tui/src/app/**"
+      - "code-rs/tui/src/app_event.rs"
+      - "code-rs/tui/src/bottom_pane/settings_pages/mcp/**"
+      - "code-rs/tui/src/chatwidget/**"
+      - ".github/workflows/mcp-reload-tests.yml"
+
+concurrency:
+  group: mcp-reload-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test live MCP lifecycle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      CARGO_INCREMENTAL: "0"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
+      RUST_WORKSPACE_DIR: code-rs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read Rust toolchain
+        id: rust_toolchain
+        shell: sh
+        run: |
+          set -eu
+          channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' code-rs/rust-toolchain.toml | head -n 1)
+          if [ -z "$channel" ]; then
+            echo "Unable to read the Rust channel from code-rs/rust-toolchain.toml" >&2
+            exit 1
+          fi
+          printf 'channel=%s\n' "$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust_toolchain.outputs.channel }}
+
+      - name: Cache Rust tests
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          prefix-key: code-mcp-reload-tests
+          shared-key: rust-${{ steps.rust_toolchain.outputs.channel }}
+          workspaces: code-rs -> target
+          cache-targets: true
+          cache-workspace-crates: true
+          cache-on-failure: true
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure compiler cache
+        shell: sh
+        run: |
+          set -eu
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'RUSTC_WRAPPER=sccache'
+            echo 'SCCACHE_IDLE_TIMEOUT=1800'
+            echo 'SCCACHE_CACHE_SIZE=10G'
+          } >> "$GITHUB_ENV"
+
+      - name: Install Linux test dependencies
+        shell: sh
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            libssl-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+          {
+            echo 'CC=clang'
+            echo 'CXX=clang++'
+            echo 'OPENSSL_NO_VENDOR=1'
+          } >> "$GITHUB_ENV"
+
+      - name: Prefetch dependencies
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo fetch --locked
+
+      - name: Test connection manager reload and enablement
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: |
+          cargo test --frozen --locked -j1 -p code-core mcp_connection_manager::tests::
+
+      - name: Test config watcher reload signal
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-core file_watcher::tests::config_change_emits_reload_signal -- --exact
+
+      - name: Test conversation reload event ordering and fanout
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-core --test mcp_reload
+
+      - name: Test MCP reload UI actions
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
+          cargo test --frozen --locked -j1 -p code-tui mcp_reload
+          cargo test --frozen --locked -j1 -p code-tui config_reload_event_requests_disk_reload
+
+      - name: Compile app-server refresh integration
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-app-server mcp_server_refresh_v2
+
+      - name: Compile non-interactive event consumers
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        run: cargo test --frozen --locked -j1 -p code-exec -p code-mcp-server --no-run

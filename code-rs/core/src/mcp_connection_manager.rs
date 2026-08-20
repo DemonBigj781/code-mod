@@ -410,6 +410,8 @@ pub struct McpConnectionManager {
     mcp_oauth_credentials_store_mode: OAuthCredentialsStoreMode,
     tx_event: Sender<Event>,
     elicitation_requests: ElicitationRequestManager,
+    server_configs: StdRwLock<HashMap<String, McpServerConfig>>,
+    disabled_server_configs: StdRwLock<HashMap<String, McpServerConfig>>,
     server_transports: StdRwLock<HashMap<String, McpServerTransportConfig>>,
     server_scheduling: StdRwLock<HashMap<String, McpServerSchedulingToml>>,
     tool_scheduling: StdRwLock<HashMap<(String, String), McpToolSchedulingOverrideToml>>,
@@ -424,6 +426,7 @@ pub struct McpConnectionManager {
 
     /// Fully qualified tool name -> tool instance.
     tools: StdRwLock<HashMap<String, ToolInfo>>,
+    base_excluded_tools: HashSet<(String, String)>,
     excluded_tools: StdRwLock<HashSet<(String, String)>>,
     server_names: StdRwLock<Vec<String>>,
     failures: StdRwLock<HashMap<String, McpServerFailure>>,
@@ -437,6 +440,8 @@ impl Default for McpConnectionManager {
             mcp_oauth_credentials_store_mode: OAuthCredentialsStoreMode::default(),
             tx_event,
             elicitation_requests: ElicitationRequestManager::default(),
+            server_configs: StdRwLock::new(HashMap::new()),
+            disabled_server_configs: StdRwLock::new(HashMap::new()),
             server_transports: StdRwLock::new(HashMap::new()),
             server_scheduling: StdRwLock::new(HashMap::new()),
             tool_scheduling: StdRwLock::new(HashMap::new()),
@@ -444,6 +449,7 @@ impl Default for McpConnectionManager {
             tool_limiters: StdRwLock::new(HashMap::new()),
             clients: TokioRwLock::new(HashMap::new()),
             tools: StdRwLock::new(HashMap::new()),
+            base_excluded_tools: HashSet::new(),
             excluded_tools: StdRwLock::new(HashSet::new()),
             server_names: StdRwLock::new(Vec::new()),
             failures: StdRwLock::new(HashMap::new()),
@@ -468,6 +474,22 @@ impl McpConnectionManager {
         tx_event: Sender<Event>,
         approval_policy: AskForApproval,
     ) -> Result<(Self, ClientStartErrors)> {
+        let mut disabled_server_configs = match crate::config::list_mcp_servers(&code_home) {
+            Ok((_, disabled)) => disabled.into_iter().collect::<HashMap<_, _>>(),
+            Err(error) => {
+                warn!(
+                    "failed to load disabled MCP server configs from {}: {error:#}",
+                    code_home.display()
+                );
+                HashMap::new()
+            }
+        };
+        disabled_server_configs.retain(|disabled_name, _| {
+            !mcp_servers
+                .keys()
+                .any(|enabled_name| enabled_name.eq_ignore_ascii_case(disabled_name))
+        });
+
         // Early exit if no servers are configured.
         if mcp_servers.is_empty() {
             let elicitation_requests = ElicitationRequestManager::new(approval_policy);
@@ -477,6 +499,8 @@ impl McpConnectionManager {
                     mcp_oauth_credentials_store_mode,
                     tx_event,
                     elicitation_requests,
+                    server_configs: StdRwLock::new(HashMap::new()),
+                    disabled_server_configs: StdRwLock::new(disabled_server_configs),
                     server_transports: StdRwLock::new(HashMap::new()),
                     server_scheduling: StdRwLock::new(HashMap::new()),
                     tool_scheduling: StdRwLock::new(HashMap::new()),
@@ -484,6 +508,7 @@ impl McpConnectionManager {
                     tool_limiters: StdRwLock::new(HashMap::new()),
                     clients: TokioRwLock::new(HashMap::new()),
                     tools: StdRwLock::new(HashMap::new()),
+                    base_excluded_tools: excluded_tools.clone(),
                     excluded_tools: StdRwLock::new(excluded_tools),
                     server_names: StdRwLock::new(Vec::new()),
                     failures: StdRwLock::new(HashMap::new()),
@@ -493,6 +518,15 @@ impl McpConnectionManager {
         }
 
         // Launch all configured servers concurrently.
+        let server_configs = mcp_servers.clone();
+        let base_excluded_tools = excluded_tools.clone();
+        let mut excluded_tools = excluded_tools;
+        excluded_tools.extend(server_configs.iter().flat_map(|(server_name, cfg)| {
+            cfg.disabled_tools
+                .iter()
+                .cloned()
+                .map(|tool_name| (server_name.clone(), tool_name))
+        }));
         let mut join_set = JoinSet::new();
         let mut errors = ClientStartErrors::new();
         let elicitation_requests = ElicitationRequestManager::new(approval_policy);
@@ -691,27 +725,30 @@ impl McpConnectionManager {
 
         let tools = qualify_tools(all_tools);
 
-        let mut server_names: Vec<String> = clients.keys().cloned().collect();
-        server_names.sort();
+        let mut server_names: Vec<String> = server_configs.keys().cloned().collect();
+        server_names.sort_by_key(|name| name.to_ascii_lowercase());
         let failures = errors.clone();
 
         Ok((
             Self {
-            code_home,
-            mcp_oauth_credentials_store_mode,
-            tx_event,
-            elicitation_requests,
-            server_transports: StdRwLock::new(server_transports),
-            server_scheduling: StdRwLock::new(server_scheduling),
-            tool_scheduling: StdRwLock::new(tool_scheduling),
-            server_limiters: StdRwLock::new(server_limiters),
-            tool_limiters: StdRwLock::new(tool_limiters),
-            clients: TokioRwLock::new(clients),
-            tools: StdRwLock::new(tools),
-            excluded_tools: StdRwLock::new(excluded_tools),
-            server_names: StdRwLock::new(server_names),
-            failures: StdRwLock::new(failures),
-        },
+                code_home,
+                mcp_oauth_credentials_store_mode,
+                tx_event,
+                elicitation_requests,
+                server_configs: StdRwLock::new(server_configs),
+                disabled_server_configs: StdRwLock::new(disabled_server_configs),
+                server_transports: StdRwLock::new(server_transports),
+                server_scheduling: StdRwLock::new(server_scheduling),
+                tool_scheduling: StdRwLock::new(tool_scheduling),
+                server_limiters: StdRwLock::new(server_limiters),
+                tool_limiters: StdRwLock::new(tool_limiters),
+                clients: TokioRwLock::new(clients),
+                tools: StdRwLock::new(tools),
+                base_excluded_tools,
+                excluded_tools: StdRwLock::new(excluded_tools),
+                server_names: StdRwLock::new(server_names),
+                failures: StdRwLock::new(failures),
+            },
             errors,
         ))
     }
@@ -723,6 +760,54 @@ impl McpConnectionManager {
             Ok(guard) => guard,
             Err(poisoned) => {
                 warn!("MCP server scheduling lock poisoned; recovering inner state");
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    fn server_configs_read(
+        &self,
+    ) -> std::sync::RwLockReadGuard<'_, HashMap<String, McpServerConfig>> {
+        match self.server_configs.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                warn!("MCP server configs lock poisoned; recovering inner state");
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    fn server_configs_write(
+        &self,
+    ) -> std::sync::RwLockWriteGuard<'_, HashMap<String, McpServerConfig>> {
+        match self.server_configs.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                warn!("MCP server configs lock poisoned; recovering inner state");
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    fn disabled_server_configs_read(
+        &self,
+    ) -> std::sync::RwLockReadGuard<'_, HashMap<String, McpServerConfig>> {
+        match self.disabled_server_configs.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                warn!("MCP disabled server configs lock poisoned; recovering inner state");
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    fn disabled_server_configs_write(
+        &self,
+    ) -> std::sync::RwLockWriteGuard<'_, HashMap<String, McpServerConfig>> {
+        match self.disabled_server_configs.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                warn!("MCP disabled server configs lock poisoned; recovering inner state");
                 poisoned.into_inner()
             }
         }
@@ -1287,6 +1372,8 @@ impl McpConnectionManager {
         {
             let mut scheduling = self.tool_scheduling_write();
             let mut limiters = self.tool_limiters_write();
+            scheduling.retain(|(server, _), _| !server.eq_ignore_ascii_case(server_name));
+            limiters.retain(|(server, _), _| !server.eq_ignore_ascii_case(server_name));
             for (tool_name, override_cfg) in &cfg.tool_scheduling {
                 let key = (server_name.to_owned(), tool_name.clone());
                 if override_cfg.is_empty() {
@@ -1336,6 +1423,7 @@ impl McpConnectionManager {
 
         let client = match transport {
             McpServerTransportConfig::Stdio { command, args, env } => {
+                let command_for_error = command.clone();
                 let command_os: OsString = command.into();
                 let args_os: Vec<OsString> = args.into_iter().map(Into::into).collect();
                 let send_elicitation = self
@@ -1349,7 +1437,12 @@ impl McpConnectionManager {
                     startup_timeout,
                     send_elicitation,
                 )
-                .await?
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to start MCP server '{server_name}' with command '{command_for_error}'"
+                    )
+                })?
             }
             McpServerTransportConfig::StreamableHttp {
                 url,
@@ -1359,6 +1452,7 @@ impl McpConnectionManager {
                 http_headers,
                 env_http_headers,
             } => {
+                let url_for_error = url.clone();
                 let bearer_token = resolve_streamable_http_bearer_token(
                     server_name,
                     bearer_token,
@@ -1379,7 +1473,10 @@ impl McpConnectionManager {
                     startup_timeout,
                     send_elicitation,
                 })
-                .await?
+                .await
+                .with_context(|| {
+                    format!("failed to connect MCP server '{server_name}' at '{url_for_error}'")
+                })?
             }
         };
 
@@ -1406,7 +1503,10 @@ impl McpConnectionManager {
 
         {
             let mut names = self.server_names_write();
-            if !names.iter().any(|name| name.eq_ignore_ascii_case(server_name)) {
+            if !names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(server_name))
+            {
                 names.push(server_name.to_owned());
                 names.sort_by_key(|name| name.to_ascii_lowercase());
                 names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
@@ -1420,6 +1520,163 @@ impl McpConnectionManager {
 
         self.refresh_tools().await;
         Ok(true)
+    }
+
+    fn replace_server_configs(&self, configs: HashMap<String, McpServerConfig>) {
+        let mut names: Vec<String> = configs.keys().cloned().collect();
+        names.sort_by_key(|name| name.to_ascii_lowercase());
+
+        let mut excluded = self.base_excluded_tools.clone();
+        excluded.extend(configs.iter().flat_map(|(server_name, cfg)| {
+            cfg.disabled_tools
+                .iter()
+                .cloned()
+                .map(|tool_name| (server_name.clone(), tool_name))
+        }));
+
+        *self.server_configs_write() = configs;
+        *self.server_names_write() = names;
+        *self.excluded_tools_write() = excluded;
+    }
+
+    async fn stop_server(&self, server_name: &str, keep_config: bool) -> bool {
+        let removed = {
+            let mut clients = self.clients.write().await;
+            clients.remove(server_name)
+        };
+        let had_client = removed.is_some();
+
+        self.refresh_tools().await;
+
+        if let Some(managed) = removed {
+            managed.shutdown().await;
+        }
+
+        if !keep_config {
+            self.server_configs_write().remove(server_name);
+            self.server_names_write()
+                .retain(|name| !name.eq_ignore_ascii_case(server_name));
+            self.server_transports_write().remove(server_name);
+            self.server_scheduling_write().remove(server_name);
+            self.server_limiters_write().remove(server_name);
+            self.tool_scheduling_write()
+                .retain(|(server, _), _| !server.eq_ignore_ascii_case(server_name));
+            self.tool_limiters_write()
+                .retain(|(server, _), _| !server.eq_ignore_ascii_case(server_name));
+            self.failures_write().remove(server_name);
+        }
+
+        had_client
+    }
+
+    /// Stop and restart one MCP server using the current session configuration.
+    pub async fn reload_server(&self, server_name: &str) -> Result<()> {
+        let cfg = self
+            .server_configs_read()
+            .get(server_name)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown MCP server '{server_name}'"))?;
+
+        self.stop_server(server_name, true).await;
+
+        if let Err(error) = self.ensure_server_started(server_name, &cfg).await {
+            self.refresh_tools().await;
+            self.failures_write().insert(
+                server_name.to_owned(),
+                McpServerFailure {
+                    phase: McpServerFailurePhase::Start,
+                    message: format!("{error:#}"),
+                },
+            );
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    pub async fn reload_servers(&self, server: Option<&str>) -> Result<()> {
+        if let Some(server_name) = server {
+            let target = self
+                .server_configs_read()
+                .keys()
+                .find(|name| name.eq_ignore_ascii_case(server_name))
+                .cloned()
+                .ok_or_else(|| anyhow!("unknown MCP server '{server_name}'"))?;
+            return self.reload_server(&target).await;
+        }
+
+        let targets = self.server_names_read().clone();
+
+        let mut failures = Vec::new();
+        for target in targets {
+            if let Err(error) = self.reload_server(&target).await {
+                failures.push(format!("{target}: {error:#}"));
+            }
+        }
+
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "failed to reload MCP servers: {}",
+                failures.join("; ")
+            ))
+        }
+    }
+
+    pub async fn set_server_enabled(&self, server_name: &str, enabled: bool) -> Result<()> {
+        if enabled {
+            if self
+                .server_configs_read()
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case(server_name))
+            {
+                return Ok(());
+            }
+
+            let (canonical_name, config) = {
+                let disabled = self.disabled_server_configs_read();
+                disabled
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(server_name))
+                    .map(|(name, config)| (name.clone(), config.clone()))
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "unknown disabled MCP server '{server_name}' in current session; reload configuration to enable it"
+                        )
+                    })?
+            };
+            self.disabled_server_configs_write().remove(&canonical_name);
+            let mut configs = self.server_configs_read().clone();
+            configs.insert(canonical_name.clone(), config);
+            self.replace_server_configs(configs);
+            return self.reload_server(&canonical_name).await;
+        }
+
+        let (canonical_name, config) = {
+            let configs = self.server_configs_read();
+            if let Some((name, config)) = configs
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(server_name))
+            {
+                (name.clone(), config.clone())
+            } else if self
+                .disabled_server_configs_read()
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case(server_name))
+            {
+                return Ok(());
+            } else {
+                return Err(anyhow!("unknown MCP server '{server_name}'"));
+            }
+        };
+
+        self.stop_server(&canonical_name, false).await;
+        self.disabled_server_configs_write()
+            .insert(canonical_name, config);
+        let configs = self.server_configs_read().clone();
+        self.replace_server_configs(configs);
+        Ok(())
     }
 
     pub(crate) async fn resolve_elicitation(
@@ -1576,7 +1833,12 @@ impl McpConnectionManager {
             clients.clone()
         };
         let excluded_tools = self.excluded_tools_read().clone();
-        let mut errors = HashMap::new();
+        let mut errors: HashMap<String, McpServerFailure> = self
+            .failures_read()
+            .iter()
+            .filter(|(_, failure)| failure.phase == McpServerFailurePhase::Start)
+            .map(|(server, failure)| (server.clone(), failure.clone()))
+            .collect();
         let all_tools = list_all_tools(&clients_snapshot, &excluded_tools, &mut errors).await;
         let tools = qualify_tools(all_tools);
         *self.tools_write() = tools;
@@ -1834,5 +2096,304 @@ mod tests {
             msg.contains("nonexistent-cmd"),
             "error should include the missing command, got: {msg}"
         );
+    }
+
+    #[tokio::test]
+    async fn reload_failed_restart_removes_stale_tools_and_records_start_failure() {
+        let manager = McpConnectionManager::default();
+        manager.tools_write().insert(
+            "broken__stale".to_string(),
+            create_test_tool("broken", "stale"),
+        );
+
+        let cfg = McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: "nonexistent-reload-command".to_string(),
+                args: Vec::new(),
+                env: None,
+            },
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            disabled_tools: Vec::new(),
+            scheduling: crate::config_types::McpServerSchedulingToml::default(),
+            tool_scheduling: std::collections::BTreeMap::new(),
+        };
+        manager.replace_server_configs(HashMap::from([("broken".to_owned(), cfg)]));
+
+        let error = manager
+            .reload_servers(Some("broken"))
+            .await
+            .expect_err("missing executable should fail reload");
+
+        assert!(error.to_string().contains("nonexistent-reload-command"));
+        assert!(!manager.clients.read().await.contains_key("broken"));
+        assert!(manager.list_all_tools().is_empty());
+        let failure = manager
+            .list_server_failures()
+            .remove("broken")
+            .expect("reload failure should be retained");
+        assert_eq!(failure.phase, McpServerFailurePhase::Start);
+        assert!(failure.message.contains("nonexistent-reload-command"));
+    }
+
+    #[tokio::test]
+    async fn reload_unknown_server_returns_visible_error() {
+        let manager = McpConnectionManager::default();
+        let error = manager
+            .reload_servers(Some("missing"))
+            .await
+            .expect_err("unknown server should fail");
+
+        assert_eq!(error.to_string(), "unknown MCP server 'missing'");
+    }
+
+    #[tokio::test]
+    async fn reload_named_server_uses_manager_owned_config() {
+        let manager = McpConnectionManager::default();
+        let config = |command: &str| McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: command.to_owned(),
+                args: Vec::new(),
+                env: None,
+            },
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            disabled_tools: Vec::new(),
+            scheduling: crate::config_types::McpServerSchedulingToml::default(),
+            tool_scheduling: std::collections::BTreeMap::new(),
+        };
+        manager.replace_server_configs(HashMap::from([(
+            "alpha".to_owned(),
+            config("old-alpha-command"),
+        )]));
+
+        manager
+            .reload_servers(Some("ALPHA"))
+            .await
+            .expect_err("missing alpha command should fail reload");
+
+        let configs = manager.server_configs_read();
+        assert_eq!(configs.len(), 1);
+        assert!(configs.contains_key("alpha"));
+        assert!(!configs.contains_key("beta"));
+        assert_eq!(manager.list_server_names(), vec!["alpha"]);
+        assert!(manager.list_server_failures()["alpha"]
+            .message
+            .contains("old-alpha-command"));
+    }
+
+    #[tokio::test]
+    async fn reload_all_preserves_each_start_failure() {
+        let manager = McpConnectionManager::default();
+        let config = |command: &str| McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: command.to_owned(),
+                args: Vec::new(),
+                env: None,
+            },
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            disabled_tools: Vec::new(),
+            scheduling: crate::config_types::McpServerSchedulingToml::default(),
+            tool_scheduling: std::collections::BTreeMap::new(),
+        };
+
+        manager.replace_server_configs(HashMap::from([
+            ("alpha".to_owned(), config("missing-alpha-command")),
+            ("beta".to_owned(), config("missing-beta-command")),
+        ]));
+
+        manager
+            .reload_servers(None)
+            .await
+            .expect_err("both missing commands should fail reload");
+
+        let failures = manager.list_server_failures();
+        assert!(failures["alpha"].message.contains("missing-alpha-command"));
+        assert!(failures["beta"].message.contains("missing-beta-command"));
+    }
+
+    #[tokio::test]
+    async fn mcp_server_enabled_disable_removes_runtime_state() {
+        let manager = McpConnectionManager::default();
+        manager.tools_write().insert(
+            "alpha__stale".to_owned(),
+            create_test_tool("alpha", "stale"),
+        );
+        manager.replace_server_configs(HashMap::from([(
+            "alpha".to_owned(),
+            McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: "unused".to_owned(),
+                    args: Vec::new(),
+                    env: None,
+                },
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
+                disabled_tools: Vec::new(),
+                scheduling: crate::config_types::McpServerSchedulingToml::default(),
+                tool_scheduling: std::collections::BTreeMap::new(),
+            },
+        )]));
+
+        manager
+            .set_server_enabled("alpha", false)
+            .await
+            .expect("disable should succeed");
+
+        assert!(manager.list_server_names().is_empty());
+        assert!(manager.list_all_tools().is_empty());
+        assert!(!manager.server_configs_read().contains_key("alpha"));
+        assert!(manager.disabled_server_configs_read().contains_key("alpha"));
+    }
+
+    #[tokio::test]
+    async fn mcp_server_disable_then_enable_uses_preserved_session_config() {
+        let manager = McpConnectionManager::default();
+        let config = McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: "missing-enable-command".to_owned(),
+                args: Vec::new(),
+                env: None,
+            },
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            disabled_tools: Vec::new(),
+            scheduling: crate::config_types::McpServerSchedulingToml::default(),
+            tool_scheduling: std::collections::BTreeMap::new(),
+        };
+        manager.replace_server_configs(HashMap::from([("alpha".to_owned(), config)]));
+
+        manager
+            .set_server_enabled("alpha", false)
+            .await
+            .expect("disable should preserve the session config");
+        assert!(!manager.server_configs_read().contains_key("alpha"));
+        assert!(manager.disabled_server_configs_read().contains_key("alpha"));
+
+        manager
+            .set_server_enabled("ALPHA", true)
+            .await
+            .expect_err("missing command should fail enable");
+
+        assert_eq!(manager.list_server_names(), vec!["alpha"]);
+        assert!(manager.server_configs_read().contains_key("alpha"));
+        assert!(!manager.disabled_server_configs_read().contains_key("alpha"));
+        assert!(
+            manager.list_server_failures()["alpha"]
+                .message
+                .contains("missing-enable-command")
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_all_skips_servers_disabled_in_the_same_session() {
+        let manager = McpConnectionManager::default();
+        manager.replace_server_configs(HashMap::from([(
+            "alpha".to_owned(),
+            McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: "must-not-run-after-disable".to_owned(),
+                    args: Vec::new(),
+                    env: None,
+                },
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
+                disabled_tools: Vec::new(),
+                scheduling: crate::config_types::McpServerSchedulingToml::default(),
+                tool_scheduling: std::collections::BTreeMap::new(),
+            },
+        )]));
+
+        manager
+            .set_server_enabled("alpha", false)
+            .await
+            .expect("disable should succeed");
+        manager
+            .reload_servers(None)
+            .await
+            .expect("reload all should ignore disabled servers");
+
+        assert!(manager.list_server_names().is_empty());
+        assert!(manager.list_server_failures().is_empty());
+        assert!(manager.disabled_server_configs_read().contains_key("alpha"));
+    }
+
+    #[tokio::test]
+    async fn startup_disabled_server_can_be_enabled_without_reloading_config() {
+        let code_home = tempfile::tempdir().expect("code home");
+        std::fs::write(
+            code_home.path().join(crate::config::CONFIG_TOML_FILE),
+            r#"[mcp_servers_disabled.alpha]
+command = "missing-startup-disabled-command"
+"#,
+        )
+        .expect("write disabled MCP config");
+        let (tx_event, _rx_event) = async_channel::unbounded();
+        let (manager, errors) = McpConnectionManager::new(
+            code_home.path().to_path_buf(),
+            OAuthCredentialsStoreMode::Auto,
+            HashMap::new(),
+            HashSet::new(),
+            tx_event,
+            AskForApproval::OnRequest,
+        )
+        .await
+        .expect("manager should load disabled configs without starting them");
+
+        assert!(errors.is_empty());
+        assert!(manager.disabled_server_configs_read().contains_key("alpha"));
+
+        let error = manager
+            .set_server_enabled("alpha", true)
+            .await
+            .expect_err("the preserved config should be used for the enable attempt");
+        assert!(
+            error
+                .to_string()
+                .contains("missing-startup-disabled-command")
+        );
+        assert!(manager.server_configs_read().contains_key("alpha"));
+        assert!(!manager.disabled_server_configs_read().contains_key("alpha"));
+    }
+
+    #[tokio::test]
+    async fn mcp_server_enabled_enable_requires_current_session_config() {
+        let manager = McpConnectionManager::default();
+
+        let error = manager
+            .set_server_enabled("missing", true)
+            .await
+            .expect_err("unknown disabled server should require config reload");
+
+        assert_eq!(
+            error.to_string(),
+            "unknown disabled MCP server 'missing' in current session; reload configuration to enable it"
+        );
+    }
+
+    #[test]
+    fn replacing_server_configs_uses_stable_case_insensitive_order() {
+        let manager = McpConnectionManager::default();
+        let config = |command: &str| McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: command.to_owned(),
+                args: Vec::new(),
+                env: None,
+            },
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            disabled_tools: Vec::new(),
+            scheduling: crate::config_types::McpServerSchedulingToml::default(),
+            tool_scheduling: std::collections::BTreeMap::new(),
+        };
+
+        manager.replace_server_configs(HashMap::from([
+            ("zeta".to_owned(), config("zeta")),
+            ("Alpha".to_owned(), config("alpha")),
+            ("beta".to_owned(), config("beta")),
+        ]));
+
+        assert_eq!(manager.list_server_names(), vec!["Alpha", "beta", "zeta"]);
     }
 }

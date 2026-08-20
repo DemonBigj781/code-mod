@@ -2190,15 +2190,24 @@ impl MessageProcessor {
         request_id: mcp_types::RequestId,
         _params: Option<()>,
     ) {
-        let _config = match self.load_effective_config(/*cwd*/ None) {
-            Ok(config) => config,
-            Err(error) => {
-                self.outgoing
-                    .send_error_to_connection(connection_id, request_id, error)
-                    .await;
-                return;
-            }
-        };
+        if let Err(error) = self
+            .conversation_manager
+            .reload_mcp_servers()
+            .await
+        {
+            self.outgoing
+                .send_error_to_connection(
+                    connection_id,
+                    request_id,
+                    JSONRPCErrorError {
+                        code: INTERNAL_ERROR_CODE,
+                        message: format!("failed to reload MCP servers: {error}"),
+                        data: None,
+                    },
+                )
+                .await;
+            return;
+        }
 
         self.outgoing
             .send_response_to_connection(connection_id, request_id, McpServerRefreshResponse {})

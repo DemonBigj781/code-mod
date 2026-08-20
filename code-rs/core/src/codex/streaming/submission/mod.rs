@@ -371,59 +371,7 @@ pub(in crate::codex) async fn submission_loop(
                     send_no_session_event(sub.id).await;
                     continue;
                 };
-
-                let tools = sess
-                    .mcp_connection_manager
-                    .list_all_tools()
-                    .into_iter()
-                    .filter_map(|(name, tool)| {
-                        let value = match serde_json::to_value(tool) {
-                            Ok(value) => value,
-                            Err(err) => {
-                                warn!("failed to serialize MCP tool {name}: {err}");
-                                return None;
-                            }
-                        };
-                        match code_protocol::mcp::Tool::from_mcp_value(value) {
-                            Ok(converted) => Some((name, converted)),
-                            Err(err) => {
-                                warn!("failed to convert MCP tool {name}: {err}");
-                                None
-                            }
-                        }
-                    })
-                    .collect();
-                let server_tools = sess.mcp_connection_manager.list_tools_by_server();
-                let server_disabled_tools =
-                    sess.mcp_connection_manager.list_disabled_tools_by_server();
-                let server_failures = sess.mcp_connection_manager.list_server_failures();
-                let resources =
-                    convert_mcp_resources_by_server(sess.mcp_connection_manager.list_resources_by_server().await);
-                let resource_templates = convert_mcp_resource_templates_by_server(
-                    sess.mcp_connection_manager
-                        .list_resource_templates_by_server()
-                        .await,
-                );
-                let auth_statuses = sess.mcp_connection_manager.list_auth_statuses().await;
-
-                let event = Event {
-                    id: sub.id.clone(),
-                    event_seq: 0,
-                    msg: EventMsg::McpListToolsResponse(McpListToolsResponseEvent {
-                        tools,
-                        server_tools: Some(server_tools),
-                        server_disabled_tools: Some(server_disabled_tools),
-                        server_failures: Some(server_failures),
-                        resources,
-                        resource_templates,
-                        auth_statuses,
-                    }),
-                    order: None,
-                };
-
-                if let Err(e) = tx_event.send(event).await {
-                    warn!("failed to send McpListToolsResponse event: {e}");
-                }
+                send_mcp_tools_snapshot(&sess, &tx_event, &sub.id).await;
             }
             Op::RefreshMcpTools => {
                 let sess = if let Some(sess) = sess.as_ref() { Arc::clone(sess) } else {
@@ -432,59 +380,58 @@ pub(in crate::codex) async fn submission_loop(
                 };
 
                 sess.mcp_connection_manager.refresh_tools().await;
-
-                let tools = sess
-                    .mcp_connection_manager
-                    .list_all_tools()
-                    .into_iter()
-                    .filter_map(|(name, tool)| {
-                        let value = match serde_json::to_value(tool) {
-                            Ok(value) => value,
-                            Err(err) => {
-                                warn!("failed to serialize MCP tool {name}: {err}");
-                                return None;
-                            }
-                        };
-                        match code_protocol::mcp::Tool::from_mcp_value(value) {
-                            Ok(converted) => Some((name, converted)),
-                            Err(err) => {
-                                warn!("failed to convert MCP tool {name}: {err}");
-                                None
-                            }
-                        }
-                    })
-                    .collect();
-                let server_tools = sess.mcp_connection_manager.list_tools_by_server();
-                let server_disabled_tools =
-                    sess.mcp_connection_manager.list_disabled_tools_by_server();
-                let server_failures = sess.mcp_connection_manager.list_server_failures();
-                let resources =
-                    convert_mcp_resources_by_server(sess.mcp_connection_manager.list_resources_by_server().await);
-                let resource_templates = convert_mcp_resource_templates_by_server(
-                    sess.mcp_connection_manager
-                        .list_resource_templates_by_server()
-                        .await,
-                );
-                let auth_statuses = sess.mcp_connection_manager.list_auth_statuses().await;
-
-                let event = Event {
-                    id: sub.id.clone(),
-                    event_seq: 0,
-                    msg: EventMsg::McpListToolsResponse(McpListToolsResponseEvent {
-                        tools,
-                        server_tools: Some(server_tools),
-                        server_disabled_tools: Some(server_disabled_tools),
-                        server_failures: Some(server_failures),
-                        resources,
-                        resource_templates,
-                        auth_statuses,
-                    }),
-                    order: None,
+                send_mcp_tools_snapshot(&sess, &tx_event, &sub.id).await;
+            }
+            Op::ReloadMcpServers { server } => {
+                let sess = if let Some(sess) = sess.as_ref() { Arc::clone(sess) } else {
+                    send_no_session_event(sub.id).await;
+                    continue;
                 };
 
-                if let Err(e) = tx_event.send(event).await {
-                    warn!("failed to send McpListToolsResponse event: {e}");
+                if let Err(error) = sess
+                    .mcp_connection_manager
+                    .reload_servers(server.as_deref())
+                    .await
+                {
+                    let event = sess.make_event(
+                        &sub.id,
+                        EventMsg::Error(ErrorEvent {
+                            message: error.to_string(),
+                        }),
+                    );
+                    if let Err(send_error) = tx_event.send(event).await {
+                        warn!("failed to send MCP reload error: {send_error}");
+                    }
                 }
+
+                send_mcp_tools_snapshot(&sess, &tx_event, &sub.id).await;
+            }
+            Op::SetMcpServerEnabled {
+                server,
+                enabled,
+            } => {
+                let sess = if let Some(sess) = sess.as_ref() { Arc::clone(sess) } else {
+                    send_no_session_event(sub.id).await;
+                    continue;
+                };
+
+                if let Err(error) = sess
+                    .mcp_connection_manager
+                    .set_server_enabled(&server, enabled)
+                    .await
+                {
+                    let event = sess.make_event(
+                        &sub.id,
+                        EventMsg::Error(ErrorEvent {
+                            message: error.to_string(),
+                        }),
+                    );
+                    if let Err(send_error) = tx_event.send(event).await {
+                        warn!("failed to send MCP lifecycle error: {send_error}");
+                    }
+                }
+
+                send_mcp_tools_snapshot(&sess, &tx_event, &sub.id).await;
             }
             Op::SetMcpToolEnabled {
                 server,
@@ -764,6 +711,23 @@ pub(in crate::codex) async fn submission_loop(
                             .await;
                         });
                     }
+                    Ok(crate::file_watcher::FileWatcherEvent::ConfigChanged) => {
+                        let event = match sess.as_ref() {
+                            Some(sess_arc) => sess_arc.make_event(
+                                "config-watcher",
+                                EventMsg::ConfigChanged,
+                            ),
+                            None => Event {
+                                id: "config-watcher".to_owned(),
+                                event_seq: 0,
+                                msg: EventMsg::ConfigChanged,
+                                order: None,
+                            },
+                        };
+                        if let Err(error) = tx_event.send(event).await {
+                            warn!("failed to send config change event: {error}");
+                        }
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         warn!("file watcher channel closed; disabling");
@@ -774,4 +738,59 @@ pub(in crate::codex) async fn submission_loop(
         }
     }
     debug!("Agent loop exited");
+}
+
+async fn send_mcp_tools_snapshot(sess: &Session, tx_event: &Sender<Event>, sub_id: &str) {
+    let tools = sess
+        .mcp_connection_manager
+        .list_all_tools()
+        .into_iter()
+        .filter_map(|(name, tool)| {
+            let value = match serde_json::to_value(tool) {
+                Ok(value) => value,
+                Err(err) => {
+                    warn!("failed to serialize MCP tool {name}: {err}");
+                    return None;
+                }
+            };
+            match code_protocol::mcp::Tool::from_mcp_value(value) {
+                Ok(converted) => Some((name, converted)),
+                Err(err) => {
+                    warn!("failed to convert MCP tool {name}: {err}");
+                    None
+                }
+            }
+        })
+        .collect();
+    let server_tools = sess.mcp_connection_manager.list_tools_by_server();
+    let server_disabled_tools = sess.mcp_connection_manager.list_disabled_tools_by_server();
+    let server_failures = sess.mcp_connection_manager.list_server_failures();
+    let resources = convert_mcp_resources_by_server(
+        sess.mcp_connection_manager.list_resources_by_server().await,
+    );
+    let resource_templates = convert_mcp_resource_templates_by_server(
+        sess.mcp_connection_manager
+            .list_resource_templates_by_server()
+            .await,
+    );
+    let auth_statuses = sess.mcp_connection_manager.list_auth_statuses().await;
+
+    let event = Event {
+        id: sub_id.to_owned(),
+        event_seq: 0,
+        msg: EventMsg::McpListToolsResponse(McpListToolsResponseEvent {
+            tools,
+            server_tools: Some(server_tools),
+            server_disabled_tools: Some(server_disabled_tools),
+            server_failures: Some(server_failures),
+            resources,
+            resource_templates,
+            auth_statuses,
+        }),
+        order: None,
+    };
+
+    if let Err(error) = tx_event.send(event).await {
+        warn!("failed to send McpListToolsResponse event: {error}");
+    }
 }

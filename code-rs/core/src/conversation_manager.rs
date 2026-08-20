@@ -10,6 +10,7 @@ use crate::error::Result as CodexResult;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
 use crate::protocol::SessionConfiguredEvent;
+use crate::protocol::Op;
 use crate::rollout::RolloutRecorder;
 use code_protocol::ConversationId;
 use code_protocol::protocol::SessionSource;
@@ -158,6 +159,40 @@ impl ConversationManager {
         let mut ids: Vec<ConversationId> = conversations.keys().copied().collect();
         ids.sort_by_key(ToString::to_string);
         ids
+    }
+
+    pub async fn reload_mcp_servers(&self) -> CodexResult<()> {
+        let conversations = {
+            let conversations = self.conversations.read().await;
+            let mut entries: Vec<_> = conversations
+                .iter()
+                .map(|(id, conversation)| (*id, Arc::clone(conversation)))
+                .collect();
+            entries.sort_by_key(|(id, _)| id.to_string());
+            entries
+        };
+
+        let mut first_error = None;
+        for (conversation_id, conversation) in conversations {
+            if let Err(error) = conversation
+                .submit(Op::ReloadMcpServers { server: None })
+                .await
+            {
+                tracing::warn!(
+                    %conversation_id,
+                    %error,
+                    "failed to submit MCP reload to loaded conversation"
+                );
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// Fork an existing conversation by dropping the last `drop_last_messages`

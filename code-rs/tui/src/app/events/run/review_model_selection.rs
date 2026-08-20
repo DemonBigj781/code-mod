@@ -97,6 +97,30 @@
                         widget.toggle_mcp_server(&name, enable);
                     }
                 }
+                AppEvent::ReloadMcpServers { server } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.reload_mcp_servers(server);
+                    }
+                }
+                AppEvent::ReloadConfigFromDisk => {
+                    match self.reload_config_with_startup_overrides() {
+                        Ok(config) => {
+                            self.config = config.clone();
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.apply_reloaded_config(config);
+                                widget.submit_op(widget.current_configure_session_op());
+                                widget.flash_footer_notice("Reloaded config.toml".to_owned());
+                            }
+                        }
+                        Err(error) => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.flash_footer_notice(format!(
+                                    "Failed to reload config.toml: {error}"
+                                ));
+                            }
+                        }
+                    }
+                }
                 AppEvent::UpdateMcpServerTool {
                     server_name,
                     tool_name,

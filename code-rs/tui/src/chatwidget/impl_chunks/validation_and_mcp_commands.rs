@@ -1,4 +1,16 @@
 impl ChatWidget<'_> {
+    fn parse_mcp_reload_target<'a>(
+        mut parts: impl Iterator<Item = &'a str>,
+    ) -> Result<Option<String>, String> {
+        let Some(name) = parts.next() else {
+            return Err("Usage: /mcp reload <name|all>".to_owned());
+        };
+        if parts.next().is_some() {
+            return Err("Usage: /mcp reload <name|all>".to_owned());
+        }
+        Ok((name != "all").then(|| name.to_owned()))
+    }
+
     fn validation_tool_flag_mut(
         &mut self,
         name: &str,
@@ -361,7 +373,7 @@ impl ChatWidget<'_> {
         crate::text_formatting::truncate_chars_with_ellipsis(&summary, MAX_CHARS)
     }
 
-    /// Handle `/mcp` command: manage MCP servers (status/on/off/add).
+    /// Handle `/mcp` command: manage MCP servers (status/reload/on/off/add).
     pub(crate) fn handle_mcp_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
         if trimmed.is_empty() {
@@ -384,6 +396,14 @@ impl ChatWidget<'_> {
                     self.push_background_tail(Self::format_mcp_status_report(&rows));
                 }
             }
+            "reload" => {
+                match Self::parse_mcp_reload_target(parts) {
+                    Ok(server) => self.reload_mcp_servers(server),
+                    Err(message) => {
+                        self.history_push_plain_state(history_cell::new_error_event(message));
+                    }
+                }
+            }
             "on" | "off" => {
                 let name = parts.next().unwrap_or("");
                 if name.is_empty() {
@@ -391,53 +411,7 @@ impl ChatWidget<'_> {
                     self.history_push_plain_state(history_cell::new_error_event(msg));
                     return;
                 }
-                match find_code_home() {
-                    Ok(home) => {
-                        match code_core::config::set_mcp_server_enabled(&home, name, sub == "on") {
-                            Ok(changed) => {
-                                if changed {
-                                    // Keep ChatWidget's in-memory config roughly in sync for new sessions.
-                                    if sub == "off" {
-                                        self.config.mcp_servers.remove(name);
-                                    }
-                                    if sub == "on" {
-                                        // If enabling, try to load its config from disk and add to in-memory map.
-                                        if let Ok((enabled, _)) =
-                                            code_core::config::list_mcp_servers(&home)
-                                            && let Some((_, cfg)) =
-                                                enabled.into_iter().find(|(n, _)| n == name)
-                                            {
-                                                self.config
-                                                    .mcp_servers
-                                                    .insert(name.to_owned(), cfg);
-                                            }
-                                    }
-                                    let msg = format!(
-                                        "{} MCP server '{}'",
-                                        if sub == "on" { "Enabled" } else { "Disabled" },
-                                        name
-                                    );
-                                    self.push_background_tail(msg);
-                                } else {
-                                    let msg = format!(
-                                        "No change: server '{}' was already {}",
-                                        name,
-                                        if sub == "on" { "enabled" } else { "disabled" }
-                                    );
-                                    self.push_background_tail(msg);
-                                }
-                            }
-                            Err(e) => {
-                                let msg = format!("Failed to update MCP server '{name}': {e}");
-                                self.history_push_plain_state(history_cell::new_error_event(msg));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let msg = format!("Failed to locate CODEX_HOME: {e}");
-                        self.history_push_plain_state(history_cell::new_error_event(msg));
-                    }
-                }
+                self.toggle_mcp_server(name, sub == "on");
             }
             "add" => {
                 // Support two forms:
@@ -578,7 +552,7 @@ impl ChatWidget<'_> {
             }
             _ => {
                 let msg = format!(
-                    "Unknown MCP command: '{sub}'\nUsage:\n  /mcp status\n  /mcp on <name>\n  /mcp off <name>\n  /mcp add <name> <command> [args…] [ENV=VAL…]"
+                    "Unknown MCP command: '{sub}'\nUsage:\n  /mcp status\n  /mcp reload <name|all>\n  /mcp on <name>\n  /mcp off <name>\n  /mcp add <name> <command> [args…] [ENV=VAL…]"
                 );
                 self.history_push_plain_state(history_cell::new_error_event(msg));
             }
