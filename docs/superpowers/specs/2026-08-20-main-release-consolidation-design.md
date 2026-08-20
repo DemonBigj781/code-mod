@@ -8,9 +8,11 @@ submitting coherent changes to `origin/main` for hosted one-worker compilation
 and verification.
 
 The consolidation starts from commit
-`d8a80334438402abd237b083429a67b9dc06aa1c`. The dirty source worktree at
-`/var/home/jack/.config/superpowers/worktrees/code/feat-mcp-reload` remains
-read-only evidence until every edit has been classified.
+`d8a80334438402abd237b083429a67b9dc06aa1c` and proceeds directly on the sole
+`main` checkout. The removed mixed worktree is preserved as a verified patch,
+status record, and untracked-file archive beneath the path recorded in
+`/var/home/jack/.code-backups/code-worktrees-20260820T174218Z`. That backup
+remains read-only evidence until every edit has been classified.
 
 ## Required Scope
 
@@ -54,8 +56,8 @@ on filename-level similarity. Overlapping files must be reviewed hunk by hunk.
 
 ## Delivery Architecture
 
-Work is divided into independently reviewable streams. Each stream begins in a
-fresh isolated worktree created from the latest verified `origin/main`:
+Work is divided into independently reviewable streams implemented sequentially
+in the sole `main` checkout:
 
 1. Release ledger and full dirty-hunk inventory.
 2. Small correctness fixes and missing resource/MCP edge coverage.
@@ -68,8 +70,12 @@ If the inventory identifies another coherent required stream, it is added to
 the ledger with dependencies and acceptance tests before implementation.
 
 Each implementation stream is reconstructed rather than copied wholesale. A
-stream may reuse a dirty hunk only after confirming that its surrounding source
-and assumptions still match current `origin/main`.
+stream may reuse a backed-up dirty hunk only after confirming that its
+surrounding source and assumptions still match current `main`.
+
+No linked worktree or feature branch is created. Every release edit, test,
+commit, and correction is made directly on local `main` and submitted directly
+to `origin/main`.
 
 ## Submission And Verification Flow
 
@@ -82,17 +88,17 @@ For each stream:
 
 1. Add regression tests or a deterministic validation harness before the
    implementation where practical.
-2. Reconstruct the implementation against the latest verified `origin/main`.
+2. Reconstruct the implementation against the current local `main`.
 3. Perform a hunk-level changeset review and static validation.
-4. Commit the isolated stream.
-5. Submit and push the commit to `origin/main`.
+4. Commit the coherent stream directly on `main`.
+5. Submit and push local `main` directly to `origin/main`.
 6. Allow GitHub Actions to compile and test with exactly one worker.
 7. Inspect exact hosted logs on failure, patch the same stream, and push again.
 8. Mark the stream verified only after all applicable hosted workflows pass.
 
-Dependent streams do not start from an unverified commit. Independent audit and
-design work may proceed while a hosted workflow runs, but no later stream is
-submitted on top of a failed baseline.
+Dependent streams do not start from an unverified pushed commit. Independent
+audit and design work may proceed while a hosted workflow runs, but no later
+stream is submitted on top of a failed baseline.
 
 ## Provider Feature Boundaries
 
