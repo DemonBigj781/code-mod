@@ -227,7 +227,7 @@
           "type": "string"
         },
         {
-          "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\n`ChatGPT` auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
+          "description": "\\[UNSTABLE\\] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\n`ChatGPT` auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
           "enum": [
             "chatgptAuthTokens"
           ],
@@ -748,7 +748,7 @@
           "$ref": "#/definitions/Personality"
         },
         "model_provider": {
-          "description": "The key in the `model_providers` map identifying the [`ModelProviderInfo`] to use.",
+          "description": "The key in the `model_providers` map identifying the [`ModelProviderInfo`](crate::model_provider_info::ModelProviderInfo) to use.",
           "type": "string"
         },
         "model_reasoning_effort": {
@@ -917,11 +917,18 @@
     },
     "DynamicToolSpec": {
       "properties": {
+        "deferLoading": {
+          "default": false,
+          "type": "boolean"
+        },
         "description": {
           "type": "string"
         },
         "inputSchema": true,
         "name": {
+          "type": "string"
+        },
+        "namespace": {
           "type": "string"
         }
       },
@@ -1067,7 +1074,7 @@
       ]
     },
     "HighlightConfig": {
-      "description": "Configuration for syntax highlighting in Markdown code blocks.\n\n`theme` accepts the following values: - \"auto\" (default): choose a sensible built-in syntect theme based on whether the current UI theme is light or dark. - \"<name>\": use a specific syntect theme by name from the default `ThemeSet`.",
+      "description": "Configuration for syntax highlighting in Markdown code blocks.\n\n`theme` accepts the following values: - \"auto\" (default): choose a sensible built-in syntect theme based on whether the current UI theme is light or dark. - \"\\<name>\": use a specific syntect theme by name from the default `ThemeSet`.",
       "properties": {
         "theme": {
           "default": null,
@@ -1906,7 +1913,8 @@
             "low",
             "medium",
             "high",
-            "xhigh"
+            "xhigh",
+            "max"
           ],
           "type": "string"
         },
@@ -2045,7 +2053,8 @@
       "oneOf": [
         {
           "enum": [
-            "fast"
+            "fast",
+            "flex"
           ],
           "type": "string"
         },
@@ -2061,6 +2070,11 @@
     "SettingsMenuConfig": {
       "description": "Settings UI routing preferences under `[tui.settings_menu]`.",
       "properties": {
+        "fuse_hint_key_labels": {
+          "default": true,
+          "description": "When `true` (the default), shortcut hints whose key letter matches the first letter of the action description are rendered fused (e.g. `r` + ` refresh` becomes `r`+`efresh` with `r` in the key accent colour).\n\nDisable for improved readability without relying on colour contrast.",
+          "type": "boolean"
+        },
         "open_mode": {
           "allOf": [
             {
@@ -2312,8 +2326,16 @@
       },
       "type": "object"
     },
-    "ShellStyleProfileConfig": {
+    "ShellStyleProfileEntry": {
+      "description": "A user-created shell style profile entry, keyed by a string id.\n\nThe `style` field selects which script syntax the model uses. If absent, the id is tried as a style name (backward compat with old config format). `applicable_shells` lists the shell basenames for which this profile activates. If empty, defaults to the natural basenames for the resolved style.",
       "properties": {
+        "applicable_shells": {
+          "description": "Shell basenames this profile activates for. When empty, defaults to the style's natural shells.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "command_safety": {
           "allOf": [
             {
@@ -2405,6 +2427,14 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "style": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ShellScriptStyle"
+            }
+          ],
+          "description": "Script style to use. If None, inferred from the map key (backward compat)."
         },
         "summary": {
           "description": "Optional user-defined summary describing what this style profile does. Used for UI affordances like shell profile pickers and settings.",
@@ -2647,7 +2677,7 @@
         },
         "is_dark": {
           "default": null,
-          "description": "Optional hint whether the custom theme targets a dark background. When present and `name == Custom`, the UI can show \"Dark - <label>\" or \"Light - <label>\" in lists.",
+          "description": "Optional hint whether the custom theme targets a dark background. When present and `name == Custom`, the UI can show \"Dark - `<label>`\" or \"Light - `<label>`\" in lists.",
           "type": "boolean"
         },
         "label": {
@@ -2822,7 +2852,7 @@
         },
         "web_search_allowed_domains": {
           "default": null,
-          "description": "Optional allow-list of domains used by the Responses API `web_search` tool. Example:\n\n[tools] `web_search` = true `web_search_allowed_domains` = [\"openai.com\", \"arxiv.org\"]",
+          "description": "Optional allow-list of domains used by the Responses API `web_search` tool. Example:\n\n```ignore [tools] web_search = true web_search_allowed_domains = [\"openai.com\", \"arxiv.org\"] ```",
           "items": {
             "type": "string"
           },
@@ -2982,6 +3012,7 @@
             }
           ],
           "default": {
+            "fuse_hint_key_labels": true,
             "open_mode": "overlay",
             "overlay_min_width": 100
           },
@@ -3930,10 +3961,10 @@
     },
     "shell_style_profiles": {
       "additionalProperties": {
-        "$ref": "#/definitions/ShellStyleProfileConfig"
+        "$ref": "#/definitions/ShellStyleProfileEntry"
       },
       "default": {},
-      "description": "Optional shell-style resource profiles keyed by style slug.",
+      "description": "Optional shell-style resource profiles keyed by profile id.",
       "type": "object"
     },
     "show_raw_agent_reasoning": {
