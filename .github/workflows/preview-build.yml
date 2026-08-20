@@ -2,20 +2,14 @@ name: Build Code
 
 on:
   push:
-    branches-ignore:
-      - upstream-merge
+    branches:
+      - main
     paths:
       - "code-rs/**"
       - ".github/workflows/preview-build.yml"
-  pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
-    paths:
-      - "code-rs/**"
-      - ".github/workflows/preview-build.yml"
-  workflow_dispatch: {}
 
 concurrency:
-  group: build-code-${{ github.event.pull_request.number || github.ref }}
+  group: build-code-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -23,12 +17,6 @@ permissions:
 
 jobs:
   build-linux:
-    if: >-
-      github.event_name != 'pull_request' ||
-      (
-        github.event.pull_request.draft == false &&
-        github.event.pull_request.head.ref != 'upstream-merge'
-      )
     name: Build Linux x86_64
     runs-on: ubuntu-22.04
     timeout-minutes: 90
