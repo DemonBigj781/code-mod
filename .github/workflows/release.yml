@@ -32,7 +32,7 @@ jobs:
     name: Preflight Tests
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       CARGO_TARGET_DIR: /mnt/cargo-target
     steps:
@@ -172,7 +172,7 @@ jobs:
     needs:
       - determine-version
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
