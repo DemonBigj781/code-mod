@@ -1,10 +1,13 @@
 use chrono::{DateTime, Utc};
 use code_protocol::openai_models::ModelInfo;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::io;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+const LEGACY_MODEL_CACHE_FILE: &str = "models_cache.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ModelsCache {
@@ -23,6 +26,37 @@ pub(crate) fn is_fresh(fetched_at: DateTime<Utc>, ttl: Duration) -> bool {
     };
     let age = Utc::now().signed_duration_since(fetched_at);
     age <= ttl_duration
+}
+
+pub(crate) fn cache_path(code_home: &Path, provider_id: &str) -> PathBuf {
+    if provider_id == "openai" {
+        return code_home.join(LEGACY_MODEL_CACHE_FILE);
+    }
+
+    let readable = provider_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .take(48)
+        .collect::<String>();
+    let readable = readable.trim_matches('-');
+    let readable = if readable.is_empty() {
+        "provider"
+    } else {
+        readable
+    };
+    let digest = Sha256::digest(provider_id.as_bytes());
+    let suffix = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+
+    code_home.join(format!("models_cache-{readable}-{suffix}.json"))
 }
 
 pub(crate) fn load_cache(path: &Path) -> io::Result<Option<ModelsCache>> {
@@ -55,4 +89,3 @@ fn tmp_path_for(path: &Path) -> PathBuf {
     tmp.push(".tmp");
     PathBuf::from(tmp)
 }
-

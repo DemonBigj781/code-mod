@@ -302,8 +302,9 @@ impl Runner<'_> {
 
         let model_descriptions = model_guide_markdown_with_custom(&config.agents);
         let remote_models_manager = self.auth_manager.as_ref().map(|mgr| {
-            Arc::new(RemoteModelsManager::new(
+            Arc::new(RemoteModelsManager::new_for_provider(
                 Arc::clone(mgr),
+                config.model_provider_id.clone(),
                 provider.clone(),
                 config.code_home.clone(),
             ))

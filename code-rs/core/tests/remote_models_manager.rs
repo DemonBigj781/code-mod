@@ -4,6 +4,7 @@ use code_core::CodexAuth;
 use code_core::ModelProviderInfo;
 use code_core::WireApi;
 use code_core::remote_models::RemoteModelsManager;
+use code_core::remote_models::RemoteModelsStatus;
 use code_protocol::openai_models::ModelInfo;
 use code_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
@@ -63,6 +64,35 @@ fn provider_for(base_url: String) -> ModelProviderInfo {
         requires_openai_auth: false,
         openrouter: None,
     }
+}
+
+fn standard_models(ids: &[&str]) -> serde_json::Value {
+    serde_json::json!({
+        "object": "list",
+        "data": ids
+            .iter()
+            .map(|id| serde_json::json!({
+                "id": id,
+                "object": "model",
+                "created": 0,
+                "owned_by": "test",
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn provider_cache_files(code_home: &std::path::Path) -> TestResult<Vec<std::path::PathBuf>> {
+    let mut files = std::fs::read_dir(code_home)?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("models_cache-") && name.ends_with(".json"))
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
 }
 
 fn auth_manager_chatgpt() -> std::sync::Arc<AuthManager> {
@@ -334,6 +364,329 @@ async fn construct_model_family_applies_remote_overrides() -> TestResult {
     assert_eq!(
         family.default_reasoning_effort,
         Some(code_core::config_types::ReasoningEffort::High)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_models_provider_equal_model_ids_remain_isolated() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let first_server = MockServer::start().await;
+    let second_server = MockServer::start().await;
+    for server in [&first_server, &second_server] {
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(standard_models(&["shared-model"])))
+            .up_to_n_times(1)
+            .mount(server)
+            .await;
+    }
+
+    let code_home = tempdir()?;
+    let first = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-first",
+        provider_for(format!("{}/v1", first_server.uri())),
+        code_home.path().to_path_buf(),
+    );
+    let second = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-second",
+        provider_for(format!("{}/v1", second_server.uri())),
+        code_home.path().to_path_buf(),
+    );
+
+    let first_catalog = first.refresh_remote_models().await;
+    let second_catalog = second.refresh_remote_models().await;
+
+    assert_eq!(first_catalog.provider_id, "direct-first");
+    assert_eq!(second_catalog.provider_id, "direct-second");
+    assert_eq!(first_catalog.models[0].slug, "shared-model");
+    assert_eq!(second_catalog.models[0].slug, "shared-model");
+    assert_eq!(first_catalog.status, RemoteModelsStatus::Fresh);
+    assert_eq!(second_catalog.status, RemoteModelsStatus::Fresh);
+    for server in [&first_server, &second_server] {
+        let requests = server
+            .received_requests()
+            .await
+            .ok_or_else(|| std::io::Error::other("request log unavailable"))?;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(query_param(requests[0].url.as_str(), "client_version"), None);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_models_provider_cache_writes_are_isolated() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let first_server = MockServer::start().await;
+    let second_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(standard_models(&["first-model"])))
+        .up_to_n_times(1)
+        .mount(&first_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(standard_models(&["second-model"])))
+        .up_to_n_times(1)
+        .mount(&second_server)
+        .await;
+
+    let code_home = tempdir()?;
+    let first = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-first",
+        provider_for(format!("{}/v1", first_server.uri())),
+        code_home.path().to_path_buf(),
+    );
+    let second = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-second",
+        provider_for(format!("{}/v1", second_server.uri())),
+        code_home.path().to_path_buf(),
+    );
+    let _ = first.refresh_remote_models().await;
+    let _ = second.refresh_remote_models().await;
+
+    let files = provider_cache_files(code_home.path())?;
+    assert_eq!(files.len(), 2);
+    assert!(!code_home.path().join("models_cache.json").exists());
+    let mut cached_slugs = files
+        .iter()
+        .map(|path| -> TestResult<String> {
+            let value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path)?)?;
+            let slug = value["models"][0]["slug"]
+                .as_str()
+                .ok_or_else(|| std::io::Error::other("cached model slug missing"))?;
+            Ok(slug.to_owned())
+        })
+        .collect::<TestResult<Vec<_>>>()?;
+    cached_slugs.sort();
+    assert_eq!(cached_slugs, vec!["first-model", "second-model"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_models_provider_auth_failure_retains_stale_models() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(standard_models(&["cached-model"])))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let code_home = tempdir()?;
+    let provider = provider_for(format!("{}/v1", server.uri()));
+    let manager = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-auth",
+        provider.clone(),
+        code_home.path().to_path_buf(),
+    );
+    assert_eq!(
+        manager.refresh_remote_models().await.status,
+        RemoteModelsStatus::Fresh
+    );
+
+    let cache_path = provider_cache_files(code_home.path())?
+        .into_iter()
+        .next()
+        .ok_or_else(|| std::io::Error::other("provider cache missing"))?;
+    let mut cache: serde_json::Value = serde_json::from_slice(&std::fs::read(&cache_path)?)?;
+    cache["fetched_at"] = serde_json::Value::String(
+        (Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),
+    );
+    std::fs::write(&cache_path, serde_json::to_vec_pretty(&cache)?)?;
+
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(401))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let manager = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-auth",
+        provider,
+        code_home.path().to_path_buf(),
+    );
+    let catalog = manager.refresh_remote_models().await;
+    assert!(matches!(
+        catalog.status,
+        RemoteModelsStatus::AuthenticationError { .. }
+    ));
+    assert_eq!(catalog.models[0].slug, "cached-model");
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_models_provider_refresh_leaves_other_provider_unchanged() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let first_server = MockServer::start().await;
+    let second_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(standard_models(&["first-model"])))
+        .up_to_n_times(1)
+        .mount(&first_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(standard_models(&["second-model"])))
+        .up_to_n_times(1)
+        .mount(&second_server)
+        .await;
+
+    let code_home = tempdir()?;
+    let first = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-first",
+        provider_for(format!("{}/v1", first_server.uri())),
+        code_home.path().to_path_buf(),
+    );
+    let second = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-second",
+        provider_for(format!("{}/v1", second_server.uri())),
+        code_home.path().to_path_buf(),
+    );
+    let _ = first.refresh_remote_models().await;
+    let second_before = second.refresh_remote_models().await;
+
+    first_server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&first_server)
+        .await;
+
+    let first_after = first.refresh_remote_models_no_cache().await;
+    let second_after = second.catalog_snapshot().await;
+    assert!(matches!(
+        first_after.status,
+        RemoteModelsStatus::ConnectionError { .. }
+    ));
+    assert_eq!(first_after.models[0].slug, "first-model");
+    assert_eq!(second_after, second_before);
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_models_provider_reports_loading_while_refresh_is_in_flight() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(1))
+                .set_body_json(standard_models(&["delayed-model"])),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let code_home = tempdir()?;
+    let manager = std::sync::Arc::new(RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "direct-loading",
+        provider_for(format!("{}/v1", server.uri())),
+        code_home.path().to_path_buf(),
+    ));
+    assert_eq!(
+        manager.catalog_snapshot().await.status,
+        RemoteModelsStatus::Stale
+    );
+
+    let refresh_manager = std::sync::Arc::clone(&manager);
+    let refresh = tokio::spawn(async move { refresh_manager.refresh_remote_models().await });
+    for _ in 0..50 {
+        if server
+            .received_requests()
+            .await
+            .is_some_and(|requests| !requests.is_empty())
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(
+        manager.catalog_snapshot().await.status,
+        RemoteModelsStatus::Loading
+    );
+    let catalog = refresh.await?;
+    assert_eq!(catalog.status, RemoteModelsStatus::Fresh);
+    assert_eq!(catalog.models[0].slug, "delayed-model");
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_models_provider_openai_loads_legacy_cache() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let server = MockServer::start().await;
+    let response = ModelsResponse {
+        models: vec![remote_model("legacy-model", "Legacy", 1)?],
+    };
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&response))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let code_home = tempdir()?;
+    let provider = provider_for(server.uri());
+    let first = RemoteModelsManager::new(
+        auth_manager_chatgpt(),
+        provider.clone(),
+        code_home.path().to_path_buf(),
+    );
+    let _ = first.refresh_remote_models().await;
+    assert!(code_home.path().join("models_cache.json").exists());
+
+    let second = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        "openai",
+        provider,
+        code_home.path().to_path_buf(),
+    );
+    let catalog = second.refresh_remote_models().await;
+    assert_eq!(catalog.status, RemoteModelsStatus::Fresh);
+    assert_eq!(catalog.models[0].slug, "legacy-model");
+    assert_eq!(
+        server
+            .received_requests()
+            .await
+            .ok_or_else(|| std::io::Error::other("request log unavailable"))?
+            .len(),
+        1
     );
     Ok(())
 }

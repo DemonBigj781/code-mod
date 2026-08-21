@@ -70,13 +70,15 @@ impl App<'_> {
         {
             let remote_tx = app_event_tx.clone();
             let remote_auth_manager = auth_manager;
+            let remote_provider_id = config.model_provider_id.clone();
             let remote_provider = config.model_provider.clone();
             let remote_code_home = config.code_home.clone();
             let remote_using_chatgpt_hint = config.using_chatgpt_auth;
             if !crate::chatwidget::is_test_mode() {
                 tokio::spawn(async move {
-                    let remote_manager = code_core::remote_models::RemoteModelsManager::new(
+                    let remote_manager = code_core::remote_models::RemoteModelsManager::new_for_provider(
                         remote_auth_manager.clone(),
+                        remote_provider_id,
                         remote_provider,
                         remote_code_home,
                     );

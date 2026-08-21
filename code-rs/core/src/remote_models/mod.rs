@@ -7,14 +7,19 @@ use code_app_server_protocol::AuthMode;
 use code_protocol::config_types::ReasoningSummary as ProtocolReasoningSummary;
 use code_protocol::config_types::Personality as ProtocolPersonality;
 use code_protocol::openai_models::ApplyPatchToolType as ProtocolApplyPatchToolType;
+use code_protocol::openai_models::ConfigShellToolType;
+use code_protocol::openai_models::ModelVisibility;
 use code_protocol::openai_models::ModelInfo;
 use code_protocol::openai_models::ModelsResponse;
 use code_protocol::openai_models::ReasoningEffort as ProtocolReasoningEffort;
+use code_protocol::openai_models::TruncationPolicyConfig;
 use code_protocol::openai_models::TruncationMode as ProtocolTruncationMode;
 use code_protocol::openai_models::WebSearchToolType;
+use code_protocol::openai_models::default_input_modalities;
 use reqwest::header;
 use reqwest::Method;
 use reqwest::Url;
+use serde::Deserialize;
 use tokio::sync::RwLock;
 
 use crate::auth::AuthManager;
@@ -31,27 +36,56 @@ use crate::CodexAuth;
 
 mod cache;
 
-const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 const REMOTE_MODELS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const CODEX_AUTO_BALANCED_MODEL: &str = "codex-auto-balanced";
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteModelsStatus {
+    Loading,
+    Fresh,
+    Stale,
+    AuthenticationError { message: String },
+    ConnectionError { message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteModelsCatalog {
+    pub provider_id: String,
+    pub models: Vec<ModelInfo>,
+    pub status: RemoteModelsStatus,
+}
+
+#[derive(Debug, Clone)]
 struct RemoteModelsState {
     loaded_from_disk: bool,
     fetched_at: Option<chrono::DateTime<Utc>>,
     etag: Option<String>,
     models: Vec<ModelInfo>,
+    status: RemoteModelsStatus,
+}
+
+impl Default for RemoteModelsState {
+    fn default() -> Self {
+        Self {
+            loaded_from_disk: false,
+            fetched_at: None,
+            etag: None,
+            models: Vec::new(),
+            status: RemoteModelsStatus::Loading,
+        }
+    }
 }
 
 /// Coordinates remote `/models` discovery and cached metadata on disk.
 ///
-/// Any error (disk, auth, network, parse) results in an empty remote model list
-/// so callers can safely fall back to built-in behaviour.
+/// Refresh failures retain the last cached model list and expose a status so
+/// callers can distinguish stale data from authentication and connection errors.
 #[derive(Debug)]
 pub struct RemoteModelsManager {
     state: RwLock<RemoteModelsState>,
     auth_manager: Arc<AuthManager>,
+    provider_id: String,
     provider: ModelProviderInfo,
     code_home: PathBuf,
     cache_ttl: Duration,
@@ -60,9 +94,19 @@ pub struct RemoteModelsManager {
 
 impl RemoteModelsManager {
     pub fn new(auth_manager: Arc<AuthManager>, provider: ModelProviderInfo, code_home: PathBuf) -> Self {
+        Self::new_for_provider(auth_manager, "openai", provider, code_home)
+    }
+
+    pub fn new_for_provider(
+        auth_manager: Arc<AuthManager>,
+        provider_id: impl Into<String>,
+        provider: ModelProviderInfo,
+        code_home: PathBuf,
+    ) -> Self {
         Self {
             state: RwLock::new(RemoteModelsState::default()),
             auth_manager,
+            provider_id: provider_id.into(),
             provider,
             code_home,
             cache_ttl: DEFAULT_MODEL_CACHE_TTL,
@@ -80,8 +124,12 @@ impl RemoteModelsManager {
     ///
     /// This loads from disk once (best-effort) but does not block on network.
     pub async fn remote_models_snapshot(&self) -> Vec<ModelInfo> {
+        self.catalog_snapshot().await.models
+    }
+
+    pub async fn catalog_snapshot(&self) -> RemoteModelsCatalog {
         self.ensure_loaded_from_disk().await;
-        self.state.read().await.models.clone()
+        self.current_catalog().await
     }
 
     /// Returns the remote default model slug when available.
@@ -91,7 +139,7 @@ impl RemoteModelsManager {
     pub async fn default_model_slug(&self, auth_mode: Option<AuthMode>) -> Option<String> {
         self.ensure_loaded_from_disk().await;
 
-        if !auth_mode.is_some_and(AuthMode::is_chatgpt) {
+        if !self.uses_codex_models_schema() || !auth_mode.is_some_and(AuthMode::is_chatgpt) {
             return None;
         }
 
@@ -106,11 +154,11 @@ impl RemoteModelsManager {
     /// Best-effort refresh of remote models.
     ///
     /// Never errors: on failures the in-memory snapshot remains unchanged.
-    pub async fn refresh_remote_models(&self) {
-        self.refresh_remote_models_with_cache().await;
+    pub async fn refresh_remote_models(&self) -> RemoteModelsCatalog {
+        self.refresh_remote_models_with_cache().await
     }
 
-    pub async fn refresh_remote_models_with_cache(&self) {
+    pub async fn refresh_remote_models_with_cache(&self) -> RemoteModelsCatalog {
         self.ensure_loaded_from_disk().await;
 
         let (stale_etag, should_fetch) = {
@@ -122,16 +170,16 @@ impl RemoteModelsManager {
         };
 
         if !should_fetch {
-            return;
+            return self.current_catalog().await;
         }
 
-        self.refresh_remote_models_inner(stale_etag).await;
+        self.refresh_remote_models_inner(stale_etag).await
     }
 
-    pub async fn refresh_remote_models_no_cache(&self) {
+    pub async fn refresh_remote_models_no_cache(&self) -> RemoteModelsCatalog {
         self.ensure_loaded_from_disk().await;
         let stale_etag = self.state.read().await.etag.clone();
-        self.refresh_remote_models_inner(stale_etag).await;
+        self.refresh_remote_models_inner(stale_etag).await
     }
 
     pub async fn refresh_if_new_etag(&self, etag: String) {
@@ -139,34 +187,46 @@ impl RemoteModelsManager {
         if current_etag.is_some() && current_etag.as_deref() == Some(etag.as_str()) {
             return;
         }
-        self.refresh_remote_models_no_cache().await;
+        let _ = self.refresh_remote_models_no_cache().await;
     }
 
     async fn get_etag(&self) -> Option<String> {
         self.state.read().await.etag.clone()
     }
 
-    async fn refresh_remote_models_inner(&self, stale_etag: Option<String>) {
+    async fn refresh_remote_models_inner(&self, stale_etag: Option<String>) -> RemoteModelsCatalog {
         let auth = self.auth_manager.auth();
         let auth_mode = auth.as_ref().map(|a| a.mode);
-        if !auth_mode.is_some_and(AuthMode::is_chatgpt) {
+        let uses_codex_schema = self.uses_codex_models_schema();
+        if uses_codex_schema && !auth_mode.is_some_and(AuthMode::is_chatgpt) {
             // Only the ChatGPT backend exposes the Codex `/models` schema.
-            return;
+            return self.current_catalog().await;
+        }
+
+        {
+            let mut state = self.state.write().await;
+            state.status = RemoteModelsStatus::Loading;
         }
 
         let url = match self.models_url(auth.as_ref()) {
             Ok(url) => url,
             Err(err) => {
                 tracing::debug!("remote /models URL construction failed: {err}");
-                return;
+                return self
+                    .set_failure(RemoteModelsStatus::ConnectionError {
+                        message: err.to_string(),
+                    })
+                    .await;
             }
         };
+
+        let request_auth = uses_codex_schema.then_some(auth.as_ref()).flatten();
 
         let mut request = match self
             .provider
             .create_request_builder_for_url(
                 &self.client,
-                auth.as_ref(),
+                request_auth,
                 Method::GET,
                 url,
             )
@@ -175,7 +235,11 @@ impl RemoteModelsManager {
             Ok(request) => request,
             Err(err) => {
                 tracing::debug!("remote /models auth/header setup failed: {err}");
-                return;
+                return self
+                    .set_failure(RemoteModelsStatus::AuthenticationError {
+                        message: err.to_string(),
+                    })
+                    .await;
             }
         };
 
@@ -185,7 +249,8 @@ impl RemoteModelsManager {
             request = request.header(header::IF_NONE_MATCH, etag);
         }
 
-        if let Some(auth) = auth.as_ref()
+        if uses_codex_schema
+            && let Some(auth) = auth.as_ref()
             && auth.uses_codex_backend()
             && let Some(account_id) = auth.get_account_id()
         {
@@ -196,7 +261,11 @@ impl RemoteModelsManager {
             Ok(response) => response,
             Err(err) => {
                 tracing::debug!("remote /models request failed: {err}");
-                return;
+                return self
+                    .set_failure(RemoteModelsStatus::ConnectionError {
+                        message: err.to_string(),
+                    })
+                    .await;
             }
         };
 
@@ -210,12 +279,27 @@ impl RemoteModelsManager {
             }) {
                 tracing::debug!("failed to persist /models cache on 304: {err}");
             }
-            return;
+            state.status = RemoteModelsStatus::Fresh;
+            drop(state);
+            return self.current_catalog().await;
         }
 
         if !response.status().is_success() {
-            tracing::debug!("remote /models request failed with status {}", response.status());
-            return;
+            let status = response.status();
+            tracing::debug!("remote /models request failed with status {status}");
+            let failure = if matches!(
+                status,
+                reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+            ) {
+                RemoteModelsStatus::AuthenticationError {
+                    message: format!("remote /models request failed with status {status}"),
+                }
+            } else {
+                RemoteModelsStatus::ConnectionError {
+                    message: format!("remote /models request failed with status {status}"),
+                }
+            };
+            return self.set_failure(failure).await;
         }
 
         let header_etag = response
@@ -228,15 +312,23 @@ impl RemoteModelsManager {
             Ok(body) => body,
             Err(err) => {
                 tracing::debug!("remote /models response body read failed: {err}");
-                return;
+                return self
+                    .set_failure(RemoteModelsStatus::ConnectionError {
+                        message: err.to_string(),
+                    })
+                    .await;
             }
         };
 
-        let parsed = match serde_json::from_str::<ModelsResponse>(&body) {
+        let models = match parse_models_response(&body) {
             Ok(parsed) => parsed,
             Err(err) => {
                 tracing::debug!("remote /models response parse failed: {err}");
-                return;
+                return self
+                    .set_failure(RemoteModelsStatus::ConnectionError {
+                        message: format!("invalid /models response: {err}"),
+                    })
+                    .await;
             }
         };
 
@@ -245,9 +337,10 @@ impl RemoteModelsManager {
         let fetched_at = Utc::now();
         {
             let mut state = self.state.write().await;
-            state.models = parsed.models;
+            state.models = models;
             state.etag.clone_from(&etag);
             state.fetched_at = Some(fetched_at);
+            state.status = RemoteModelsStatus::Fresh;
         }
 
         let models = self.state.read().await.models.clone();
@@ -258,6 +351,7 @@ impl RemoteModelsManager {
         }) {
             tracing::debug!("failed to write /models cache: {err}");
         }
+        self.current_catalog().await
     }
 
     pub async fn apply_remote_overrides(&self, model: &str, family: ModelFamily) -> ModelFamily {
@@ -299,6 +393,20 @@ impl RemoteModelsManager {
             .any(|info| info.slug.eq_ignore_ascii_case(model))
     }
 
+    async fn current_catalog(&self) -> RemoteModelsCatalog {
+        let state = self.state.read().await;
+        RemoteModelsCatalog {
+            provider_id: self.provider_id.clone(),
+            models: state.models.clone(),
+            status: state.status.clone(),
+        }
+    }
+
+    async fn set_failure(&self, status: RemoteModelsStatus) -> RemoteModelsCatalog {
+        self.state.write().await.status = status;
+        self.current_catalog().await
+    }
+
     async fn ensure_loaded_from_disk(&self) {
         let loaded = { self.state.read().await.loaded_from_disk };
         if loaded {
@@ -317,10 +425,21 @@ impl RemoteModelsManager {
         let mut state = self.state.write().await;
         state.loaded_from_disk = true;
         if let Some(cache) = cache {
+            state.status = if cache::is_fresh(cache.fetched_at, self.cache_ttl) {
+                RemoteModelsStatus::Fresh
+            } else {
+                RemoteModelsStatus::Stale
+            };
             state.fetched_at = Some(cache.fetched_at);
             state.etag = cache.etag;
             state.models = cache.models;
+        } else {
+            state.status = RemoteModelsStatus::Stale;
         }
+    }
+
+    fn uses_codex_models_schema(&self) -> bool {
+        self.provider_id == "openai"
     }
 
     fn models_url(&self, auth: Option<&CodexAuth>) -> crate::error::Result<Url> {
@@ -345,14 +464,78 @@ impl RemoteModelsManager {
                     pairs.append_pair(k, v);
                 }
             }
-            pairs.append_pair("client_version", &format_client_version_to_whole());
+            if self.uses_codex_models_schema() {
+                pairs.append_pair("client_version", &format_client_version_to_whole());
+            }
         }
 
         Ok(url)
     }
 
     fn cache_path(&self) -> PathBuf {
-        self.code_home.join(MODEL_CACHE_FILE)
+        cache::cache_path(&self.code_home, &self.provider_id)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ModelsWireResponse {
+    Codex(ModelsResponse),
+    OpenAi { data: Vec<OpenAiModel> },
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModel {
+    id: String,
+}
+
+fn parse_models_response(body: &str) -> serde_json::Result<Vec<ModelInfo>> {
+    let parsed = serde_json::from_str::<ModelsWireResponse>(body)?;
+    Ok(match parsed {
+        ModelsWireResponse::Codex(response) => response.models,
+        ModelsWireResponse::OpenAi { data } => data
+            .into_iter()
+            .filter_map(|model| {
+                let id = model.id.trim();
+                (!id.is_empty()).then(|| direct_model_info(id.to_owned()))
+            })
+            .collect(),
+    })
+}
+
+fn direct_model_info(id: String) -> ModelInfo {
+    ModelInfo {
+        slug: id.clone(),
+        display_name: id,
+        description: None,
+        default_reasoning_level: None,
+        supported_reasoning_levels: Vec::new(),
+        shell_type: ConfigShellToolType::Default,
+        visibility: ModelVisibility::List,
+        supported_in_api: true,
+        priority: 0,
+        additional_speed_tiers: Vec::new(),
+        availability_nux: None,
+        upgrade: None,
+        base_instructions: String::new(),
+        model_messages: None,
+        supports_reasoning_summaries: false,
+        default_reasoning_summary: ProtocolReasoningSummary::Auto,
+        support_verbosity: false,
+        default_verbosity: None,
+        apply_patch_tool_type: None,
+        web_search_tool_type: WebSearchToolType::Text,
+        truncation_policy: TruncationPolicyConfig::bytes(10_000),
+        supports_parallel_tool_calls: false,
+        supports_image_detail_original: false,
+        context_window: None,
+        auto_compact_token_limit: None,
+        effective_context_window_percent: 95,
+        experimental_supported_tools: Vec::new(),
+        input_modalities: default_input_modalities(),
+        supports_search_tool: false,
+        prefer_websockets: false,
+        used_fallback_model_metadata: true,
     }
 }
 
