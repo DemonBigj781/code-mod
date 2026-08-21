@@ -22,6 +22,10 @@ impl App<'_> {
         let remote_auth_manager = self._server.auth_manager();
         let remote_provider_id = self.config.model_provider_id.clone();
         let remote_provider = self.config.model_provider.clone();
+        let remote_provider_is_direct = crate::direct_provider::is_direct_provider_definition(
+            &remote_provider_id,
+            &remote_provider,
+        );
         let remote_code_home = self.config.code_home.clone();
         let remote_using_chatgpt_hint = self.config.using_chatgpt_auth;
         tokio::spawn(async move {
@@ -31,22 +35,23 @@ impl App<'_> {
                 remote_provider,
                 remote_code_home,
             );
-            remote_manager.refresh_remote_models().await;
-            let remote_models = remote_manager.remote_models_snapshot().await;
+            let catalog = remote_manager.refresh_remote_models().await;
+            if remote_provider_is_direct {
+                remote_tx.send(AppEvent::DirectModelCatalogUpdated { catalog });
+                return;
+            }
+            let remote_models = catalog.models;
             if remote_models.is_empty() {
                 return;
             }
 
-            let auth_mode = remote_auth_manager
-                .auth()
-                .map(|auth| auth.mode)
-                .or({
-                    if remote_using_chatgpt_hint {
-                        Some(AuthMode::ChatGPT)
-                    } else {
-                        Some(AuthMode::ApiKey)
-                    }
-                });
+            let auth_mode = remote_auth_manager.auth().map(|auth| auth.mode).or({
+                if remote_using_chatgpt_hint {
+                    Some(AuthMode::ChatGPT)
+                } else {
+                    Some(AuthMode::ApiKey)
+                }
+            });
             let supports_pro_only_models = remote_auth_manager.supports_pro_only_models();
             let presets = code_common::model_presets::builtin_model_presets(
                 auth_mode,

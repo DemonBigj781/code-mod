@@ -275,17 +275,22 @@ impl ChatWidget<'_> {
                 return;
             }
 
-            self.bottom_pane.show_model_selection(ModelSelectionViewParams {
-                presets,
-                current_model: self.config.model.clone(),
-                current_effort: self.config.model_reasoning_effort,
-                current_service_tier: self.config.service_tier,
-                current_context_mode: self.config.context_mode,
-                current_context_window: self.config.model_context_window,
-                current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
-                use_chat_model: false,
-                target: ModelSelectionTarget::Session,
-            });
+            self.refresh_direct_provider_catalogs();
+            let direct_provider_catalogs = self.available_direct_provider_catalogs();
+            self.bottom_pane
+                .show_model_selection(ModelSelectionViewParams {
+                    presets,
+                    current_model: self.config.model.clone(),
+                    current_model_provider_id: Some(self.config.model_provider_id.clone()),
+                    current_effort: self.config.model_reasoning_effort,
+                    current_service_tier: self.config.service_tier,
+                    current_context_mode: self.config.context_mode,
+                    current_context_window: self.config.model_context_window,
+                    current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+                    use_chat_model: false,
+                    direct_provider_catalogs,
+                    target: ModelSelectionTarget::Session,
+                });
         } else {
             // User specified a level: e.g., "high"
             let new_effort = match trimmed.to_lowercase().as_str() {

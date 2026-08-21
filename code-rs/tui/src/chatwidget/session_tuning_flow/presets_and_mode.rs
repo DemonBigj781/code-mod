@@ -39,6 +39,122 @@ impl ChatWidget<'_> {
         presets
     }
 
+    fn configured_direct_model_providers(&self) -> Vec<(String, ModelProviderInfo)> {
+        let mut providers: Vec<(String, ModelProviderInfo)> = self
+            .config
+            .model_providers
+            .iter()
+            .filter_map(|(provider_id, provider)| {
+                crate::direct_provider::is_direct_provider_definition(provider_id, provider)
+                    .then(|| (provider_id.clone(), provider.clone()))
+            })
+            .collect();
+        providers.sort_by(|(left_id, left), (right_id, right)| {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+                .then_with(|| left_id.cmp(right_id))
+        });
+        providers
+    }
+
+    pub(super) fn available_direct_provider_catalogs(&self) -> Vec<DirectProviderModelCatalog> {
+        self.configured_direct_model_providers()
+            .into_iter()
+            .map(|(provider_id, provider)| {
+                let catalog = self.direct_model_catalogs.get(&provider_id);
+                DirectProviderModelCatalog {
+                    provider_id,
+                    display_name: provider.name,
+                    status: catalog
+                        .map(|catalog| catalog.status.clone())
+                        .unwrap_or(code_core::remote_models::RemoteModelsStatus::Loading),
+                    presets: catalog
+                        .map(|catalog| {
+                            crate::remote_model_presets::direct_model_presets(
+                                catalog.models.clone(),
+                            )
+                        })
+                        .unwrap_or_default(),
+                }
+            })
+            .collect()
+    }
+
+    pub(super) fn refresh_direct_provider_catalogs(&mut self) {
+        let providers = self.configured_direct_model_providers();
+        let configured_ids: HashSet<String> = providers
+            .iter()
+            .map(|(provider_id, _)| provider_id.clone())
+            .collect();
+        self.direct_model_catalogs
+            .retain(|provider_id, _| configured_ids.contains(provider_id));
+        for (provider_id, _) in &providers {
+            self.direct_model_catalogs
+                .entry(provider_id.clone())
+                .and_modify(|catalog| {
+                    catalog.status = code_core::remote_models::RemoteModelsStatus::Loading;
+                })
+                .or_insert_with(|| code_core::remote_models::RemoteModelsCatalog {
+                    provider_id: provider_id.clone(),
+                    models: Vec::new(),
+                    status: code_core::remote_models::RemoteModelsStatus::Loading,
+                });
+        }
+
+        if crate::chatwidget::is_test_mode() {
+            return;
+        }
+
+        let auth_manager = self.auth_manager.clone();
+        let code_home = self.config.code_home.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        for (provider_id, provider) in providers {
+            let auth_manager = auth_manager.clone();
+            let code_home = code_home.clone();
+            let app_event_tx = app_event_tx.clone();
+            tokio::spawn(async move {
+                let manager = code_core::remote_models::RemoteModelsManager::new_for_provider(
+                    auth_manager,
+                    provider_id,
+                    provider,
+                    code_home,
+                );
+                let snapshot = manager.catalog_snapshot().await;
+                app_event_tx.send(AppEvent::DirectModelCatalogUpdated {
+                    catalog: snapshot.clone(),
+                });
+                if matches!(
+                    snapshot.status,
+                    code_core::remote_models::RemoteModelsStatus::Fresh
+                ) {
+                    return;
+                }
+
+                let mut loading = snapshot;
+                loading.status = code_core::remote_models::RemoteModelsStatus::Loading;
+                app_event_tx.send(AppEvent::DirectModelCatalogUpdated { catalog: loading });
+                let catalog = manager.refresh_remote_models_no_cache().await;
+                app_event_tx.send(AppEvent::DirectModelCatalogUpdated { catalog });
+            });
+        }
+    }
+
+    pub(crate) fn update_direct_model_catalog(
+        &mut self,
+        catalog: code_core::remote_models::RemoteModelsCatalog,
+    ) {
+        self.direct_model_catalogs
+            .insert(catalog.provider_id.clone(), catalog);
+        let catalogs = self.available_direct_provider_catalogs();
+        self.bottom_pane
+            .update_direct_provider_catalogs(catalogs.clone());
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.update_direct_provider_catalogs(catalogs);
+        }
+        self.request_redraw();
+    }
+
     pub(crate) fn update_model_presets(
         &mut self,
         presets: Vec<ModelPreset>,
@@ -49,8 +165,12 @@ impl ChatWidget<'_> {
         }
 
         self.remote_model_presets = Some(presets);
+        let available_presets = self.available_model_presets();
         self.bottom_pane
-            .update_model_selection_presets(self.available_model_presets());
+            .update_model_selection_presets(available_presets.clone());
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.update_model_presets(available_presets);
+        }
 
         if let Some(default_model) = default_model {
             self.maybe_apply_remote_default_model(default_model);
@@ -61,40 +181,38 @@ impl ChatWidget<'_> {
 
     pub(crate) fn finish_direct_provider_add(
         &mut self,
-        result: Result<Vec<code_protocol::openai_models::ModelInfo>, String>,
+        result: Result<crate::direct_provider::DirectProviderAddOutcome, String>,
     ) {
-        let models = match result {
-            Ok(models) => models,
+        let outcome = match result {
+            Ok(outcome) => outcome,
             Err(error) => {
-                self.bottom_pane.finish_direct_provider_add(Err(error));
+                self.bottom_pane
+                    .finish_direct_provider_add(Err(error.clone()));
+                if let Some(overlay) = self.settings.overlay.as_mut() {
+                    overlay.finish_direct_provider_add(Err(error));
+                }
                 return;
             }
         };
 
-        let auth_mode = self
-            .auth_manager
-            .auth()
-            .map(|auth| auth.mode)
-            .or({
-                if self.config.using_chatgpt_auth {
-                    Some(AuthMode::ChatGPT)
-                } else {
-                    Some(AuthMode::ApiKey)
-                }
-            });
-        let supports_pro_only_models = self.auth_manager.supports_pro_only_models();
-        let local_presets = self.remote_model_presets.take().unwrap_or_else(|| {
-            builtin_model_presets(auth_mode, supports_pro_only_models)
-        });
-        self.remote_model_presets = Some(crate::remote_model_presets::merge_remote_models(
-            models,
-            local_presets,
-            auth_mode,
-            supports_pro_only_models,
-        ));
-        let presets = self.available_model_presets();
-        self.bottom_pane.update_model_selection_presets(presets);
+        self.direct_model_catalogs.insert(
+            outcome.provider_id.clone(),
+            code_core::remote_models::RemoteModelsCatalog {
+                provider_id: outcome.provider_id,
+                models: outcome.models,
+                status: code_core::remote_models::RemoteModelsStatus::Fresh,
+            },
+        );
+        let catalogs = self.available_direct_provider_catalogs();
+        self.bottom_pane
+            .update_direct_provider_catalogs(catalogs.clone());
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.update_direct_provider_catalogs(catalogs);
+        }
         self.bottom_pane.finish_direct_provider_add(Ok(()));
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.finish_direct_provider_add(Ok(()));
+        }
         self.request_redraw();
     }
 
@@ -112,7 +230,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.apply_model_selection_inner(default_model, None, false, false);
+        self.apply_model_selection_inner(default_model, None, None, false, false);
     }
 
     fn preset_effort_for_model(preset: &ModelPreset) -> ReasoningEffort {

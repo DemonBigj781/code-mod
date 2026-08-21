@@ -2,10 +2,13 @@ use super::*;
 use crate::app_event::{AppEvent, Redacted};
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::settings_pages::model::ModelSelectionTarget;
-use crate::bottom_pane::settings_pages::model::model_selection_state::EntryKind;
+use crate::bottom_pane::settings_pages::model::model_selection_state::{
+    DirectProviderModelCatalog, EntryKind,
+};
 use code_common::model_presets::{ModelPreset, ReasoningEffortPreset};
-use code_core::config_types::{ContextMode, ReasoningEffort};
 use code_core::WireApi;
+use code_core::config_types::{ContextMode, ReasoningEffort};
+use code_core::remote_models::RemoteModelsStatus;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -48,12 +51,14 @@ fn make_view_with_model(
         ModelSelectionViewParams {
             presets,
             current_model: current_model.to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: None,
             current_context_window: Some(1_047_576),
             current_auto_compact_token_limit: Some(942_818),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target,
         },
         AppEventSender::new(tx),
@@ -99,6 +104,24 @@ fn presets_sort_gpt_5_5_above_gpt_5_4() {
 }
 
 #[test]
+fn sorted_presets_keep_the_current_model_selected() {
+    let view = make_view(
+        ModelSelectionTarget::Session,
+        vec![preset("gpt-5.3-codex"), preset("gpt-5.4")],
+    );
+
+    let selected = view
+        .data
+        .entry_at(view.selected_index)
+        .expect("selected entry");
+    let EntryKind::Preset(preset_index) = selected else {
+        panic!("expected selected preset, got {selected:?}");
+    };
+
+    assert_eq!(view.data.flat_presets[preset_index].model, "gpt-5.4");
+}
+
+#[test]
 fn get_entry_line_accounts_for_header_and_fast_block() {
     let view = make_view(ModelSelectionTarget::Session, vec![preset("gpt-5.3-codex")]);
     assert_eq!(view.data.entry_line(0), 5);
@@ -125,7 +148,7 @@ fn vim_navigation_keys_move_selection() {
         vec![preset("gpt-5.3-codex"), preset("gpt-5.4")],
     );
 
-    assert_eq!(view.selected_index, 5);
+    assert_eq!(view.selected_index, 4);
     view.selected_index = view.entry_count() - 1;
     assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Char('j'))));
     assert_eq!(view.selected_index, 0);
@@ -140,17 +163,15 @@ fn vim_navigation_keys_require_no_modifiers() {
         vec![preset("gpt-5.3-codex"), preset("gpt-5.4")],
     );
 
-    assert_eq!(view.selected_index, 5);
-    assert!(!view.handle_key_event_direct(KeyEvent::new(
-        KeyCode::Char('j'),
-        KeyModifiers::CONTROL,
-    )));
-    assert_eq!(view.selected_index, 5);
-    assert!(!view.handle_key_event_direct(KeyEvent::new(
-        KeyCode::Char('k'),
-        KeyModifiers::CONTROL,
-    )));
-    assert_eq!(view.selected_index, 5);
+    assert_eq!(view.selected_index, 4);
+    assert!(
+        !view.handle_key_event_direct(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL,))
+    );
+    assert_eq!(view.selected_index, 4);
+    assert!(
+        !view.handle_key_event_direct(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL,))
+    );
+    assert_eq!(view.selected_index, 4);
 }
 
 #[test]
@@ -160,12 +181,14 @@ fn selecting_preset_updates_local_current_model_state() {
         ModelSelectionViewParams {
             presets: vec![preset_with_effort("gpt-5.3-codex", ReasoningEffort::High)],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: None,
             current_context_window: Some(1_047_576),
             current_auto_compact_token_limit: Some(942_818),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -185,12 +208,14 @@ fn selecting_follow_chat_updates_local_follow_chat_state() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.3-codex")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: None,
             current_context_window: Some(1_047_576),
             current_auto_compact_token_limit: Some(942_818),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Review,
         },
         AppEventSender::new(tx),
@@ -208,12 +233,14 @@ fn selecting_context_mode_sends_session_context_mode_update() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: Some(ContextMode::Disabled),
             current_context_window: Some(272_000),
             current_auto_compact_token_limit: Some(244_800),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -349,12 +376,14 @@ fn adjusting_auto_compact_row_sends_context_settings_event() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: Some(ContextMode::Auto),
             current_context_window: Some(500_000),
             current_auto_compact_token_limit: Some(450_000),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -385,12 +414,14 @@ fn ctrl_s_in_main_persists_current_context_settings() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: Some(ContextMode::Auto),
             current_context_window: Some(500_000),
             current_auto_compact_token_limit: Some(450_000),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -420,12 +451,14 @@ fn ctrl_s_in_edit_saves_and_persists_context_settings() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: Some(ContextMode::Auto),
             current_context_window: Some(500_000),
             current_auto_compact_token_limit: Some(400_000),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -476,12 +509,14 @@ fn editing_auto_compact_accepts_percent_of_context_window() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: Some(ContextMode::Auto),
             current_context_window: Some(500_000),
             current_auto_compact_token_limit: Some(400_000),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -510,12 +545,14 @@ fn editing_auto_compact_accepts_ratio_of_context_window() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: Some(ContextMode::Auto),
             current_context_window: Some(500_000),
             current_auto_compact_token_limit: Some(450_000),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -544,12 +581,14 @@ fn editing_auto_compact_percent_requires_context_window() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: Some(ContextMode::Auto),
             current_context_window: None,
             current_auto_compact_token_limit: None,
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -559,6 +598,220 @@ fn editing_auto_compact_percent_requires_context_window() {
         .save_edit_value(EditTarget::AutoCompact, "90%")
         .expect_err("error");
     assert!(err.contains("context window"));
+}
+
+fn direct_catalog(
+    provider_id: &str,
+    display_name: &str,
+    status: RemoteModelsStatus,
+    models: &[&str],
+) -> DirectProviderModelCatalog {
+    DirectProviderModelCatalog {
+        provider_id: provider_id.to_owned(),
+        display_name: display_name.to_owned(),
+        status,
+        presets: models.iter().map(|model| preset(model)).collect(),
+    }
+}
+
+#[test]
+fn direct_provider_endpoint_equal_model_ids_emit_provider_qualified_events() {
+    let catalogs = vec![
+        direct_catalog(
+            "direct-company-a",
+            "Company A",
+            RemoteModelsStatus::Fresh,
+            &["shared-model"],
+        ),
+        direct_catalog(
+            "direct-company-b",
+            "Company B",
+            RemoteModelsStatus::Stale,
+            &["shared-model"],
+        ),
+    ];
+    let (tx, rx) = mpsc::channel::<AppEvent>();
+    let mut view = ModelSelectionView::new(
+        ModelSelectionViewParams {
+            presets: Vec::new(),
+            current_model: "shared-model".to_owned(),
+            current_model_provider_id: Some("direct-company-a".to_owned()),
+            current_effort: ReasoningEffort::Medium,
+            current_service_tier: None,
+            current_context_mode: None,
+            current_context_window: None,
+            current_auto_compact_token_limit: None,
+            use_chat_model: false,
+            direct_provider_catalogs: catalogs,
+            target: ModelSelectionTarget::Session,
+        },
+        AppEventSender::new(tx),
+    );
+
+    let direct_entries: Vec<(usize, String)> = view
+        .data
+        .entries()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(entry_index, entry)| match entry {
+            EntryKind::Preset(preset_index) => view.data.flat_presets[preset_index]
+                .provider_id
+                .clone()
+                .map(|provider_id| (entry_index, provider_id)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        direct_entries,
+        vec![
+            (3, "direct-company-a".to_owned()),
+            (4, "direct-company-b".to_owned()),
+        ],
+    );
+
+    for (entry_index, _) in &direct_entries {
+        view.select_item(*entry_index);
+    }
+
+    let selected_providers: Vec<String> = rx
+        .try_iter()
+        .filter_map(|event| match event {
+            AppEvent::UpdateModelSelection {
+                model,
+                model_provider_id,
+                ..
+            } => {
+                assert_eq!(model, "shared-model");
+                model_provider_id
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        selected_providers,
+        vec!["direct-company-a".to_owned(), "direct-company-b".to_owned(),],
+    );
+}
+
+#[test]
+fn direct_provider_endpoint_refresh_keeps_sorted_ordinary_selection() {
+    let (tx, _rx) = mpsc::channel::<AppEvent>();
+    let mut view = ModelSelectionView::new(
+        ModelSelectionViewParams {
+            presets: vec![preset("gpt-5.3-codex"), preset("gpt-5.4")],
+            current_model: "gpt-5.4".to_owned(),
+            current_model_provider_id: Some("openai".to_owned()),
+            current_effort: ReasoningEffort::Medium,
+            current_service_tier: None,
+            current_context_mode: None,
+            current_context_window: None,
+            current_auto_compact_token_limit: None,
+            use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
+            target: ModelSelectionTarget::Session,
+        },
+        AppEventSender::new(tx),
+    );
+
+    view.update_direct_provider_catalogs(vec![direct_catalog(
+        "direct-local",
+        "LocalAI",
+        RemoteModelsStatus::Fresh,
+        &["local-model"],
+    )]);
+
+    let selected = view
+        .data
+        .entry_at(view.selected_index)
+        .expect("selected entry after refresh");
+    let EntryKind::Preset(preset_index) = selected else {
+        panic!("expected selected preset, got {selected:?}");
+    };
+    let selected_preset = &view.data.flat_presets[preset_index];
+    assert_eq!(selected_preset.provider_id, None);
+    assert_eq!(selected_preset.model, "gpt-5.4");
+}
+
+#[test]
+fn direct_provider_endpoint_render_groups_catalog_state_without_worker_counts() {
+    let (tx, _rx) = mpsc::channel::<AppEvent>();
+    let view = ModelSelectionView::new(
+        ModelSelectionViewParams {
+            presets: Vec::new(),
+            current_model: "local-model".to_owned(),
+            current_model_provider_id: Some("direct-local".to_owned()),
+            current_effort: ReasoningEffort::Medium,
+            current_service_tier: None,
+            current_context_mode: None,
+            current_context_window: None,
+            current_auto_compact_token_limit: None,
+            use_chat_model: false,
+            direct_provider_catalogs: vec![
+                direct_catalog(
+                    "direct-local",
+                    "LocalAI",
+                    RemoteModelsStatus::Fresh,
+                    &["local-model"],
+                ),
+                direct_catalog(
+                    "direct-gateway",
+                    "Company Gateway",
+                    RemoteModelsStatus::AuthenticationError {
+                        message: "invalid key".to_owned(),
+                    },
+                    &["gateway-model"],
+                ),
+                direct_catalog(
+                    "direct-stale",
+                    "Stale Endpoint",
+                    RemoteModelsStatus::Stale,
+                    &["stale-model"],
+                ),
+                direct_catalog(
+                    "direct-loading",
+                    "Loading Endpoint",
+                    RemoteModelsStatus::Loading,
+                    &["loading-model"],
+                ),
+                direct_catalog(
+                    "direct-offline",
+                    "Offline Endpoint",
+                    RemoteModelsStatus::ConnectionError {
+                        message: "connection refused".to_owned(),
+                    },
+                    &["offline-model"],
+                ),
+            ],
+            target: ModelSelectionTarget::Session,
+        },
+        AppEventSender::new(tx),
+    );
+    let area = Rect::new(0, 0, 100, 40);
+    let mut buf = Buffer::empty(area);
+
+    view.content_only().render(area, &mut buf);
+
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("LocalAI"));
+    assert!(rendered.contains("fresh"));
+    assert!(rendered.contains("Company Gateway"));
+    assert!(rendered.contains("authentication failed"));
+    assert!(rendered.contains("Stale Endpoint"));
+    assert!(rendered.contains("stale cache"));
+    assert!(rendered.contains("Loading Endpoint"));
+    assert!(rendered.contains("loading"));
+    assert!(rendered.contains("Offline Endpoint"));
+    assert!(rendered.contains("connection failed"));
+    assert!(rendered.contains("local-model"));
+    assert!(rendered.contains("gateway-model"));
+    assert!(!rendered.to_ascii_lowercase().contains("worker"));
 }
 
 #[test]
@@ -586,12 +839,14 @@ fn direct_provider_endpoint_inline_validation_blocks_empty_name_and_url() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: None,
             current_context_window: Some(1_047_576),
             current_auto_compact_token_limit: Some(942_818),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),
@@ -613,12 +868,14 @@ fn direct_provider_endpoint_no_key_submission_emits_normalized_request() {
         ModelSelectionViewParams {
             presets: vec![preset("gpt-5.4")],
             current_model: "gpt-5.4".to_string(),
+            current_model_provider_id: Some("openai".to_owned()),
             current_effort: ReasoningEffort::Medium,
             current_service_tier: None,
             current_context_mode: None,
             current_context_window: Some(1_047_576),
             current_auto_compact_token_limit: Some(942_818),
             use_chat_model: false,
+            direct_provider_catalogs: Vec::new(),
             target: ModelSelectionTarget::Session,
         },
         AppEventSender::new(tx),

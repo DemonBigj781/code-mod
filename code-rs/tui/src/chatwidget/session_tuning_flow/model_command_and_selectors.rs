@@ -33,17 +33,22 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.bottom_pane.show_model_selection(ModelSelectionViewParams {
-            presets,
-            current_model: self.config.model.clone(),
-            current_effort: self.config.model_reasoning_effort,
-            current_service_tier: self.config.service_tier,
-            current_context_mode: self.config.context_mode,
-            current_context_window: self.config.model_context_window,
-            current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
-            use_chat_model: false,
-            target: ModelSelectionTarget::Session,
-        });
+        self.refresh_direct_provider_catalogs();
+        let direct_provider_catalogs = self.available_direct_provider_catalogs();
+        self.bottom_pane
+            .show_model_selection(ModelSelectionViewParams {
+                presets,
+                current_model: self.config.model.clone(),
+                current_model_provider_id: Some(self.config.model_provider_id.clone()),
+                current_effort: self.config.model_reasoning_effort,
+                current_service_tier: self.config.service_tier,
+                current_context_mode: self.config.context_mode,
+                current_context_window: self.config.model_context_window,
+                current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+                use_chat_model: false,
+                direct_provider_catalogs,
+                target: ModelSelectionTarget::Session,
+            });
     }
 
     pub(crate) fn show_review_model_selector(&mut self) {
@@ -58,17 +63,20 @@ impl ChatWidget<'_> {
             self.pending_settings_return = Some(SettingsSection::Review);
             self.close_settings_overlay();
         }
-        self.bottom_pane.show_model_selection(ModelSelectionViewParams {
-            presets,
-            current_model: self.config.review_model.clone(),
-            current_effort: self.config.review_model_reasoning_effort,
-            current_service_tier: self.config.service_tier,
-            current_context_mode: None,
-            current_context_window: self.config.model_context_window,
-            current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
-            use_chat_model: self.config.review_use_chat_model,
-            target: ModelSelectionTarget::Review,
-        });
+        self.bottom_pane
+            .show_model_selection(ModelSelectionViewParams {
+                presets,
+                current_model: self.config.review_model.clone(),
+                current_model_provider_id: None,
+                current_effort: self.config.review_model_reasoning_effort,
+                current_service_tier: self.config.service_tier,
+                current_context_mode: None,
+                current_context_window: self.config.model_context_window,
+                current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+                use_chat_model: self.config.review_use_chat_model,
+                direct_provider_catalogs: Vec::new(),
+                target: ModelSelectionTarget::Review,
+            });
     }
 
     pub(crate) fn show_review_resolve_model_selector(&mut self) {
@@ -93,17 +101,20 @@ impl ChatWidget<'_> {
         } else {
             self.config.review_resolve_model_reasoning_effort
         };
-        self.bottom_pane.show_model_selection(ModelSelectionViewParams {
-            presets,
-            current_model: current,
-            current_effort: effort,
-            current_service_tier: self.config.service_tier,
-            current_context_mode: None,
-            current_context_window: self.config.model_context_window,
-            current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
-            use_chat_model: self.config.review_resolve_use_chat_model,
-            target: ModelSelectionTarget::ReviewResolve,
-        });
+        self.bottom_pane
+            .show_model_selection(ModelSelectionViewParams {
+                presets,
+                current_model: current,
+                current_model_provider_id: None,
+                current_effort: effort,
+                current_service_tier: self.config.service_tier,
+                current_context_mode: None,
+                current_context_window: self.config.model_context_window,
+                current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+                use_chat_model: self.config.review_resolve_use_chat_model,
+                direct_provider_catalogs: Vec::new(),
+                target: ModelSelectionTarget::ReviewResolve,
+            });
     }
 
     pub(crate) fn show_auto_review_model_selector(&mut self) {
@@ -128,17 +139,20 @@ impl ChatWidget<'_> {
         } else {
             self.config.auto_review_model_reasoning_effort
         };
-        self.bottom_pane.show_model_selection(ModelSelectionViewParams {
-            presets,
-            current_model: current,
-            current_effort: effort,
-            current_service_tier: self.config.service_tier,
-            current_context_mode: None,
-            current_context_window: self.config.model_context_window,
-            current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
-            use_chat_model: self.config.auto_review_use_chat_model,
-            target: ModelSelectionTarget::AutoReview,
-        });
+        self.bottom_pane
+            .show_model_selection(ModelSelectionViewParams {
+                presets,
+                current_model: current,
+                current_model_provider_id: None,
+                current_effort: effort,
+                current_service_tier: self.config.service_tier,
+                current_context_mode: None,
+                current_context_window: self.config.model_context_window,
+                current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+                use_chat_model: self.config.auto_review_use_chat_model,
+                direct_provider_catalogs: Vec::new(),
+                target: ModelSelectionTarget::AutoReview,
+            });
     }
 
     pub(crate) fn show_auto_review_resolve_model_selector(&mut self) {
@@ -163,17 +177,20 @@ impl ChatWidget<'_> {
         } else {
             self.config.auto_review_resolve_model_reasoning_effort
         };
-        self.bottom_pane.show_model_selection(ModelSelectionViewParams {
-            presets,
-            current_model: current,
-            current_effort: effort,
-            current_service_tier: self.config.service_tier,
-            current_context_mode: None,
-            current_context_window: self.config.model_context_window,
-            current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
-            use_chat_model: self.config.auto_review_resolve_use_chat_model,
-            target: ModelSelectionTarget::AutoReviewResolve,
-        });
+        self.bottom_pane
+            .show_model_selection(ModelSelectionViewParams {
+                presets,
+                current_model: current,
+                current_model_provider_id: None,
+                current_effort: effort,
+                current_service_tier: self.config.service_tier,
+                current_context_mode: None,
+                current_context_window: self.config.model_context_window,
+                current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+                use_chat_model: self.config.auto_review_resolve_use_chat_model,
+                direct_provider_catalogs: Vec::new(),
+                target: ModelSelectionTarget::AutoReviewResolve,
+            });
     }
 
     pub(crate) fn show_planning_model_selector(&mut self) {
@@ -194,17 +211,20 @@ impl ChatWidget<'_> {
             self.config.planning_model.clone()
         };
         let effort = self.config.planning_model_reasoning_effort;
-        self.bottom_pane.show_model_selection(ModelSelectionViewParams {
-            presets,
-            current_model: current,
-            current_effort: effort,
-            current_service_tier: self.config.service_tier,
-            current_context_mode: None,
-            current_context_window: self.config.model_context_window,
-            current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
-            use_chat_model: self.config.planning_use_chat_model,
-            target: ModelSelectionTarget::Planning,
-        });
+        self.bottom_pane
+            .show_model_selection(ModelSelectionViewParams {
+                presets,
+                current_model: current,
+                current_model_provider_id: None,
+                current_effort: effort,
+                current_service_tier: self.config.service_tier,
+                current_context_mode: None,
+                current_context_window: self.config.model_context_window,
+                current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+                use_chat_model: self.config.planning_use_chat_model,
+                direct_provider_catalogs: Vec::new(),
+                target: ModelSelectionTarget::Planning,
+            });
     }
 
     pub(crate) fn show_auto_drive_model_selector(&mut self) {
@@ -219,21 +239,33 @@ impl ChatWidget<'_> {
             self.pending_settings_return = Some(SettingsSection::AutoDrive);
             self.close_settings_overlay();
         }
-        self.bottom_pane.show_model_selection(ModelSelectionViewParams {
-            presets,
-            current_model: self.config.auto_drive.model.clone(),
-            current_effort: self.config.auto_drive.model_reasoning_effort,
-            current_service_tier: self.config.service_tier,
-            current_context_mode: None,
-            current_context_window: self.config.model_context_window,
-            current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
-            use_chat_model: self.config.auto_drive_use_chat_model,
-            target: ModelSelectionTarget::AutoDrive,
-        });
+        self.bottom_pane
+            .show_model_selection(ModelSelectionViewParams {
+                presets,
+                current_model: self.config.auto_drive.model.clone(),
+                current_model_provider_id: None,
+                current_effort: self.config.auto_drive.model_reasoning_effort,
+                current_service_tier: self.config.service_tier,
+                current_context_mode: None,
+                current_context_window: self.config.model_context_window,
+                current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
+                use_chat_model: self.config.auto_drive_use_chat_model,
+                direct_provider_catalogs: Vec::new(),
+                target: ModelSelectionTarget::AutoDrive,
+            });
     }
 
     pub(crate) fn apply_model_selection(&mut self, model: String, effort: Option<ReasoningEffort>) {
-        self.apply_model_selection_inner(model, effort, true, true);
+        self.apply_model_selection_inner(model, effort, None, true, true);
+    }
+
+    pub(crate) fn apply_model_selection_with_provider(
+        &mut self,
+        model: String,
+        effort: Option<ReasoningEffort>,
+        model_provider_id: Option<String>,
+    ) {
+        self.apply_model_selection_inner(model, effort, model_provider_id, true, true);
     }
 
     pub(crate) fn apply_service_tier_selection(

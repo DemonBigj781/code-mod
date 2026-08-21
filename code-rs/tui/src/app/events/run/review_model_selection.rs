@@ -72,10 +72,11 @@
                                 self.config = config.clone();
                                 if let AppState::Chat { widget } = &mut self.app_state {
                                     widget.apply_reloaded_config_keep_settings_state(config);
-                                    widget.finish_direct_provider_add(Ok(outcome.models));
+                                    let provider_id = outcome.provider_id.clone();
+                                    widget.finish_direct_provider_add(Ok(outcome));
                                     widget.flash_footer_notice(format!(
                                         "Added endpoint {}",
-                                        outcome.provider_id,
+                                        provider_id,
                                     ));
                                 }
                             }
@@ -92,6 +93,12 @@
                                 widget.finish_direct_provider_add(Err(error));
                             }
                         }
+                    }
+                    self.schedule_redraw();
+                }
+                AppEvent::DirectModelCatalogUpdated { catalog } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.update_direct_model_catalog(catalog);
                     }
                     self.schedule_redraw();
                 }

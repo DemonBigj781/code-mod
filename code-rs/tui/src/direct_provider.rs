@@ -34,6 +34,16 @@ struct StagedSecret {
     previous: Option<String>,
 }
 
+pub(crate) fn is_direct_provider_definition(
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+) -> bool {
+    provider
+        .base_url
+        .as_deref()
+        .is_some_and(|base_url| direct_model_provider_id(&provider.name, base_url) == provider_id)
+}
+
 impl StagedSecret {
     fn rollback(self) -> Result<(), String> {
         match self.previous {

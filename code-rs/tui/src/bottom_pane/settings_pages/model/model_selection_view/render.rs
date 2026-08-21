@@ -4,10 +4,11 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 
 use code_core::config_types::{ContextMode, ServiceTier};
+use code_core::remote_models::RemoteModelsStatus;
 
 use crate::bottom_pane::chrome::ChromeMode;
-use crate::bottom_pane::settings_ui::hints::{hint_enter, hint_esc, KeyHint};
 use crate::bottom_pane::settings_ui::editor_page::SettingsEditorPage;
+use crate::bottom_pane::settings_ui::hints::{KeyHint, hint_enter, hint_esc};
 use crate::bottom_pane::settings_ui::line_runs::SelectableLineRun;
 use crate::bottom_pane::settings_ui::menu_page::SettingsMenuPage;
 use crate::bottom_pane::settings_ui::panel::SettingsPanelStyle;
@@ -266,30 +267,32 @@ impl ModelSelectionView {
                 continue;
             };
             let flat_preset = &self.data.flat_presets[*preset_index];
-            let is_new_model = previous_model
-                .is_none_or(|model| !model.eq_ignore_ascii_case(&flat_preset.model));
+            if flat_preset.provider_id.is_some() {
+                continue;
+            }
+            let is_new_model =
+                previous_model.is_none_or(|model| !model.eq_ignore_ascii_case(&flat_preset.model));
 
             if is_new_model {
                 if previous_model.is_some() {
                     Self::push_blank_line(lines);
                 }
-                lines.push(SelectableLineRun::plain(vec![Line::from(vec![Span::styled(
-                    flat_preset.display_name.clone(),
-                    Self::section_header_style(),
-                )])]));
+                lines.push(SelectableLineRun::plain(vec![Line::from(vec![
+                    Span::styled(
+                        flat_preset.display_name.clone(),
+                        Self::section_header_style(),
+                    ),
+                ])]));
                 if !flat_preset.model_description.trim().is_empty() {
-                    lines.push(SelectableLineRun::plain(vec![Line::from(vec![Span::styled(
-                        flat_preset.model_description.clone(),
-                        Self::dim_style(),
-                    )])]));
+                    lines.push(SelectableLineRun::plain(vec![Line::from(vec![
+                        Span::styled(flat_preset.model_description.clone(), Self::dim_style()),
+                    ])]));
                 }
                 previous_model = Some(&flat_preset.model);
             }
 
             let is_selected = entry_idx == self.selected_index;
-            let is_current = !self.data.current.use_chat_model
-                && flat_preset.model.eq_ignore_ascii_case(&self.data.current.current_model)
-                && flat_preset.effort == self.data.current.current_effort;
+            let is_current = self.data.preset_is_current(flat_preset);
 
             let mut row_text = reasoning_effort_label(flat_preset.effort).to_owned();
             if is_current {
@@ -324,15 +327,85 @@ impl ModelSelectionView {
         }
     }
 
-    fn push_add_direct_provider_section<'a>(
-        &self,
-        lines: &mut Vec<SelectableLineRun<'a, usize>>,
-    ) {
+    fn direct_catalog_status(status: &RemoteModelsStatus) -> (&'static str, Style) {
+        match status {
+            RemoteModelsStatus::Fresh => ("fresh", Style::new().fg(colors::success())),
+            RemoteModelsStatus::Stale => ("stale cache", Style::new().fg(colors::warning())),
+            RemoteModelsStatus::Loading => ("loading", Style::new().fg(colors::primary())),
+            RemoteModelsStatus::AuthenticationError { .. } => {
+                ("authentication failed", Style::new().fg(colors::error()))
+            }
+            RemoteModelsStatus::ConnectionError { .. } => {
+                ("connection failed", Style::new().fg(colors::error()))
+            }
+        }
+    }
+
+    fn push_direct_provider_rows<'a>(&self, lines: &mut Vec<SelectableLineRun<'a, usize>>) {
+        let entries = self.data.entries();
+        for catalog in &self.data.direct_provider_catalogs {
+            let (status, status_style) = Self::direct_catalog_status(&catalog.status);
+            lines.push(SelectableLineRun::plain(vec![Line::from(vec![
+                Span::styled(catalog.display_name.clone(), Self::section_header_style()),
+                Span::styled("  [", Self::dim_style()),
+                Span::styled(status, status_style),
+                Span::styled("]", Self::dim_style()),
+            ])]));
+
+            for (entry_index, entry) in entries.iter().enumerate() {
+                let EntryKind::Preset(preset_index) = entry else {
+                    continue;
+                };
+                let flat_preset = &self.data.flat_presets[*preset_index];
+                if flat_preset.provider_id.as_deref() != Some(catalog.provider_id.as_str()) {
+                    continue;
+                }
+
+                let is_selected = entry_index == self.selected_index;
+                let is_current = self.data.preset_is_current(flat_preset);
+                let indent_style = if is_selected {
+                    Style::new().bg(colors::selection()).bold()
+                } else {
+                    Style::new()
+                };
+                let label_style = {
+                    let base = Self::highlighted(Style::new().fg(colors::text()), is_selected);
+                    if is_current {
+                        base.fg(colors::success())
+                    } else {
+                        base
+                    }
+                };
+                let detail_style =
+                    Self::highlighted(Style::new().fg(colors::text_dim()), is_selected);
+                let mut label = flat_preset.display_name.clone();
+                if is_current {
+                    label.push_str(" (current)");
+                }
+
+                lines.push(SelectableLineRun::selectable(
+                    entry_index,
+                    vec![Line::from(vec![
+                        Span::styled(crate::icons::selection_prefix(is_selected), indent_style),
+                        Span::styled("   ", indent_style),
+                        Span::styled(label, label_style),
+                        Span::styled(" - ", detail_style),
+                        Span::styled(reasoning_effort_label(flat_preset.effort), detail_style),
+                    ])],
+                ));
+            }
+        }
+    }
+
+    fn push_add_direct_provider_section<'a>(&self, lines: &mut Vec<SelectableLineRun<'a, usize>>) {
+        if !self.data.target.supports_direct_providers() {
+            return;
+        }
         Self::push_blank_line(lines);
-        lines.push(SelectableLineRun::plain(vec![Line::from(vec![Span::styled(
-            "OpenAI-compatible endpoints",
-            Self::section_header_style(),
-        )])]));
+        lines.push(SelectableLineRun::plain(vec![Line::from(vec![
+            Span::styled("OpenAI-compatible endpoints", Self::section_header_style()),
+        ])]));
+        self.push_direct_provider_rows(lines);
 
         let entry_index = self.data.entry_count().saturating_sub(1);
         let is_selected = self.selected_index == entry_index;

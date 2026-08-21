@@ -240,6 +240,19 @@ impl<'a> BottomPane<'a> {
         self.request_redraw();
     }
 
+    pub(crate) fn update_direct_provider_catalogs(
+        &mut self,
+        catalogs: Vec<settings_pages::model::DirectProviderModelCatalog>,
+    ) {
+        let Some(model_view) = self.active_view_as::<settings_pages::model::ModelSelectionView>()
+        else {
+            return;
+        };
+
+        model_view.update_direct_provider_catalogs(catalogs);
+        self.request_redraw_with_height_change();
+    }
+
     pub(crate) fn finish_direct_provider_add(&mut self, result: Result<(), String>) {
         let Some(model_view) = self.active_view_as::<settings_pages::model::ModelSelectionView>()
         else {

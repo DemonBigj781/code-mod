@@ -56,6 +56,7 @@ impl ChatWidget<'_> {
     }
 
     fn populate_settings_overlay_content(&mut self, overlay: &mut SettingsOverlayView) {
+        self.refresh_direct_provider_catalogs();
         overlay.set_model_content(self.build_model_settings_content());
         overlay.set_planning_content(self.build_planning_settings_content());
         overlay.set_personality_content(self.build_personality_settings_content());

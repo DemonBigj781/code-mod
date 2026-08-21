@@ -809,9 +809,17 @@
                         widget.show_agent_editor_new_ui();
                     }
                 }
-                AppEvent::UpdateModelSelection { model, effort } => {
+                AppEvent::UpdateModelSelection {
+                    model,
+                    effort,
+                    model_provider_id,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.apply_model_selection(model, effort);
+                        widget.apply_model_selection_with_provider(
+                            model,
+                            effort,
+                            model_provider_id,
+                        );
                     }
                 }
                 AppEvent::UpdateServiceTierSelection { service_tier } => {

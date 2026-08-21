@@ -1,5 +1,95 @@
 impl ChatWidget<'_> {
-    fn sync_provider_for_model_selection(&mut self, model: &str) -> bool {
+    fn is_configured_direct_provider(&self, provider_id: &str) -> bool {
+        self.config
+            .model_providers
+            .get(provider_id)
+            .is_some_and(|provider| {
+                crate::direct_provider::is_direct_provider_definition(provider_id, provider)
+            })
+    }
+
+    fn active_provider_is_direct(&self) -> bool {
+        crate::direct_provider::is_direct_provider_definition(
+            &self.config.model_provider_id,
+            &self.config.model_provider,
+        )
+    }
+
+    fn configured_non_direct_provider(
+        &self,
+        provider_id: &str,
+    ) -> Option<(String, ModelProviderInfo)> {
+        let provider = self.config.model_providers.get(provider_id)?;
+        (!crate::direct_provider::is_direct_provider_definition(provider_id, provider))
+            .then(|| (provider_id.to_owned(), provider.clone()))
+    }
+
+    fn fallback_non_direct_provider(&self) -> Option<(String, ModelProviderInfo)> {
+        self.configured_non_direct_provider("openai").or_else(|| {
+            self.config
+                .model_providers
+                .iter()
+                .filter(|(provider_id, provider)| {
+                    !crate::direct_provider::is_direct_provider_definition(provider_id, provider)
+                })
+                .min_by(|(left_id, _), (right_id, _)| left_id.cmp(right_id))
+                .map(|(provider_id, provider)| (provider_id.clone(), provider.clone()))
+        })
+    }
+
+    fn restore_provider_before_direct(&mut self) -> Result<bool, String> {
+        if !self.active_provider_is_direct() {
+            return Ok(false);
+        }
+
+        let previous_provider_id = self.model_provider_before_direct.as_deref();
+        let (provider_id, provider) = previous_provider_id
+            .and_then(|provider_id| self.configured_non_direct_provider(provider_id))
+            .or_else(|| self.fallback_non_direct_provider())
+            .ok_or_else(|| {
+                "No non-direct model provider is available for this selection.".to_owned()
+            })?;
+        let changed =
+            self.config.model_provider_id != provider_id || self.config.model_provider != provider;
+        self.model_provider_before_direct = None;
+        self.config.model_provider_id = provider_id;
+        self.config.model_provider = provider;
+        Ok(changed)
+    }
+
+    fn sync_provider_for_model_selection(
+        &mut self,
+        model: &str,
+        requested_provider_id: Option<&str>,
+    ) -> Result<bool, String> {
+        if let Some(provider_id) = requested_provider_id {
+            if !self.is_configured_direct_provider(provider_id) {
+                return Err(format!(
+                    "The selected endpoint provider '{provider_id}' is no longer configured."
+                ));
+            }
+            let provider = self
+                .config
+                .model_providers
+                .get(provider_id)
+                .cloned()
+                .ok_or_else(|| {
+                    format!("The selected endpoint provider '{provider_id}' is unavailable.")
+                })?;
+
+            if !self.active_provider_is_direct() && self.config.model_provider_id != provider_id {
+                self.model_provider_before_direct = Some(self.config.model_provider_id.clone());
+            }
+
+            let changed = self.config.model_provider_id != provider_id
+                || self.config.model_provider != provider;
+            self.config.model_provider_id = provider_id.to_owned();
+            self.config.model_provider = provider;
+            return Ok(changed);
+        }
+
+        let direct_provider_changed = self.restore_provider_before_direct()?;
+
         if model.eq_ignore_ascii_case(OPENROUTER_FREE_MAX_MODEL) {
             let Some(openrouter) = self
                 .config
@@ -8,7 +98,7 @@ impl ChatWidget<'_> {
                 .cloned()
             else {
                 tracing::error!("OpenRouter Free was selected without a registered OpenRouter provider");
-                return false;
+                return Ok(false);
             };
 
             if self.model_provider_before_openrouter.is_none()
@@ -22,19 +112,20 @@ impl ChatWidget<'_> {
                 ));
             }
 
-            let changed = self.config.model_provider_id != OPENROUTER_PROVIDER_ID
+            let changed = direct_provider_changed
+                || self.config.model_provider_id != OPENROUTER_PROVIDER_ID
                 || self.config.model_provider != openrouter
                 || self.config.active_profile.as_deref() != Some(OPENROUTER_FREE_PROFILE);
             self.config.model_provider_id = OPENROUTER_PROVIDER_ID.to_owned();
             self.config.model_provider = openrouter;
             self.config.active_profile = Some(OPENROUTER_FREE_PROFILE.to_owned());
-            return changed;
+            return Ok(changed);
         }
 
         if self.config.model_provider_id != OPENROUTER_PROVIDER_ID
             || self.config.active_profile.as_deref() != Some(OPENROUTER_FREE_PROFILE)
         {
-            return false;
+            return Ok(direct_provider_changed);
         }
 
         let (provider_id, provider, profile) = self
@@ -48,20 +139,21 @@ impl ChatWidget<'_> {
                     .map(|provider| ("openai".to_owned(), provider, None))
             })
             .expect("built-in OpenAI provider must be available");
-        let changed = self.config.model_provider_id != provider_id
+        let changed = direct_provider_changed
+            || self.config.model_provider_id != provider_id
             || self.config.model_provider != provider
             || self.config.active_profile != profile;
         self.config.model_provider_id = provider_id;
         self.config.model_provider = provider;
         self.config.active_profile = profile;
-        changed
+        Ok(changed)
     }
 
-    fn clamp_reasoning_for_model_from_presets(
+    fn clamp_reasoning_for_matching_preset(
         model: &str,
         requested: ReasoningEffort,
         presets: &[ModelPreset],
-    ) -> ReasoningEffort {
+    ) -> Option<ReasoningEffort> {
         fn rank(effort: ReasoningEffort) -> u8 {
             match effort {
                 ReasoningEffort::Minimal => 0,
@@ -75,13 +167,11 @@ impl ChatWidget<'_> {
         }
 
         let model_lower = model.to_ascii_lowercase();
-        let Some(preset) = presets.iter().find(|preset| {
+        let preset = presets.iter().find(|preset| {
             preset.model.eq_ignore_ascii_case(&model_lower)
                 || preset.id.eq_ignore_ascii_case(&model_lower)
                 || preset.display_name.eq_ignore_ascii_case(&model_lower)
-        }) else {
-            return Self::clamp_reasoning_for_model(model, requested);
-        };
+        })?;
 
         let supported: Vec<ReasoningEffort> = preset
             .supported_reasoning_efforts
@@ -89,23 +179,35 @@ impl ChatWidget<'_> {
             .map(|opt| ReasoningEffort::from(opt.effort))
             .collect();
         if supported.contains(&requested) {
-            return requested;
+            return Some(requested);
         }
 
         let requested_rank = rank(requested);
-        supported
-            .into_iter()
-            .min_by_key(|effort| {
-                let effort_rank = rank(*effort);
-                (requested_rank.abs_diff(effort_rank), u8::MAX - effort_rank)
-            })
-            .unwrap_or(requested)
+        Some(
+            supported
+                .into_iter()
+                .min_by_key(|effort| {
+                    let effort_rank = rank(*effort);
+                    (requested_rank.abs_diff(effort_rank), u8::MAX - effort_rank)
+                })
+                .unwrap_or(requested),
+        )
+    }
+
+    fn clamp_reasoning_for_model_from_presets(
+        model: &str,
+        requested: ReasoningEffort,
+        presets: &[ModelPreset],
+    ) -> ReasoningEffort {
+        Self::clamp_reasoning_for_matching_preset(model, requested, presets)
+            .unwrap_or_else(|| Self::clamp_reasoning_for_model(model, requested))
     }
 
     fn apply_model_selection_inner(
         &mut self,
         model: String,
         effort: Option<ReasoningEffort>,
+        model_provider_id: Option<String>,
         mark_explicit: bool,
         announce: bool,
     ) {
@@ -114,12 +216,20 @@ impl ChatWidget<'_> {
             return;
         }
 
+        let provider_changed =
+            match self.sync_provider_for_model_selection(trimmed, model_provider_id.as_deref()) {
+                Ok(changed) => changed,
+                Err(error) => {
+                    self.bottom_pane.flash_footer_notice(error);
+                    self.request_redraw();
+                    return;
+                }
+            };
+
         if mark_explicit {
             self.chat_model_selected_explicitly = true;
             self.config.model_explicit = true;
         }
-
-        let provider_changed = self.sync_provider_for_model_selection(trimmed);
 
         let model_changed = if !self.config.model.eq_ignore_ascii_case(trimmed) {
             trimmed.clone_into(&mut self.config.model);
@@ -142,8 +252,20 @@ impl ChatWidget<'_> {
         let requested_effort = effort
             .or(self.config.preferred_model_reasoning_effort)
             .unwrap_or(self.config.model_reasoning_effort);
-        let presets = self.available_session_model_presets();
-        let clamped_effort = Self::clamp_reasoning_for_model_from_presets(trimmed, requested_effort, &presets);
+        let clamped_effort = if let Some(provider_id) = model_provider_id.as_deref() {
+            self.direct_model_catalogs
+                .get(provider_id)
+                .map(|catalog| {
+                    crate::remote_model_presets::direct_model_presets(catalog.models.clone())
+                })
+                .and_then(|presets| {
+                    Self::clamp_reasoning_for_matching_preset(trimmed, requested_effort, &presets)
+                })
+                .unwrap_or(requested_effort)
+        } else {
+            let presets = self.available_session_model_presets();
+            Self::clamp_reasoning_for_model_from_presets(trimmed, requested_effort, &presets)
+        };
 
         let reasoning_changed = if self.config.model_reasoning_effort != clamped_effort {
             self.config.model_reasoning_effort = clamped_effort;

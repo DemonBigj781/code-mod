@@ -1342,6 +1342,221 @@
     }
 
     #[test]
+    fn direct_provider_endpoint_selection_updates_provider_and_preserves_profile() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let original_provider_id = chat.config.model_provider_id.clone();
+    let original_provider = chat.config.model_provider.clone();
+    let original_profile = Some("existing-profile".to_owned());
+    chat.config.active_profile = original_profile.clone();
+
+    let base_url = "http://127.0.0.1:11434/v1";
+    let provider_id = code_core::direct_model_provider_id("LocalAI", base_url);
+    let provider = code_core::ModelProviderInfo::direct_openai_compatible(
+        "LocalAI",
+        base_url,
+        None,
+        code_core::WireApi::Chat,
+    );
+    chat.config
+        .model_providers
+        .insert(provider_id.clone(), provider.clone());
+
+    chat.apply_model_selection_with_provider(
+        "shared-model".to_owned(),
+        Some(ReasoningEffort::Medium),
+        Some(provider_id.clone()),
+    );
+
+    assert_eq!(chat.config.model, "shared-model");
+    assert_eq!(chat.config.model_provider_id, provider_id);
+    assert_eq!(chat.config.model_provider, provider);
+    assert_eq!(chat.config.active_profile, original_profile);
+
+    chat.apply_model_selection("gpt-5.5".to_owned(), Some(ReasoningEffort::Medium));
+
+    assert_eq!(chat.config.model_provider_id, original_provider_id);
+    assert_eq!(chat.config.model_provider, original_provider);
+    assert_eq!(chat.config.active_profile, original_profile);
+    }
+
+    #[test]
+    fn direct_provider_endpoint_removed_while_active_still_restores_original_provider() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let original_provider_id = chat.config.model_provider_id.clone();
+    let original_provider = chat.config.model_provider.clone();
+    let original_profile = Some("existing-profile".to_owned());
+    chat.config.active_profile = original_profile.clone();
+
+    let base_url = "http://127.0.0.1:11434/v1";
+    let provider_id = code_core::direct_model_provider_id("LocalAI", base_url);
+    let provider = code_core::ModelProviderInfo::direct_openai_compatible(
+        "LocalAI",
+        base_url,
+        None,
+        code_core::WireApi::Chat,
+    );
+    chat.config
+        .model_providers
+        .insert(provider_id.clone(), provider);
+
+    chat.apply_model_selection_with_provider(
+        "shared-model".to_owned(),
+        Some(ReasoningEffort::Medium),
+        Some(provider_id.clone()),
+    );
+    chat.config.model_providers.remove(&provider_id);
+    chat.apply_model_selection("gpt-5.5".to_owned(), Some(ReasoningEffort::Medium));
+
+    assert_eq!(chat.config.model_provider_id, original_provider_id);
+    assert_eq!(chat.config.model_provider, original_provider);
+    assert_eq!(chat.config.active_profile, original_profile);
+    }
+
+    #[test]
+    fn direct_provider_endpoint_then_openrouter_then_ordinary_restores_original_provider() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let original_provider_id = chat.config.model_provider_id.clone();
+    let original_provider = chat.config.model_provider.clone();
+    let original_profile = Some("existing-profile".to_owned());
+    chat.config.active_profile = original_profile.clone();
+
+    let base_url = "http://127.0.0.1:11434/v1";
+    let provider_id = code_core::direct_model_provider_id("LocalAI", base_url);
+    let provider = code_core::ModelProviderInfo::direct_openai_compatible(
+        "LocalAI",
+        base_url,
+        None,
+        code_core::WireApi::Chat,
+    );
+    chat.config
+        .model_providers
+        .insert(provider_id.clone(), provider);
+
+    chat.apply_model_selection_with_provider(
+        "shared-model".to_owned(),
+        Some(ReasoningEffort::Medium),
+        Some(provider_id),
+    );
+    chat.apply_model_selection(
+        OPENROUTER_FREE_MAX_MODEL.to_owned(),
+        Some(ReasoningEffort::None),
+    );
+    chat.apply_model_selection("gpt-5.5".to_owned(), Some(ReasoningEffort::Medium));
+
+    assert_eq!(chat.config.model_provider_id, original_provider_id);
+    assert_eq!(chat.config.model_provider, original_provider);
+    assert_eq!(chat.config.active_profile, original_profile);
+    }
+
+    #[test]
+    fn direct_provider_endpoint_after_openrouter_then_ordinary_restores_original_provider() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let original_provider_id = chat.config.model_provider_id.clone();
+    let original_provider = chat.config.model_provider.clone();
+    let original_profile = Some("existing-profile".to_owned());
+    chat.config.active_profile = original_profile.clone();
+
+    let base_url = "http://127.0.0.1:11434/v1";
+    let provider_id = code_core::direct_model_provider_id("LocalAI", base_url);
+    let provider = code_core::ModelProviderInfo::direct_openai_compatible(
+        "LocalAI",
+        base_url,
+        None,
+        code_core::WireApi::Chat,
+    );
+    chat.config
+        .model_providers
+        .insert(provider_id.clone(), provider);
+
+    chat.apply_model_selection(
+        OPENROUTER_FREE_MAX_MODEL.to_owned(),
+        Some(ReasoningEffort::None),
+    );
+    chat.apply_model_selection_with_provider(
+        "shared-model".to_owned(),
+        Some(ReasoningEffort::Medium),
+        Some(provider_id),
+    );
+    chat.apply_model_selection("gpt-5.5".to_owned(), Some(ReasoningEffort::Medium));
+
+    assert_eq!(chat.config.model_provider_id, original_provider_id);
+    assert_eq!(chat.config.model_provider, original_provider);
+    assert_eq!(chat.config.active_profile, original_profile);
+    }
+
+    #[test]
+    fn direct_provider_endpoint_selection_uses_provider_specific_reasoning_metadata() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let base_url = "http://127.0.0.1:11434/v1";
+    let provider_id = code_core::direct_model_provider_id("LocalAI", base_url);
+    let provider = code_core::ModelProviderInfo::direct_openai_compatible(
+        "LocalAI",
+        base_url,
+        None,
+        code_core::WireApi::Chat,
+    );
+    chat.config
+        .model_providers
+        .insert(provider_id.clone(), provider);
+    let direct_model: code_protocol::openai_models::ModelInfo =
+        serde_json::from_value(serde_json::json!({
+            "slug": "gpt-5.5",
+            "display_name": "gpt-5.5",
+            "description": null,
+            "default_reasoning_level": null,
+            "supported_reasoning_levels": [],
+            "shell_type": "default",
+            "visibility": "list",
+            "supported_in_api": true,
+            "priority": 0,
+            "additional_speed_tiers": [],
+            "availability_nux": null,
+            "upgrade": null,
+            "base_instructions": "",
+            "model_messages": null,
+            "supports_reasoning_summaries": false,
+            "default_reasoning_summary": "auto",
+            "support_verbosity": false,
+            "default_verbosity": null,
+            "apply_patch_tool_type": null,
+            "web_search_tool_type": "text",
+            "truncation_policy": {"mode": "bytes", "limit": 10000},
+            "supports_parallel_tool_calls": false,
+            "supports_image_detail_original": false,
+            "context_window": null,
+            "auto_compact_token_limit": null,
+            "effective_context_window_percent": 95,
+            "experimental_supported_tools": [],
+            "input_modalities": ["text"],
+            "supports_search_tool": false,
+            "prefer_websockets": false,
+            "used_fallback_model_metadata": true
+        }))
+        .expect("direct model metadata");
+    chat.direct_model_catalogs.insert(
+        provider_id.clone(),
+        code_core::remote_models::RemoteModelsCatalog {
+            provider_id: provider_id.clone(),
+            models: vec![direct_model],
+            status: code_core::remote_models::RemoteModelsStatus::Fresh,
+        },
+    );
+
+    chat.apply_model_selection_with_provider(
+        "gpt-5.5".to_owned(),
+        Some(ReasoningEffort::Minimal),
+        Some(provider_id),
+    );
+
+    assert_eq!(chat.config.model_reasoning_effort, ReasoningEffort::Minimal);
+    }
+
+    #[test]
     fn free_router_selection_restores_an_existing_openrouter_profile() {
     let mut harness = ChatWidgetHarness::new();
     let chat = harness.chat();

@@ -60,6 +60,20 @@ pub(crate) fn merge_remote_models(
     remote_presets
 }
 
+pub(crate) fn direct_model_presets(mut remote_models: Vec<ModelInfo>) -> Vec<ModelPreset> {
+    remote_models.sort_by(|a, b| a.priority.cmp(&b.priority));
+    remote_models
+        .into_iter()
+        .map(model_info_to_preset)
+        .filter(|preset| preset.show_in_picker)
+        .map(|mut preset| {
+            preset.is_default = false;
+            preset.pro_only = false;
+            preset
+        })
+        .collect()
+}
+
 fn model_info_to_preset(info: ModelInfo) -> ModelPreset {
     let pro_only = info.slug.eq_ignore_ascii_case("gpt-5.3-codex-spark");
     let show_in_picker = info.visibility == ModelVisibility::List
@@ -162,7 +176,7 @@ mod tests {
         }))
         .expect("direct model metadata");
 
-        let presets = merge_remote_models(vec![model], Vec::new(), None, false);
+        let presets = direct_model_presets(vec![model]);
 
         assert_eq!(presets.len(), 1);
         assert_eq!(presets[0].model, "local-model");

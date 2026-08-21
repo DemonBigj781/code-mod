@@ -226,6 +226,11 @@ pub(crate) enum AppEvent {
         default_model: Option<String>,
     },
 
+    /// Refresh one provider-qualified OpenAI-compatible model catalog.
+    DirectModelCatalogUpdated {
+        catalog: code_core::remote_models::RemoteModelsCatalog,
+    },
+
     /// Validate, persist, and load models for an OpenAI-compatible endpoint.
     AddDirectModelProvider(Redacted<crate::direct_provider::DirectProviderRequest>),
 
@@ -381,6 +386,7 @@ pub(crate) enum AppEvent {
     UpdateModelSelection {
         model: String,
         effort: Option<ReasoningEffort>,
+        model_provider_id: Option<String>,
     },
     UpdateServiceTierSelection {
         service_tier: Option<ServiceTier>,

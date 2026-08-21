@@ -80,6 +80,10 @@ impl ModelSelectionTarget {
         matches!(self, ModelSelectionTarget::Session)
     }
 
+    pub(crate) fn supports_direct_providers(self) -> bool {
+        matches!(self, ModelSelectionTarget::Session)
+    }
+
     pub(crate) fn dispatch_selection_action(
         self,
         app_event_tx: &AppEventSender,
@@ -119,11 +123,16 @@ impl ModelSelectionTarget {
                     app_event_tx.send(AppEvent::UpdateAutoReviewResolveUseChatModel(true));
                 }
             },
-            SelectionAction::SetPreset { model, effort } => match self {
+            SelectionAction::SetPreset {
+                model,
+                effort,
+                model_provider_id,
+            } => match self {
                 ModelSelectionTarget::Session => {
                     app_event_tx.send(AppEvent::UpdateModelSelection {
                         model: model.clone(),
                         effort: Some(*effort),
+                        model_provider_id: model_provider_id.clone(),
                     });
                 }
                 ModelSelectionTarget::Review => {

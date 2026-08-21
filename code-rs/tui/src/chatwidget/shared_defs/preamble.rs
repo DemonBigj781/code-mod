@@ -765,6 +765,8 @@ pub(crate) struct ChatWidget<'a> {
     /// Optional remote-merged presets list delivered asynchronously.
     /// When absent, the TUI falls back to built-in presets.
     remote_model_presets: Option<Vec<ModelPreset>>,
+    /// Provider-qualified catalogs for endpoints added through the direct selector flow.
+    direct_model_catalogs: HashMap<String, code_core::remote_models::RemoteModelsCatalog>,
     /// Whether remote defaults may be applied to this session.
     /// Captured at startup so later config changes don't retroactively enable it.
     allow_remote_default_at_startup: bool,
@@ -772,6 +774,8 @@ pub(crate) struct ChatWidget<'a> {
     chat_model_selected_explicitly: bool,
     /// Provider/profile in effect before the OpenRouter Free virtual model was selected.
     model_provider_before_openrouter: Option<(String, ModelProviderInfo, Option<String>)>,
+    /// Non-direct provider restored when an ordinary model is selected after a direct endpoint.
+    model_provider_before_direct: Option<String>,
     collaboration_mode: code_core::protocol::CollaborationModeKind,
 
     planning_restore: Option<(String, ReasoningEffort)>,

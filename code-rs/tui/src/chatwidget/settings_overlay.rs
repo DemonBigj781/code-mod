@@ -1,7 +1,9 @@
+use code_common::model_presets::ModelPreset;
 use ratatui::layout::Rect;
 use std::cell::{Cell, RefCell};
 
 use crate::bottom_pane::SettingsSection;
+use crate::bottom_pane::settings_pages::model::DirectProviderModelCatalog;
 
 /// Two disjoint hit ranges per overview row (label + optional summary).
 type OverviewHitRanges = Vec<[Option<(u16, u16)>; 2]>;
@@ -297,6 +299,27 @@ impl SettingsOverlayView {
 
     pub(crate) fn set_model_content(&mut self, content: ModelSettingsContent) {
         self.model_content = Some(content);
+    }
+
+    pub(crate) fn update_model_presets(&mut self, presets: Vec<ModelPreset>) {
+        if let Some(content) = self.model_content.as_mut() {
+            content.update_presets(presets);
+        }
+    }
+
+    pub(crate) fn update_direct_provider_catalogs(
+        &mut self,
+        catalogs: Vec<DirectProviderModelCatalog>,
+    ) {
+        if let Some(content) = self.model_content.as_mut() {
+            content.update_direct_provider_catalogs(catalogs);
+        }
+    }
+
+    pub(crate) fn finish_direct_provider_add(&mut self, result: Result<(), String>) {
+        if let Some(content) = self.model_content.as_mut() {
+            content.finish_direct_provider_add(result);
+        }
     }
 
     pub(crate) fn set_planning_content(&mut self, content: PlanningSettingsContent) {
@@ -762,6 +785,22 @@ impl SettingsOverlayView {
 mod tests {
     use super::*;
 
+    use std::sync::mpsc;
+
+    use code_core::config_types::ReasoningEffort;
+    use code_core::remote_models::RemoteModelsStatus;
+    use crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    use crate::app_event::AppEvent;
+    use crate::app_event_sender::AppEventSender;
+    use crate::bottom_pane::settings_pages::model::{
+        DirectProviderModelCatalog, ModelSelectionTarget, ModelSelectionView,
+        ModelSelectionViewParams,
+    };
+    use crate::chatwidget::settings_overlay::contents::ModelSettingsContent;
+
     #[test]
     fn set_overview_rows_repairs_section_mode_when_active_disappears() {
         let mut overlay = SettingsOverlayView::new(SettingsSection::Apps);
@@ -773,5 +812,62 @@ mod tests {
 
         assert!(overlay.is_menu_active());
         assert_eq!(overlay.active_section(), SettingsSection::Model);
+    }
+
+    #[test]
+    fn direct_provider_endpoint_overlay_updates_and_finishes_form() {
+        let (tx, _rx) = mpsc::channel::<AppEvent>();
+        let view = ModelSelectionView::new(
+            ModelSelectionViewParams {
+                presets: Vec::new(),
+                current_model: "missing-model".to_owned(),
+                current_model_provider_id: Some("openai".to_owned()),
+                current_effort: ReasoningEffort::Medium,
+                current_service_tier: None,
+                current_context_mode: None,
+                current_context_window: None,
+                current_auto_compact_token_limit: None,
+                use_chat_model: false,
+                direct_provider_catalogs: Vec::new(),
+                target: ModelSelectionTarget::Session,
+            },
+            AppEventSender::new(tx),
+        );
+        let mut overlay = SettingsOverlayView::new(SettingsSection::Model);
+        overlay.set_model_content(ModelSettingsContent::new(view));
+
+        let content = overlay.active_content_mut().expect("model content");
+        assert!(content.handle_key(KeyEvent::from(KeyCode::Up)));
+        assert!(content.handle_key(KeyEvent::from(KeyCode::Enter)));
+        assert!(content.has_back_navigation());
+
+        let preset = code_common::model_presets::builtin_model_presets(None, true)
+            .into_iter()
+            .next()
+            .expect("built-in preset");
+        let display_name = preset.display_name.clone();
+        overlay.update_direct_provider_catalogs(vec![DirectProviderModelCatalog {
+            provider_id: "direct-local".to_owned(),
+            display_name: "LocalAI".to_owned(),
+            status: RemoteModelsStatus::Fresh,
+            presets: vec![preset],
+        }]);
+        overlay.finish_direct_provider_add(Ok(()));
+
+        let content = overlay.active_content().expect("model content");
+        assert!(!content.has_back_navigation());
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buffer = Buffer::empty(area);
+        content.render(area, &mut buffer);
+        let rendered = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("LocalAI"));
+        assert!(rendered.contains(&display_name));
     }
 }

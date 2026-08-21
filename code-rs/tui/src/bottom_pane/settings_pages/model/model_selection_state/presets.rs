@@ -7,6 +7,7 @@ use code_core::config_types::ReasoningEffort;
 /// Flattened preset entry combining a model with a specific reasoning effort.
 #[derive(Clone, Debug)]
 pub(crate) struct FlatPreset {
+    pub(crate) provider_id: Option<String>,
     pub(crate) model: String,
     pub(crate) display_name: String,
     pub(crate) effort: ReasoningEffort,
@@ -24,6 +25,7 @@ impl FlatPreset {
             .map(|effort_preset| {
                 let effort_label = reasoning_effort_label(effort_preset.effort.into());
                 FlatPreset {
+                    provider_id: None,
                     model: preset.model.clone(),
                     display_name: preset.display_name.clone(),
                     effort: effort_preset.effort.into(),
@@ -32,6 +34,19 @@ impl FlatPreset {
                     model_description: preset.description.clone(),
                     picker_rank: picker_rank_for_model(&preset.model),
                 }
+            })
+            .collect()
+    }
+
+    pub(crate) fn from_direct_provider_preset(
+        provider_id: &str,
+        preset: &ModelPreset,
+    ) -> Vec<Self> {
+        Self::from_model_preset(preset)
+            .into_iter()
+            .map(|mut flat| {
+                flat.provider_id = Some(provider_id.to_owned());
+                flat
             })
             .collect()
     }
@@ -54,6 +69,7 @@ pub(crate) fn compare_presets(a: &FlatPreset, b: &FlatPreset) -> Ordering {
         .cmp(&b.picker_rank)
         .then_with(|| a.display_name.cmp(&b.display_name))
         .then_with(|| a.model.cmp(&b.model))
+        .then_with(|| a.provider_id.cmp(&b.provider_id))
         .then_with(|| effort_rank(a.effort).cmp(&effort_rank(b.effort)))
         .then_with(|| a.label.cmp(&b.label))
 }

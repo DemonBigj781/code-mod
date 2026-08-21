@@ -15,7 +15,9 @@ use code_common::model_presets::ModelPreset;
 use crate::app_event_sender::AppEventSender;
 use crate::components::form_text_field::FormTextField;
 
-use super::model_selection_state::{ModelSelectionData, ModelSelectionViewParams};
+use super::model_selection_state::{
+    DirectProviderModelCatalog, ModelSelectionData, ModelSelectionViewParams,
+};
 use endpoint_form::EndpointFormState;
 
 pub(super) const SUMMARY_LINE_COUNT: usize = 3;
@@ -72,6 +74,15 @@ impl ModelSelectionView {
 
     pub(crate) fn update_presets(&mut self, presets: Vec<ModelPreset>) {
         self.selected_index = self.data.update_presets(presets, self.selected_index);
+    }
+
+    pub(crate) fn update_direct_provider_catalogs(
+        &mut self,
+        catalogs: Vec<DirectProviderModelCatalog>,
+    ) {
+        self.selected_index = self
+            .data
+            .update_direct_provider_catalogs(catalogs, self.selected_index);
     }
 
     pub(crate) fn has_back_navigation(&self) -> bool {

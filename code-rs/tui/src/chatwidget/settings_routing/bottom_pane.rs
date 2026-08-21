@@ -1,20 +1,26 @@
 impl ChatWidget<'_> {
     fn open_model_settings_section(&mut self) -> bool {
+        self.refresh_direct_provider_catalogs();
         let presets = self.available_session_model_presets();
+        let direct_provider_catalogs = self.available_direct_provider_catalogs();
         let current_model = self.config.model.clone();
+        let current_model_provider_id = Some(self.config.model_provider_id.clone());
         let current_effort = self.config.model_reasoning_effort;
         self.open_bottom_pane_settings(move |this| {
-            this.bottom_pane.show_model_selection(ModelSelectionViewParams {
-                presets,
-                current_model,
-                current_effort,
-                current_service_tier: this.config.service_tier,
-                current_context_mode: this.config.context_mode,
-                current_context_window: this.config.model_context_window,
-                current_auto_compact_token_limit: this.config.model_auto_compact_token_limit,
-                use_chat_model: false,
-                target: ModelSelectionTarget::Session,
-            });
+            this.bottom_pane
+                .show_model_selection(ModelSelectionViewParams {
+                    presets,
+                    current_model,
+                    current_model_provider_id,
+                    current_effort,
+                    current_service_tier: this.config.service_tier,
+                    current_context_mode: this.config.context_mode,
+                    current_context_window: this.config.model_context_window,
+                    current_auto_compact_token_limit: this.config.model_auto_compact_token_limit,
+                    use_chat_model: false,
+                    direct_provider_catalogs,
+                    target: ModelSelectionTarget::Session,
+                });
         })
     }
 

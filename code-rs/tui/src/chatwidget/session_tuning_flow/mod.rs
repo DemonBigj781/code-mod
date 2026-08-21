@@ -1,5 +1,7 @@
 use super::*;
-use crate::bottom_pane::settings_pages::model::ModelSelectionViewParams;
+use crate::bottom_pane::settings_pages::model::{
+    DirectProviderModelCatalog, ModelSelectionViewParams,
+};
 
 include!("presets_and_mode.rs");
 include!("model_command_and_selectors.rs");

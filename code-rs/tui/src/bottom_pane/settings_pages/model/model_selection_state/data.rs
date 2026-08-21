@@ -6,9 +6,10 @@ use code_core::model_family::{
     STANDARD_CONTEXT_WINDOW_272K, default_auto_compact_limit_for_context_window,
     derive_default_model_family, resolve_context_settings, supports_extended_context,
 };
+use code_core::remote_models::RemoteModelsStatus;
 use code_protocol::num_format::format_with_separators_u64;
 
-use super::presets::{compare_presets, FlatPreset};
+use super::presets::{FlatPreset, compare_presets};
 use super::target::ModelSelectionTarget;
 
 const SUMMARY_HEADER_LINES: u16 = 3;
@@ -27,18 +28,29 @@ const FOLLOW_CHAT_ROW_OFFSET: usize = 2;
 pub(crate) struct ModelSelectionViewParams {
     pub(crate) presets: Vec<ModelPreset>,
     pub(crate) current_model: String,
+    pub(crate) current_model_provider_id: Option<String>,
     pub(crate) current_effort: ReasoningEffort,
     pub(crate) current_service_tier: Option<ServiceTier>,
     pub(crate) current_context_mode: Option<ContextMode>,
     pub(crate) current_context_window: Option<u64>,
     pub(crate) current_auto_compact_token_limit: Option<i64>,
     pub(crate) use_chat_model: bool,
+    pub(crate) direct_provider_catalogs: Vec<DirectProviderModelCatalog>,
     pub(crate) target: ModelSelectionTarget,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DirectProviderModelCatalog {
+    pub(crate) provider_id: String,
+    pub(crate) display_name: String,
+    pub(crate) status: RemoteModelsStatus,
+    pub(crate) presets: Vec<ModelPreset>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct CurrentSelection {
     pub(crate) current_model: String,
+    pub(crate) current_model_provider_id: Option<String>,
     pub(crate) current_effort: ReasoningEffort,
     pub(crate) current_service_tier: Option<ServiceTier>,
     pub(crate) current_context_mode: Option<ContextMode>,
@@ -51,6 +63,8 @@ pub(crate) struct CurrentSelection {
 pub(crate) struct ModelSelectionData {
     pub(crate) flat_presets: Vec<FlatPreset>,
     sorted_preset_indices: Vec<usize>,
+    presets: Vec<ModelPreset>,
+    pub(crate) direct_provider_catalogs: Vec<DirectProviderModelCatalog>,
     pub(crate) current: CurrentSelection,
     pub(crate) target: ModelSelectionTarget,
 }
@@ -74,12 +88,16 @@ pub(crate) enum SelectionAction {
     SetPreset {
         model: String,
         effort: ReasoningEffort,
+        model_provider_id: Option<String>,
     },
 }
 
 impl SelectionAction {
     pub(crate) fn closes_view(&self) -> bool {
-        matches!(self, SelectionAction::UseChatModel | SelectionAction::SetPreset { .. })
+        matches!(
+            self,
+            SelectionAction::UseChatModel | SelectionAction::SetPreset { .. }
+        )
     }
 }
 
@@ -88,10 +106,55 @@ impl ModelSelectionData {
         self.target.supports_fast_mode(&self.current.current_model)
     }
 
-    fn build_sorted_preset_indices(flat_presets: &[FlatPreset]) -> Vec<usize> {
-        let mut indices: Vec<usize> = (0..flat_presets.len()).collect();
+    fn build_flat_presets(
+        presets: &[ModelPreset],
+        direct_provider_catalogs: &[DirectProviderModelCatalog],
+    ) -> Vec<FlatPreset> {
+        let mut flat_presets: Vec<FlatPreset> = presets
+            .iter()
+            .flat_map(FlatPreset::from_model_preset)
+            .collect();
+        for catalog in direct_provider_catalogs {
+            flat_presets.extend(catalog.presets.iter().flat_map(|preset| {
+                FlatPreset::from_direct_provider_preset(&catalog.provider_id, preset)
+            }));
+        }
+        flat_presets
+    }
+
+    fn build_sorted_preset_indices(
+        flat_presets: &[FlatPreset],
+        direct_provider_catalogs: &[DirectProviderModelCatalog],
+    ) -> Vec<usize> {
+        let mut indices: Vec<usize> = flat_presets
+            .iter()
+            .enumerate()
+            .filter_map(|(index, preset)| preset.provider_id.is_none().then_some(index))
+            .collect();
         indices.sort_by(|&a, &b| compare_presets(&flat_presets[a], &flat_presets[b]));
+
+        for catalog in direct_provider_catalogs {
+            let mut provider_indices: Vec<usize> = flat_presets
+                .iter()
+                .enumerate()
+                .filter_map(|(index, preset)| {
+                    (preset.provider_id.as_deref() == Some(catalog.provider_id.as_str()))
+                        .then_some(index)
+                })
+                .collect();
+            provider_indices.sort_by(|&a, &b| compare_presets(&flat_presets[a], &flat_presets[b]));
+            indices.extend(provider_indices);
+        }
         indices
+    }
+
+    fn sort_direct_provider_catalogs(catalogs: &mut [DirectProviderModelCatalog]) {
+        catalogs.sort_by(|a, b| {
+            a.display_name
+                .to_ascii_lowercase()
+                .cmp(&b.display_name.to_ascii_lowercase())
+                .then_with(|| a.provider_id.cmp(&b.provider_id))
+        });
     }
 
     pub(crate) fn context_mode_intro_lines() -> &'static [String; 2] {
@@ -111,23 +174,32 @@ impl ModelSelectionData {
         let ModelSelectionViewParams {
             presets,
             current_model,
+            current_model_provider_id,
             current_effort,
             current_service_tier,
             current_context_mode,
             current_context_window,
             current_auto_compact_token_limit,
             use_chat_model,
+            mut direct_provider_catalogs,
             target,
         } = params;
-        let flat_presets: Vec<FlatPreset> =
-            presets.iter().flat_map(FlatPreset::from_model_preset).collect();
-        let sorted_preset_indices = Self::build_sorted_preset_indices(&flat_presets);
+        if !target.supports_direct_providers() {
+            direct_provider_catalogs.clear();
+        }
+        Self::sort_direct_provider_catalogs(&mut direct_provider_catalogs);
+        let flat_presets = Self::build_flat_presets(&presets, &direct_provider_catalogs);
+        let sorted_preset_indices =
+            Self::build_sorted_preset_indices(&flat_presets, &direct_provider_catalogs);
 
         Self {
             flat_presets,
             sorted_preset_indices,
+            presets,
+            direct_provider_catalogs,
             current: CurrentSelection {
                 current_model,
+                current_model_provider_id,
                 current_effort,
                 current_service_tier,
                 current_context_mode,
@@ -140,15 +212,7 @@ impl ModelSelectionData {
     }
 
     pub(crate) fn initial_selection(&self) -> usize {
-        Self::initial_selection_for(
-            self.supports_fast_mode(),
-            self.target.supports_context_mode(),
-            self.target.supports_follow_chat(),
-            self.current.use_chat_model,
-            &self.flat_presets,
-            &self.current.current_model,
-            self.current.current_effort,
-        )
+        self.initial_selection_for_current()
     }
 
     pub(crate) fn update_presets(
@@ -156,24 +220,83 @@ impl ModelSelectionData {
         presets: Vec<ModelPreset>,
         selected_index: usize,
     ) -> usize {
+        let previous_selected = self.entry_at(selected_index);
+        let previous_preset = self.selected_preset_identity(previous_selected);
+        self.presets = presets;
+        self.rebuild_flat_presets();
+        self.restore_selection(previous_selected, previous_preset)
+    }
+
+    pub(crate) fn update_direct_provider_catalogs(
+        &mut self,
+        mut catalogs: Vec<DirectProviderModelCatalog>,
+        selected_index: usize,
+    ) -> usize {
+        let previous_selected = self.entry_at(selected_index);
+        let previous_preset = self.selected_preset_identity(previous_selected);
+        if !self.target.supports_direct_providers() {
+            catalogs.clear();
+        }
+        Self::sort_direct_provider_catalogs(&mut catalogs);
+        self.direct_provider_catalogs = catalogs;
+        self.rebuild_flat_presets();
+        self.restore_selection(previous_selected, previous_preset)
+    }
+
+    fn rebuild_flat_presets(&mut self) {
+        self.flat_presets = Self::build_flat_presets(&self.presets, &self.direct_provider_catalogs);
+        self.sorted_preset_indices =
+            Self::build_sorted_preset_indices(&self.flat_presets, &self.direct_provider_catalogs);
+    }
+
+    fn selected_preset_identity(
+        &self,
+        entry: Option<EntryKind>,
+    ) -> Option<(Option<String>, String, ReasoningEffort)> {
+        match entry {
+            Some(EntryKind::Preset(index)) => self.flat_presets.get(index).map(|preset| {
+                (
+                    preset.provider_id.clone(),
+                    preset.model.clone(),
+                    preset.effort,
+                )
+            }),
+            _ => None,
+        }
+    }
+
+    fn preset_entry_prefix(&self) -> usize {
+        usize::from(self.supports_fast_mode())
+            + usize::from(self.target.supports_context_mode()) * 3
+            + usize::from(self.target.supports_follow_chat())
+    }
+
+    fn find_preset_entry_index(
+        &self,
+        provider_id: Option<&str>,
+        model: &str,
+        effort: Option<ReasoningEffort>,
+    ) -> Option<usize> {
+        self.sorted_preset_indices
+            .iter()
+            .position(|flat_index| {
+                let preset = &self.flat_presets[*flat_index];
+                preset.provider_id.as_deref() == provider_id
+                    && preset.model.eq_ignore_ascii_case(model)
+                    && effort.is_none_or(|effort| preset.effort == effort)
+            })
+            .map(|position| self.preset_entry_prefix() + position)
+    }
+
+    fn restore_selection(
+        &self,
+        previous_selected: Option<EntryKind>,
+        previous_preset: Option<(Option<String>, String, ReasoningEffort)>,
+    ) -> usize {
         let include_fast_mode = self.supports_fast_mode();
         let include_context_mode = self.target.supports_context_mode();
         let context_entry_count = if include_context_mode { 3 } else { 0 };
         let include_follow_chat = self.target.supports_follow_chat();
-        let previous_selected = self.entry_at(selected_index);
-        let previous_preset = match previous_selected {
-            Some(EntryKind::Preset(idx)) => self
-                .flat_presets
-                .get(idx)
-                .map(|preset| (preset.model.clone(), preset.effort)),
-            _ => None,
-        };
-
-        self.flat_presets = presets
-            .iter()
-            .flat_map(FlatPreset::from_model_preset)
-            .collect();
-        self.sorted_preset_indices = Self::build_sorted_preset_indices(&self.flat_presets);
 
         let mut next_selected: Option<usize> = None;
         match previous_selected {
@@ -203,35 +326,28 @@ impl ModelSelectionData {
                 }
             }
             Some(EntryKind::Preset(_)) => {
-                if let Some((previous_model, previous_effort)) = previous_preset
-                    && let Some((new_idx, _)) =
-                        self.flat_presets.iter().enumerate().find(|(_, preset)| {
-                            preset.model.eq_ignore_ascii_case(&previous_model)
-                                && preset.effort == previous_effort
-                        })
-                {
-                    let prefix =
-                        usize::from(include_fast_mode) + context_entry_count + usize::from(include_follow_chat);
-                    next_selected = Some(new_idx + prefix);
+                if let Some((provider_id, previous_model, previous_effort)) = previous_preset {
+                    next_selected = if provider_id.is_some() {
+                        self.find_preset_entry_index(
+                            provider_id.as_deref(),
+                            &previous_model,
+                            Some(previous_effort),
+                        )
+                    } else {
+                        self.find_preset_entry_index(None, &previous_model, Some(previous_effort))
+                    };
                 }
             }
             Some(EntryKind::AddDirectProvider) => {
-                next_selected = Some(self.entry_count().saturating_sub(1));
+                if self.target.supports_direct_providers() {
+                    next_selected = Some(self.entry_count().saturating_sub(1));
+                }
             }
             None => {}
         }
 
-        let mut next_selected = next_selected.unwrap_or_else(|| {
-            Self::initial_selection_for(
-                include_fast_mode,
-                include_context_mode,
-                include_follow_chat,
-                self.current.use_chat_model,
-                &self.flat_presets,
-                &self.current.current_model,
-                self.current.current_effort,
-            )
-        });
+        let mut next_selected =
+            next_selected.unwrap_or_else(|| self.initial_selection_for_current());
 
         let total = self.entry_count();
         if total == 0 {
@@ -243,49 +359,55 @@ impl ModelSelectionData {
         next_selected
     }
 
-    fn initial_selection_for(
-        include_fast_mode: bool,
-        include_context_mode: bool,
-        include_follow_chat: bool,
-        use_chat_model: bool,
-        flat_presets: &[FlatPreset],
-        current_model: &str,
-        current_effort: ReasoningEffort,
-    ) -> usize {
+    fn initial_selection_for_current(&self) -> usize {
+        let include_fast_mode = self.supports_fast_mode();
+        let include_context_mode = self.target.supports_context_mode();
+        let include_follow_chat = self.target.supports_follow_chat();
         let context_entry_count = if include_context_mode { 3 } else { 0 };
 
-        if include_follow_chat && use_chat_model {
+        if include_follow_chat && self.current.use_chat_model {
             return usize::from(include_fast_mode) + context_entry_count;
         }
 
-        if let Some((idx, _)) = flat_presets.iter().enumerate().find(|(_, preset)| {
-            preset.model.eq_ignore_ascii_case(current_model) && preset.effort == current_effort
-        }) {
-            return idx
-                + usize::from(include_fast_mode)
-                + context_entry_count
-                + usize::from(include_follow_chat);
-        }
-
-        if let Some((idx, _)) = flat_presets
-            .iter()
-            .enumerate()
-            .find(|(_, preset)| preset.model.eq_ignore_ascii_case(current_model))
+        let current_provider_id = self.current.current_model_provider_id.as_deref();
+        if let Some(provider_id) =
+            current_provider_id.filter(|provider_id| self.is_direct_provider(provider_id))
         {
-            return idx
-                + usize::from(include_fast_mode)
-                + context_entry_count
-                + usize::from(include_follow_chat);
+            if let Some(index) = self.find_preset_entry_index(
+                Some(provider_id),
+                &self.current.current_model,
+                Some(self.current.current_effort),
+            ) {
+                return index;
+            }
+            if let Some(index) =
+                self.find_preset_entry_index(Some(provider_id), &self.current.current_model, None)
+            {
+                return index;
+            }
+        } else {
+            if let Some(index) = self.find_preset_entry_index(
+                None,
+                &self.current.current_model,
+                Some(self.current.current_effort),
+            ) {
+                return index;
+            }
+            if let Some(index) =
+                self.find_preset_entry_index(None, &self.current.current_model, None)
+            {
+                return index;
+            }
         }
 
         if include_follow_chat {
-            if flat_presets.is_empty() {
+            if self.flat_presets.is_empty() {
                 usize::from(include_fast_mode) + context_entry_count
             } else {
                 usize::from(include_fast_mode) + context_entry_count + 1
             }
         } else if include_fast_mode {
-            if flat_presets.is_empty() {
+            if self.flat_presets.is_empty() {
                 0
             } else {
                 usize::from(include_fast_mode) + context_entry_count
@@ -295,6 +417,31 @@ impl ModelSelectionData {
         }
     }
 
+    pub(crate) fn is_direct_provider(&self, provider_id: &str) -> bool {
+        self.direct_provider_catalogs
+            .iter()
+            .any(|catalog| catalog.provider_id == provider_id)
+    }
+
+    pub(crate) fn preset_is_current(&self, preset: &FlatPreset) -> bool {
+        let provider_matches = match preset.provider_id.as_deref() {
+            Some(provider_id) => {
+                self.current.current_model_provider_id.as_deref() == Some(provider_id)
+            }
+            None => !self
+                .current
+                .current_model_provider_id
+                .as_deref()
+                .is_some_and(|provider_id| self.is_direct_provider(provider_id)),
+        };
+        provider_matches
+            && !self.current.use_chat_model
+            && preset
+                .model
+                .eq_ignore_ascii_case(&self.current.current_model)
+            && preset.effort == self.current.current_effort
+    }
+
     pub(crate) fn supports_extended_context(&self) -> bool {
         supports_extended_context(&self.current.current_model)
     }
@@ -302,7 +449,26 @@ impl ModelSelectionData {
     pub(crate) fn current_model_display_name(&self) -> String {
         self.flat_presets
             .iter()
-            .find(|preset| preset.model.eq_ignore_ascii_case(&self.current.current_model)).map_or_else(|| self.current.current_model.clone(), |preset| preset.display_name.clone())
+            .find(|preset| {
+                let provider_matches = match preset.provider_id.as_deref() {
+                    Some(provider_id) => {
+                        self.current.current_model_provider_id.as_deref() == Some(provider_id)
+                    }
+                    None => !self
+                        .current
+                        .current_model_provider_id
+                        .as_deref()
+                        .is_some_and(|provider_id| self.is_direct_provider(provider_id)),
+                };
+                provider_matches
+                    && preset
+                        .model
+                        .eq_ignore_ascii_case(&self.current.current_model)
+            })
+            .map_or_else(
+                || self.current.current_model.clone(),
+                |preset| preset.display_name.clone(),
+            )
     }
 
     pub(crate) fn entries(&self) -> Vec<EntryKind> {
@@ -321,7 +487,9 @@ impl ModelSelectionData {
         for idx in self.sorted_preset_indices.iter().copied() {
             entries.push(EntryKind::Preset(idx));
         }
-        entries.push(EntryKind::AddDirectProvider);
+        if self.target.supports_direct_providers() {
+            entries.push(EntryKind::AddDirectProvider);
+        }
         entries
     }
 
@@ -330,7 +498,7 @@ impl ModelSelectionData {
             + usize::from(self.target.supports_context_mode()) * 3
             + usize::from(self.target.supports_follow_chat())
             + self.flat_presets.len()
-            + 1
+            + usize::from(self.target.supports_direct_providers())
     }
 
     pub(crate) fn context_mode_entry_index(&self) -> Option<usize> {
@@ -387,7 +555,9 @@ impl ModelSelectionData {
         if let Some(flat_index) = self.sorted_preset_indices.get(preset_index) {
             return Some(EntryKind::Preset(*flat_index));
         }
-        (preset_index == self.sorted_preset_indices.len()).then_some(EntryKind::AddDirectProvider)
+        (self.target.supports_direct_providers()
+            && preset_index == self.sorted_preset_indices.len())
+        .then_some(EntryKind::AddDirectProvider)
     }
 
     pub(crate) fn content_line_count(&self) -> u16 {
@@ -408,8 +578,11 @@ impl ModelSelectionData {
         let mut previous_model: Option<&str> = None;
         for idx in self.sorted_preset_indices.iter().copied() {
             let flat_preset = &self.flat_presets[idx];
-            let is_new_model = previous_model
-                .is_none_or(|prev| !prev.eq_ignore_ascii_case(&flat_preset.model));
+            if flat_preset.provider_id.is_some() {
+                continue;
+            }
+            let is_new_model =
+                previous_model.is_none_or(|prev| !prev.eq_ignore_ascii_case(&flat_preset.model));
 
             if is_new_model {
                 if previous_model.is_some() {
@@ -425,9 +598,21 @@ impl ModelSelectionData {
             lines = lines.saturating_add(1);
         }
 
-        lines
-            .saturating_add(ADD_DIRECT_PROVIDER_SECTION_HEIGHT)
-            .saturating_add(FOOTER_HEIGHT)
+        if self.target.supports_direct_providers() {
+            lines = lines.saturating_add(ADD_DIRECT_PROVIDER_SECTION_HEIGHT);
+            for catalog in &self.direct_provider_catalogs {
+                lines = lines.saturating_add(1);
+                lines = lines.saturating_add(
+                    u16::try_from(
+                        self.preset_indices_for_provider(Some(&catalog.provider_id))
+                            .len(),
+                    )
+                    .unwrap_or(u16::MAX),
+                );
+            }
+        }
+
+        lines.saturating_add(FOOTER_HEIGHT)
     }
 
     pub(crate) fn entry_line(&self, entry_index: usize) -> usize {
@@ -464,12 +649,15 @@ impl ModelSelectionData {
             line += usize::from(FOLLOW_CHAT_SECTION_HEIGHT);
         }
 
-        let preset_prefix = self.entry_count() - self.sorted_preset_indices.len() - 1;
+        let selected_entry = self.entry_at(entry_index);
         let mut previous_model: Option<&str> = None;
-        for (preset_pos, preset_index) in self.sorted_preset_indices.iter().copied().enumerate() {
+        for preset_index in self.sorted_preset_indices.iter().copied() {
             let flat_preset = &self.flat_presets[preset_index];
-            let is_new_model = previous_model
-                .is_none_or(|model| !model.eq_ignore_ascii_case(&flat_preset.model));
+            if flat_preset.provider_id.is_some() {
+                continue;
+            }
+            let is_new_model =
+                previous_model.is_none_or(|model| !model.eq_ignore_ascii_case(&flat_preset.model));
 
             if is_new_model {
                 if previous_model.is_some() {
@@ -482,13 +670,34 @@ impl ModelSelectionData {
                 previous_model = Some(&flat_preset.model);
             }
 
-            if preset_prefix + preset_pos == entry_index {
+            if selected_entry == Some(EntryKind::Preset(preset_index)) {
                 return line;
             }
             line += 1;
         }
 
-        line + 2
+        if self.target.supports_direct_providers() {
+            line += 2;
+            for catalog in &self.direct_provider_catalogs {
+                line += 1;
+                for preset_index in self.preset_indices_for_provider(Some(&catalog.provider_id)) {
+                    if selected_entry == Some(EntryKind::Preset(preset_index)) {
+                        return line;
+                    }
+                    line += 1;
+                }
+            }
+        }
+
+        line
+    }
+
+    pub(crate) fn preset_indices_for_provider(&self, provider_id: Option<&str>) -> Vec<usize> {
+        self.sorted_preset_indices
+            .iter()
+            .copied()
+            .filter(|index| self.flat_presets[*index].provider_id.as_deref() == provider_id)
+            .collect()
     }
 
     pub(crate) fn apply_selection(&mut self, entry: EntryKind) -> Option<SelectionAction> {
@@ -531,11 +740,17 @@ impl ModelSelectionData {
             EntryKind::Preset(idx) => {
                 let flat_preset = self.flat_presets.get(idx)?.clone();
                 self.current.current_model.clone_from(&flat_preset.model);
+                if flat_preset.provider_id.is_some() {
+                    self.current
+                        .current_model_provider_id
+                        .clone_from(&flat_preset.provider_id);
+                }
                 self.current.current_effort = flat_preset.effort;
                 self.current.use_chat_model = false;
                 Some(SelectionAction::SetPreset {
                     model: flat_preset.model,
                     effort: flat_preset.effort,
+                    model_provider_id: flat_preset.provider_id,
                 })
             }
             EntryKind::AddDirectProvider => None,
