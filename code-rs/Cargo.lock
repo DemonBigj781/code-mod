@@ -2181,6 +2181,7 @@ dependencies = [
  "code-features",
  "code-file-search",
  "code-git-tooling",
+ "code-keyring-store",
  "code-login",
  "code-mcp-types",
  "code-ollama",
