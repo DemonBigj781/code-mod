@@ -464,7 +464,7 @@ named behavior, not every backed hunk:
   Provider Integration Tests `32452588286` and Build Code `32452587751`
   succeeded.
 
-- [ ] **Task 5.5: Add hosted direct-provider regression coverage and docs**
+- [x] **Task 5.5: Add hosted direct-provider regression coverage and docs**
 
   **Files:** `.github/workflows/provider-integration-tests.yml`,
   `docs/settings.md`, `docs/config.md`, and `docs/slash-commands.md`.
@@ -476,6 +476,10 @@ named behavior, not every backed hunk:
 
   **Hosted verification:** Push `main`; require `Provider Integration Tests`,
   `Settings and Agent Regression Tests`, and `Build Code` to pass.
+
+  **Evidence:** Exact SHA `fafc747a34e39eacef2f2d737469d744b58f84f8`;
+  Provider Integration Tests `32482231629`, Settings and Agent Regression Tests
+  `32482231390`, and Build Code `32482231452` succeeded.
 
 ## Phase 6: AI Horde Auxiliary Client
 
