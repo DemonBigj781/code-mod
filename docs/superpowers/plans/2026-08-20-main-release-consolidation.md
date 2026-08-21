@@ -444,7 +444,7 @@ named behavior, not every backed hunk:
   Provider Integration Tests `32440081529` and Build Code `32440081439`
   succeeded.
 
-- [ ] **Task 5.4: Group provider models and apply direct session selection**
+- [x] **Task 5.4: Group provider models and apply direct session selection**
 
   **Files:** Files under
   `code-rs/tui/src/bottom_pane/settings_pages/model/model_selection_state/`,
@@ -459,6 +459,10 @@ named behavior, not every backed hunk:
   **Tests:** Equal model IDs from two providers remain independently selectable;
   direct selection changes `model_provider_id` and model while preserving
   `active_profile`; OpenAI-compatible rows never show Horde worker counts.
+
+  **Evidence:** Exact SHA `47c79c7e03a0380a6b6a6e2911315919257378ba`;
+  Provider Integration Tests `32452588286` and Build Code `32452587751`
+  succeeded.
 
 - [ ] **Task 5.5: Add hosted direct-provider regression coverage and docs**
 
