@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - "code-rs/**"
+      - "docs/config.md"
+      - "docs/settings.md"
+      - "docs/slash-commands.md"
       - ".github/workflows/provider-integration-tests.yml"
 
 concurrency:
@@ -105,13 +108,23 @@ jobs:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
 
-      - name: Test direct provider persistence
+      - name: Test direct provider core behavior
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         shell: sh
         run: |
           set -eu
           cargo test --frozen --locked -j1 -p code-core direct_model_provider_ -- --nocapture
           cargo test --frozen --locked -j1 -p code-core --test remote_models_manager remote_models_provider_ -- --nocapture
-          cargo test --frozen --locked -j1 -p code-tui direct_provider_endpoint_ -- --nocapture
+
+      - name: Test direct provider TUI behavior
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: cargo test --frozen --locked -j1 -p code-tui direct_provider_endpoint_ -- --nocapture
+
+      - name: Check provider config compatibility
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
           cargo test --frozen --locked -j1 -p code-core checked_in_codex_schema_matches_generated -- --exact
           cargo test --frozen --locked -j1 -p code-app-server message_processor::tests::config_write_preserves_existing_table_config -- --exact

@@ -61,6 +61,35 @@ name = "Ollama"
 base_url = "http://localhost:11434/v1"
 ```
 
+### Add an OpenAI-compatible endpoint from the TUI
+
+The model picker can create these provider entries without requiring a profile.
+Open `/model` or `/settings model`, select
+**+ Add OpenAI-compatible /v1 endpoint**, and enter a display name, base URL,
+optional API key, and API shape. See
+[TUI Settings Overlay](settings.md#openai-compatible-endpoints) for the complete
+flow.
+
+TUI-created endpoints follow these rules:
+
+- The base URL is normalized to exactly one `/v1` root. Model discovery uses
+  `GET <base_url>/models`.
+- **Chat Completions** is the default and uses
+  `<base_url>/chat/completions`; **Responses** uses `<base_url>/responses`.
+- An empty API-key field creates a provider with no `env_key`, which supports
+  local endpoints that do not require authentication.
+- A provided key is encrypted under `CODE_HOME/secrets/`; the generated
+  `[model_providers.<id>]` entry stores only an `env_key`-style secret
+  reference, never the key value.
+- Model catalogs are cached per provider. If refresh fails, the last catalog
+  remains available and the TUI shows its current stale, authentication, or
+  connection state.
+- Selecting a discovered model updates the current session's `model_provider`
+  and `model`. It leaves `profile` and the selected profile contents unchanged.
+
+The generated provider ID is derived from the display name and normalized URL,
+so two endpoints with the same model ID remain independently selectable.
+
 Or a third-party provider (using a distinct environment variable for the API key):
 
 ```toml

@@ -72,7 +72,11 @@ Notes
 
 - `/theme`: customize the app theme.
 - `/verbosity (high|medium|low)`: change text verbosity.
-- `/model`: choose your default model.
+- `/model`: choose your default model. The picker also groups models from
+  configured OpenAI-compatible endpoints and provides
+  **+ Add OpenAI-compatible /v1 endpoint**. Direct selection changes the current
+  session's provider and model without creating or changing a profile; see
+  [TUI Settings Overlay](settings.md#openai-compatible-endpoints).
 - `/fast`: open the model selector and toggle Fast mode.
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: manage custom prompts.

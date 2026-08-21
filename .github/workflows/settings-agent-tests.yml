@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - "code-rs/**"
+      - "docs/config.md"
+      - "docs/settings.md"
+      - "docs/slash-commands.md"
       - ".github/workflows/settings-agent-tests.yml"
 
 concurrency:

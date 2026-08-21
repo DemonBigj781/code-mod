@@ -13,7 +13,8 @@ Full-screen settings panel for Every Code’s TUI. Use it to change models, them
 - Agent and MCP edits also live in the same config directory.
 
 ## Sections
-- **Model**: pick the default chat model and reasoning effort.
+- **Model**: pick the default chat model and reasoning effort, or add an
+  OpenAI-compatible `/v1` endpoint.
 - **Theme**: choose a theme and spinner; applies immediately.
 - **Updates**: view upgrade channel/status. `/update` opens here before running installers.
 - **Agents**: see built-in/custom agents, enable/disable, force read-only, add per-agent instructions. Open the Subagent editor to configure `/plan`/`/solve`/`/code` or custom slash commands.
@@ -26,6 +27,34 @@ Full-screen settings panel for Every Code’s TUI. Use it to change models, them
 - **Chrome**: shown when browser attach fails; choose to retry, use a temp profile, switch to the internal browser, or cancel.
 - **MCP**: enable/disable MCP servers.
 - **Notifications**: toggle all or set filters. `/notifications on|off|status` also lands here.
+
+## OpenAI-compatible endpoints
+
+Open `/model` or `/settings model`, move to **OpenAI-compatible endpoints**, and
+select **+ Add OpenAI-compatible /v1 endpoint**. The same endpoint catalog and
+form are available from the model picker and the full settings overlay.
+
+- Enter a display name and the provider's base URL. Code normalizes the URL to
+  one `/v1` root and validates it by loading `GET /v1/models` before saving it.
+- Leave **API key** empty for a local endpoint that does not require
+  authentication, such as a local Ollama-compatible server. If a key is
+  provided, Code stores it in the encrypted secrets store under `CODE_HOME`;
+  `config.toml` receives only a generated secret reference.
+- **Chat Completions** is the default API shape and sends inference requests to
+  `/v1/chat/completions`. Choose **Responses** for endpoints that implement
+  `/v1/responses`.
+- Each endpoint is shown under its own heading with a catalog state such as
+  `fresh`, `loading`, `stale cache`, `authentication failed`, or
+  `connection failed`. A failed refresh keeps the last cached model list
+  instead of deleting it.
+- Selecting an endpoint model changes the active session's model and provider
+  directly. It does not create, select, or modify a profile. Selecting an
+  ordinary Code model later restores the provider that was active before the
+  direct endpoint.
+
+The form rejects empty names, invalid URLs, URLs containing credentials, and
+endpoints that cannot return a usable model catalog. A failed validation does
+not persist the provider or its submitted key.
 
 ## Overlay lifecycle
 - All keys route through `handle_settings_key` while open; composer/history ignore input until closed.
