@@ -388,7 +388,7 @@ named behavior, not every backed hunk:
 
 ## Phase 5: Direct OpenAI-Compatible `/v1` Model Selection
 
-- [ ] **Task 5.1: Add normalized direct-provider persistence**
+- [x] **Task 5.1: Add normalized direct-provider persistence**
 
   **Files:** `code-rs/core/src/model_provider_info.rs`,
   `code-rs/core/src/config.rs`, the existing config write service under
@@ -403,7 +403,11 @@ named behavior, not every backed hunk:
   duplicate display names with different URLs, trailing `/v1` variants, and
   proof that `[profiles]` is unchanged.
 
-- [ ] **Task 5.2: Scope remote model catalogs and caches by provider**
+  **Evidence:** Exact SHA `6e41e6b4ed24d4d02e982eb828bf920d94b7417d`;
+  Provider Integration Tests `32428319179` and Build Code `32428319115`
+  succeeded.
+
+- [x] **Task 5.2: Scope remote model catalogs and caches by provider**
 
   **Files:** `code-rs/core/src/remote_models/mod.rs` and
   `code-rs/core/src/remote_models/cache.rs`.
@@ -417,7 +421,11 @@ named behavior, not every backed hunk:
   writes, stale retention after authentication failure, and one-provider
   refresh that leaves the other provider unchanged.
 
-- [ ] **Task 5.3: Add the inline endpoint form**
+  **Evidence:** Exact SHA `8bba7a3f6882573809ea36667afde95fc1429244`;
+  Provider Integration Tests `32432177692` and Build Code `32432177691`
+  succeeded.
+
+- [x] **Task 5.3: Add the inline endpoint form**
 
   **Files:** Files under
   `code-rs/tui/src/bottom_pane/settings_pages/model/model_selection_view/`, plus
@@ -431,6 +439,10 @@ named behavior, not every backed hunk:
   **Tests:** Inline validation, no-key local endpoint, encrypted-key reference,
   authentication error without cache deletion, and successful return to the
   model list.
+
+  **Evidence:** Exact SHA `f119dbc9516921252af403e4b0e8ad847496e116`;
+  Provider Integration Tests `32440081529` and Build Code `32440081439`
+  succeeded.
 
 - [ ] **Task 5.4: Group provider models and apply direct session selection**
 
