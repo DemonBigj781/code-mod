@@ -38,7 +38,7 @@ pub(super) fn command_exists(cmd: &str) -> bool {
                     .with_extension("")
                     .with_extension(ext.trim_start_matches('.'));
                 if std::fs::metadata(&candidate)
-                    .is_some_and(|metadata| metadata.is_file())
+                    .is_ok_and(|metadata| metadata.is_file())
                 {
                     return true;
                 }

@@ -110,7 +110,7 @@ pub fn run_legacy_setup_preflight(
         policy_cwd,
         codex_home,
         command_cwd,
-        env_map.clone(),
+        env_map,
     )
 }
 

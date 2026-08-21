@@ -469,7 +469,7 @@ pub async fn default_user_shell() -> Shell {
         .arg("$PSVersionTable.PSVersion.Major")
         .output()
         .await
-        .is_some_and(|o| o.status.success());
+        .is_ok_and(|o| o.status.success());
     let bash_exe = if Command::new("bash.exe")
         .arg("--version")
         .output()
