@@ -112,5 +112,6 @@ jobs:
           set -eu
           cargo test --frozen --locked -j1 -p code-core direct_model_provider_ -- --nocapture
           cargo test --frozen --locked -j1 -p code-core --test remote_models_manager remote_models_provider_ -- --nocapture
+          cargo test --frozen --locked -j1 -p code-tui direct_provider_endpoint_ -- --nocapture
           cargo test --frozen --locked -j1 -p code-core checked_in_codex_schema_matches_generated -- --exact
           cargo test --frozen --locked -j1 -p code-app-server message_processor::tests::config_write_preserves_existing_table_config -- --exact

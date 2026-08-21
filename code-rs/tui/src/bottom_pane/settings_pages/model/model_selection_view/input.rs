@@ -3,11 +3,16 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::components::mode_guard::ModeGuard;
 use crate::app_event::AppEvent;
 
+use super::endpoint_form::{
+    ENDPOINT_FORM_API_KEY_ROW, ENDPOINT_FORM_BASE_URL_ROW, ENDPOINT_FORM_CANCEL_ROW,
+    ENDPOINT_FORM_DISPLAY_NAME_ROW, ENDPOINT_FORM_SAVE_ROW, ENDPOINT_FORM_WIRE_API_ROW,
+};
 use super::{EditTarget, ModelSelectionView, ViewMode};
 use super::super::model_selection_state::EntryKind;
 
 impl ModelSelectionView {
     pub(crate) fn handle_key_event_direct(&mut self, key_event: KeyEvent) -> bool {
+        let app_event_tx = self.app_event_tx.clone();
         let mut mode_guard = ModeGuard::replace(&mut self.mode, ViewMode::Transition, |mode| {
             matches!(mode, ViewMode::Transition)
         });
@@ -59,6 +64,64 @@ impl ModelSelectionView {
                     field.handle_key(key_event)
                 }
             },
+            ViewMode::AddDirectProvider(form) => {
+                if matches!(key_event.code, KeyCode::Esc) {
+                    self.mode = ViewMode::Main;
+                    return true;
+                }
+                if form.is_submitting() {
+                    return true;
+                }
+
+                let is_ctrl_s = key_event.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key_event.code, KeyCode::Char('s' | 'S'));
+                if is_ctrl_s {
+                    return Self::submit_direct_provider_form_state(&app_event_tx, form);
+                }
+
+                match key_event.code {
+                    KeyCode::Tab => {
+                        form.select_next_row();
+                        true
+                    }
+                    KeyCode::BackTab => {
+                        form.select_previous_row();
+                        true
+                    }
+                    KeyCode::Left | KeyCode::Right
+                        if form.selected_row() == ENDPOINT_FORM_WIRE_API_ROW =>
+                    {
+                        form.toggle_wire_api();
+                        true
+                    }
+                    KeyCode::Enter | KeyCode::Char(' ') => match form.selected_row() {
+                        ENDPOINT_FORM_DISPLAY_NAME_ROW
+                        | ENDPOINT_FORM_BASE_URL_ROW
+                        | ENDPOINT_FORM_API_KEY_ROW => {
+                            form.select_next_row();
+                            true
+                        }
+                        ENDPOINT_FORM_WIRE_API_ROW => {
+                            form.toggle_wire_api();
+                            form.select_next_row();
+                            true
+                        }
+                        ENDPOINT_FORM_SAVE_ROW => {
+                            Self::submit_direct_provider_form_state(&app_event_tx, form)
+                        }
+                        ENDPOINT_FORM_CANCEL_ROW => {
+                            self.mode = ViewMode::Main;
+                            true
+                        }
+                        _ => false,
+                    },
+                    _ => {
+                        form.clear_error();
+                        form.selected_field_mut()
+                            .is_some_and(|field| field.handle_key(key_event))
+                    }
+                }
+            }
             ViewMode::Transition => {
                 self.mode = ViewMode::Main;
                 false

@@ -1,6 +1,7 @@
 use super::{EditTarget, FOOTER_LINE_COUNT, ModelSelectionView, SUMMARY_LINE_COUNT, ViewMode};
 
-use crate::app_event::AppEvent;
+use crate::app_event::{AppEvent, Redacted};
+use crate::direct_provider::DirectProviderRequest;
 
 use code_core::config_types::ContextMode;
 use code_core::model_family::{
@@ -17,8 +18,10 @@ impl ModelSelectionView {
     }
 
     pub(super) fn content_line_count(&self) -> u16 {
-        if matches!(self.mode, ViewMode::Edit { .. }) {
-            return 8;
+        match self.mode {
+            ViewMode::Edit { .. } => return 8,
+            ViewMode::AddDirectProvider(_) => return 17,
+            ViewMode::Main | ViewMode::Transition => {}
         }
         self.data
             .content_line_count()
@@ -93,6 +96,7 @@ impl ModelSelectionView {
             match entry {
                 EntryKind::ContextWindow => self.open_edit_for(EditTarget::ContextWindow, false),
                 EntryKind::AutoCompact => self.open_edit_for(EditTarget::AutoCompact, false),
+                EntryKind::AddDirectProvider => self.open_direct_provider_form(),
                 _ => {
                     if let Some(action) = self.data.apply_selection(entry) {
                         self.dispatch_selection_action(action);
@@ -163,6 +167,75 @@ impl ModelSelectionView {
             field,
             error: None,
         };
+    }
+
+    pub(super) fn open_direct_provider_form(&mut self) {
+        self.mode = ViewMode::AddDirectProvider(super::endpoint_form::EndpointFormState::new());
+    }
+
+    pub(super) fn submit_direct_provider_form(&mut self) -> bool {
+        let app_event_tx = self.app_event_tx.clone();
+        let ViewMode::AddDirectProvider(form) = &mut self.mode else {
+            return false;
+        };
+        Self::submit_direct_provider_form_state(&app_event_tx, form)
+    }
+
+    pub(super) fn submit_direct_provider_form_state(
+        app_event_tx: &crate::app_event_sender::AppEventSender,
+        form: &mut super::endpoint_form::EndpointFormState,
+    ) -> bool {
+        if form.is_submitting() {
+            return true;
+        }
+
+        let display_name = form.display_name().trim().to_owned();
+        if display_name.is_empty() {
+            form.finish_submission(Some("Display name is required.".to_owned()));
+            return true;
+        }
+        let raw_base_url = form.base_url().trim();
+        if raw_base_url.is_empty() {
+            form.finish_submission(Some("Base URL is required.".to_owned()));
+            return true;
+        }
+        let base_url = match code_core::normalize_direct_provider_base_url(raw_base_url) {
+            Ok(base_url) => base_url,
+            Err(error) => {
+                form.finish_submission(Some(error));
+                return true;
+            }
+        };
+        let api_key = form
+            .api_key()
+            .trim()
+            .to_owned();
+        let api_key = (!api_key.is_empty()).then_some(api_key);
+        let wire_api = form.wire_api();
+        form.begin_submission();
+
+        app_event_tx.send(AppEvent::AddDirectModelProvider(Redacted(
+            DirectProviderRequest {
+                display_name,
+                base_url,
+                api_key,
+                wire_api,
+            },
+        )));
+        true
+    }
+
+    pub(crate) fn finish_direct_provider_add(&mut self, result: Result<(), String>) {
+        let ViewMode::AddDirectProvider(form) = &mut self.mode else {
+            return;
+        };
+        match result {
+            Ok(()) => {
+                self.mode = ViewMode::Main;
+                self.ensure_selected_visible();
+            }
+            Err(error) => form.finish_submission(Some(error)),
+        }
     }
 
     fn parse_token_count_arg(raw: &str) -> Result<u64, String> {

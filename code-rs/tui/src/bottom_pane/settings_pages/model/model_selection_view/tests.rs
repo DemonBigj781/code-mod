@@ -1,10 +1,11 @@
 use super::*;
-use crate::app_event::AppEvent;
+use crate::app_event::{AppEvent, Redacted};
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::settings_pages::model::ModelSelectionTarget;
 use crate::bottom_pane::settings_pages::model::model_selection_state::EntryKind;
 use code_common::model_presets::{ModelPreset, ReasoningEffortPreset};
 use code_core::config_types::{ContextMode, ReasoningEffort};
+use code_core::WireApi;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -74,7 +75,7 @@ fn session_initial_selection_with_no_presets_uses_fast_mode() {
 #[test]
 fn entry_count_includes_fast_mode() {
     let view = make_view(ModelSelectionTarget::Session, vec![preset("gpt-5.3-codex")]);
-    assert_eq!(view.entry_count(), 5);
+    assert_eq!(view.entry_count(), 6);
 }
 
 #[test]
@@ -105,6 +106,7 @@ fn get_entry_line_accounts_for_header_and_fast_block() {
     assert_eq!(view.data.entry_line(2), 12);
     assert_eq!(view.data.entry_line(3), 13);
     assert_eq!(view.data.entry_line(4), 17);
+    assert_eq!(view.data.entry_line(5), 20);
 }
 
 #[test]
@@ -124,10 +126,11 @@ fn vim_navigation_keys_move_selection() {
     );
 
     assert_eq!(view.selected_index, 5);
+    view.selected_index = view.entry_count() - 1;
     assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Char('j'))));
     assert_eq!(view.selected_index, 0);
     assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Char('k'))));
-    assert_eq!(view.selected_index, 5);
+    assert_eq!(view.selected_index, view.entry_count() - 1);
 }
 
 #[test]
@@ -314,7 +317,7 @@ fn session_fast_mode_is_hidden_for_non_gpt_5_4_models() {
     );
 
     assert_eq!(view.selected_index, 3);
-    assert_eq!(view.entry_count(), 4);
+    assert_eq!(view.entry_count(), 5);
     assert_eq!(view.data.entry_at(0), Some(EntryKind::ContextMode));
 }
 
@@ -556,4 +559,116 @@ fn editing_auto_compact_percent_requires_context_window() {
         .save_edit_value(EditTarget::AutoCompact, "90%")
         .expect_err("error");
     assert!(err.contains("context window"));
+}
+
+#[test]
+fn direct_provider_endpoint_action_opens_inline_form_with_chat_default() {
+    let mut view = make_view(ModelSelectionTarget::Session, vec![preset("gpt-5.4")]);
+    let add_index = view.entry_count() - 1;
+
+    assert_eq!(view.data.entry_at(add_index), Some(EntryKind::AddDirectProvider));
+    view.select_item(add_index);
+
+    match &view.mode {
+        ViewMode::AddDirectProvider(form) => {
+            assert_eq!(form.wire_api(), WireApi::Chat);
+            assert_eq!(form.selected_row(), 0);
+            assert!(!form.is_submitting());
+        }
+        other => panic!("unexpected mode: {other:?}"),
+    }
+}
+
+#[test]
+fn direct_provider_endpoint_inline_validation_blocks_empty_name_and_url() {
+    let (tx, rx) = mpsc::channel::<AppEvent>();
+    let mut view = ModelSelectionView::new(
+        ModelSelectionViewParams {
+            presets: vec![preset("gpt-5.4")],
+            current_model: "gpt-5.4".to_string(),
+            current_effort: ReasoningEffort::Medium,
+            current_service_tier: None,
+            current_context_mode: None,
+            current_context_window: Some(1_047_576),
+            current_auto_compact_token_limit: Some(942_818),
+            use_chat_model: false,
+            target: ModelSelectionTarget::Session,
+        },
+        AppEventSender::new(tx),
+    );
+    view.open_direct_provider_form();
+
+    assert!(view.submit_direct_provider_form());
+    let ViewMode::AddDirectProvider(form) = &view.mode else {
+        panic!("expected endpoint form");
+    };
+    assert_eq!(form.error(), Some("Display name is required."));
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn direct_provider_endpoint_no_key_submission_emits_normalized_request() {
+    let (tx, rx) = mpsc::channel::<AppEvent>();
+    let mut view = ModelSelectionView::new(
+        ModelSelectionViewParams {
+            presets: vec![preset("gpt-5.4")],
+            current_model: "gpt-5.4".to_string(),
+            current_effort: ReasoningEffort::Medium,
+            current_service_tier: None,
+            current_context_mode: None,
+            current_context_window: Some(1_047_576),
+            current_auto_compact_token_limit: Some(942_818),
+            use_chat_model: false,
+            target: ModelSelectionTarget::Session,
+        },
+        AppEventSender::new(tx),
+    );
+    view.open_direct_provider_form();
+    let ViewMode::AddDirectProvider(form) = &mut view.mode else {
+        panic!("expected endpoint form");
+    };
+    form.display_name_field_mut().set_text("Local Ollama");
+    form.base_url_field_mut().set_text("http://127.0.0.1:11434/v1/");
+
+    assert!(view.submit_direct_provider_form());
+
+    match rx.recv().expect("add provider event") {
+        AppEvent::AddDirectModelProvider(Redacted(request)) => {
+            assert_eq!(request.display_name, "Local Ollama");
+            assert_eq!(request.base_url, "http://127.0.0.1:11434/v1");
+            assert_eq!(request.api_key, None);
+            assert_eq!(request.wire_api, WireApi::Chat);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn direct_provider_endpoint_escape_discards_secret_text() {
+    let mut view = make_view(ModelSelectionTarget::Session, vec![preset("gpt-5.4")]);
+    view.open_direct_provider_form();
+    let ViewMode::AddDirectProvider(form) = &mut view.mode else {
+        panic!("expected endpoint form");
+    };
+    form.api_key_field_mut().set_text("secret-that-must-be-dropped");
+
+    assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Esc)));
+    assert!(matches!(view.mode, ViewMode::Main));
+    assert!(!format!("{:?}", view.mode).contains("secret-that-must-be-dropped"));
+}
+
+#[test]
+fn direct_provider_endpoint_failure_stays_inline_and_success_returns_to_models() {
+    let mut view = make_view(ModelSelectionTarget::Session, vec![preset("gpt-5.4")]);
+    view.open_direct_provider_form();
+
+    view.finish_direct_provider_add(Err("Authentication failed.".to_owned()));
+    let ViewMode::AddDirectProvider(form) = &view.mode else {
+        panic!("expected endpoint form after failure");
+    };
+    assert_eq!(form.error(), Some("Authentication failed."));
+    assert!(!form.is_submitting());
+
+    view.finish_direct_provider_add(Ok(()));
+    assert!(matches!(view.mode, ViewMode::Main));
 }

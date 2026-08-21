@@ -71,7 +71,11 @@ fn model_info_to_preset(info: ModelInfo) -> ModelPreset {
         REMOTE_TEXT_VERBOSITY_MEDIUM
     };
 
-    let supported_reasoning_efforts = info
+    let default_reasoning_effort = map_reasoning_effort(
+        info.default_reasoning_level
+            .unwrap_or(RemoteReasoningEffort::None),
+    );
+    let mut supported_reasoning_efforts: Vec<ReasoningEffortPreset> = info
         .supported_reasoning_levels
         .into_iter()
         .map(|preset| ReasoningEffortPreset {
@@ -79,6 +83,12 @@ fn model_info_to_preset(info: ModelInfo) -> ModelPreset {
             description: preset.description,
         })
         .collect();
+    if supported_reasoning_efforts.is_empty() {
+        supported_reasoning_efforts.push(ReasoningEffortPreset {
+            effort: default_reasoning_effort,
+            description: "Endpoint default".to_owned(),
+        });
+    }
 
     let slug = info.slug;
     ModelPreset {
@@ -86,10 +96,7 @@ fn model_info_to_preset(info: ModelInfo) -> ModelPreset {
         model: slug.clone(),
         display_name: info.display_name,
         description: info.description.unwrap_or_default(),
-        default_reasoning_effort: map_reasoning_effort(
-            info.default_reasoning_level
-                .unwrap_or(RemoteReasoningEffort::None),
-        ),
+        default_reasoning_effort,
         supported_reasoning_efforts,
         supported_text_verbosity,
         is_default: false,
@@ -111,5 +118,54 @@ fn map_reasoning_effort(effort: RemoteReasoningEffort) -> ProtocolReasoningEffor
         RemoteReasoningEffort::High => ProtocolReasoningEffort::High,
         RemoteReasoningEffort::XHigh => ProtocolReasoningEffort::XHigh,
         RemoteReasoningEffort::Max => ProtocolReasoningEffort::Max,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_provider_endpoint_models_without_reasoning_metadata_remain_selectable() {
+        let model: ModelInfo = serde_json::from_value(serde_json::json!({
+            "slug": "local-model",
+            "display_name": "local-model",
+            "description": null,
+            "default_reasoning_level": null,
+            "supported_reasoning_levels": [],
+            "shell_type": "default",
+            "visibility": "list",
+            "supported_in_api": true,
+            "priority": 0,
+            "additional_speed_tiers": [],
+            "availability_nux": null,
+            "upgrade": null,
+            "base_instructions": "",
+            "model_messages": null,
+            "supports_reasoning_summaries": false,
+            "default_reasoning_summary": "auto",
+            "support_verbosity": false,
+            "default_verbosity": null,
+            "apply_patch_tool_type": null,
+            "web_search_tool_type": "text",
+            "truncation_policy": {"mode": "bytes", "limit": 10000},
+            "supports_parallel_tool_calls": false,
+            "supports_image_detail_original": false,
+            "context_window": null,
+            "auto_compact_token_limit": null,
+            "effective_context_window_percent": 95,
+            "experimental_supported_tools": [],
+            "input_modalities": ["text"],
+            "supports_search_tool": false,
+            "prefer_websockets": false,
+            "used_fallback_model_metadata": true
+        }))
+        .expect("direct model metadata");
+
+        let presets = merge_remote_models(vec![model], Vec::new(), None, false);
+
+        assert_eq!(presets.len(), 1);
+        assert_eq!(presets[0].model, "local-model");
+        assert_eq!(presets[0].supported_reasoning_efforts.len(), 1);
     }
 }

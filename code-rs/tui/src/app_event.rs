@@ -226,6 +226,14 @@ pub(crate) enum AppEvent {
         default_model: Option<String>,
     },
 
+    /// Validate, persist, and load models for an OpenAI-compatible endpoint.
+    AddDirectModelProvider(Redacted<crate::direct_provider::DirectProviderRequest>),
+
+    /// Result of adding an OpenAI-compatible endpoint.
+    DirectModelProviderAddFinished {
+        result: Result<crate::direct_provider::DirectProviderAddOutcome, String>,
+    },
+
     /// Actually draw the next frame.
     Redraw,
 

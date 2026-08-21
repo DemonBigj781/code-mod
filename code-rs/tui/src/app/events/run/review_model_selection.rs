@@ -49,6 +49,52 @@
                         widget.set_auto_review_resolve_use_chat_model(use_chat);
                     }
                 }
+                AppEvent::AddDirectModelProvider(crate::app_event::Redacted(request)) => {
+                    let tx = self.app_event_tx.clone();
+                    let code_home = self.config.code_home.clone();
+                    let cwd = self.config.cwd.clone();
+                    let auth_manager = self._server.auth_manager();
+                    tokio::spawn(async move {
+                        let result = crate::direct_provider::add_direct_provider(
+                            request,
+                            code_home,
+                            cwd,
+                            auth_manager,
+                        )
+                        .await;
+                        tx.send(AppEvent::DirectModelProviderAddFinished { result });
+                    });
+                }
+                AppEvent::DirectModelProviderAddFinished { result } => {
+                    match result {
+                        Ok(outcome) => match self.reload_config_with_startup_overrides() {
+                            Ok(config) => {
+                                self.config = config.clone();
+                                if let AppState::Chat { widget } = &mut self.app_state {
+                                    widget.apply_reloaded_config_keep_settings_state(config);
+                                    widget.finish_direct_provider_add(Ok(outcome.models));
+                                    widget.flash_footer_notice(format!(
+                                        "Added endpoint {}",
+                                        outcome.provider_id,
+                                    ));
+                                }
+                            }
+                            Err(error) => {
+                                if let AppState::Chat { widget } = &mut self.app_state {
+                                    widget.finish_direct_provider_add(Err(format!(
+                                        "Saved endpoint, but failed to reload config: {error}",
+                                    )));
+                                }
+                            }
+                        },
+                        Err(error) => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.finish_direct_provider_add(Err(error));
+                            }
+                        }
+                    }
+                    self.schedule_redraw();
+                }
                 AppEvent::ModelSelectionClosed { target, accepted } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_model_selection_closed(target, accepted);

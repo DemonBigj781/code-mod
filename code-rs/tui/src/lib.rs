@@ -76,6 +76,7 @@ mod common;
 mod colors;
 pub(crate) mod card_theme;
 mod diff_render;
+mod direct_provider;
 mod exec_command;
 mod external_editor;
 mod file_search;

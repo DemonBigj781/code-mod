@@ -1,3 +1,4 @@
+mod endpoint_form;
 mod input;
 mod model;
 mod mouse;
@@ -15,6 +16,7 @@ use crate::app_event_sender::AppEventSender;
 use crate::components::form_text_field::FormTextField;
 
 use super::model_selection_state::{ModelSelectionData, ModelSelectionViewParams};
+use endpoint_form::EndpointFormState;
 
 pub(super) const SUMMARY_LINE_COUNT: usize = 3;
 // Shortcut bar only (blank footer line was removed).
@@ -33,6 +35,7 @@ pub(super) enum ViewMode {
         field: FormTextField,
         error: Option<String>,
     },
+    AddDirectProvider(EndpointFormState),
     Transition,
 }
 
@@ -76,10 +79,21 @@ impl ModelSelectionView {
     }
 
     pub(crate) fn handle_paste_direct(&mut self, text: String) -> bool {
-        if let ViewMode::Edit { field, .. } = &mut self.mode {
-            field.handle_paste(text);
-            return true;
+        match &mut self.mode {
+            ViewMode::Edit { field, .. } => {
+                field.handle_paste(text);
+                true
+            }
+            ViewMode::AddDirectProvider(form) => {
+                if form.is_submitting() {
+                    return true;
+                }
+                if let Some(field) = form.selected_field_mut() {
+                    field.handle_paste(text);
+                }
+                true
+            }
+            ViewMode::Main | ViewMode::Transition => false,
         }
-        false
     }
 }

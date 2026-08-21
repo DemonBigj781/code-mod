@@ -80,8 +80,10 @@ impl<'a> BottomPaneView<'a> for ModelSelectionView {
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
-        if matches!(self.mode, ViewMode::Edit { .. }) {
-            return 12;
+        match self.mode {
+            ViewMode::Edit { .. } => return 12,
+            ViewMode::AddDirectProvider(_) => return 22,
+            ViewMode::Main | ViewMode::Transition => {}
         }
         let total = self
             .content_line_count()

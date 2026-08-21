@@ -8,7 +8,13 @@ use crate::components::scroll_state::ScrollState;
 use crate::ui_interaction::{SelectableListMouseConfig, SelectableListMouseResult};
 
 use crate::bottom_pane::ConditionalUpdate;
+use crate::components::mode_guard::ModeGuard;
 
+use super::endpoint_form::{
+    ENDPOINT_FORM_API_KEY_ROW, ENDPOINT_FORM_BASE_URL_ROW, ENDPOINT_FORM_CANCEL_ROW,
+    ENDPOINT_FORM_DISPLAY_NAME_ROW, ENDPOINT_FORM_SAVE_ROW, ENDPOINT_FORM_WIRE_API_ROW,
+    EndpointFormAction,
+};
 use super::{ModelSelectionView, ViewMode};
 
 impl ModelSelectionView {
@@ -70,6 +76,9 @@ impl ModelSelectionView {
             };
             return self.handle_mouse_event_shared(mouse_event, layout.body);
         }
+        if matches!(self.mode, ViewMode::AddDirectProvider(_)) {
+            return self.handle_direct_provider_mouse_event(chrome, mouse_event, area);
+        }
 
         match &mut self.mode {
             ViewMode::Edit {
@@ -98,7 +107,99 @@ impl ModelSelectionView {
                     ConditionalUpdate::NoRedraw
                 }
             }
-            ViewMode::Main | ViewMode::Transition => ConditionalUpdate::NoRedraw,
+            ViewMode::Main | ViewMode::AddDirectProvider(_) | ViewMode::Transition => {
+                ConditionalUpdate::NoRedraw
+            }
+        }
+    }
+
+    fn handle_direct_provider_mouse_event(
+        &mut self,
+        chrome: ChromeMode,
+        mouse_event: MouseEvent,
+        area: Rect,
+    ) -> ConditionalUpdate {
+        let app_event_tx = self.app_event_tx.clone();
+        let panel_title = self.data.target.panel_title();
+        let mut mode_guard = ModeGuard::replace(&mut self.mode, ViewMode::Transition, |mode| {
+            matches!(mode, ViewMode::Transition)
+        });
+        let ViewMode::AddDirectProvider(form) = mode_guard.mode_mut() else {
+            return ConditionalUpdate::NoRedraw;
+        };
+        let page = form.page(panel_title);
+        let Some(layout) = page.layout_in_chrome(chrome, area) else {
+            return ConditionalUpdate::NoRedraw;
+        };
+        let buttons = form.button_specs();
+
+        match mouse_event.kind {
+            MouseEventKind::Moved => {
+                let action = page.standard_action_at_end(
+                    &layout,
+                    mouse_event.column,
+                    mouse_event.row,
+                    &buttons,
+                );
+                if form.set_hovered_button(action) {
+                    ConditionalUpdate::NeedsRedraw
+                } else {
+                    ConditionalUpdate::NoRedraw
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if form.is_submitting() {
+                    return ConditionalUpdate::NoRedraw;
+                }
+                if let Some(action) = page.standard_action_at_end(
+                    &layout,
+                    mouse_event.column,
+                    mouse_event.row,
+                    &buttons,
+                ) {
+                    match action {
+                        EndpointFormAction::Save => {
+                            form.set_selected_row(ENDPOINT_FORM_SAVE_ROW);
+                            let _ = Self::submit_direct_provider_form_state(&app_event_tx, form);
+                        }
+                        EndpointFormAction::Cancel => {
+                            form.set_selected_row(ENDPOINT_FORM_CANCEL_ROW);
+                            self.mode = ViewMode::Main;
+                        }
+                    }
+                    return ConditionalUpdate::NeedsRedraw;
+                }
+
+                let Some(field_index) = page.field_index_at(
+                    &layout,
+                    mouse_event.column,
+                    mouse_event.row,
+                ) else {
+                    return ConditionalUpdate::NoRedraw;
+                };
+                let row = match field_index {
+                    0 => ENDPOINT_FORM_DISPLAY_NAME_ROW,
+                    1 => ENDPOINT_FORM_BASE_URL_ROW,
+                    2 => ENDPOINT_FORM_API_KEY_ROW,
+                    3 => ENDPOINT_FORM_WIRE_API_ROW,
+                    _ => return ConditionalUpdate::NoRedraw,
+                };
+                form.set_selected_row(row);
+                form.clear_error();
+                if row == ENDPOINT_FORM_WIRE_API_ROW {
+                    form.toggle_wire_api();
+                } else if let Some(field) = form.selected_field_mut()
+                    && let Some(section) = layout.sections.get(field_index)
+                {
+                    let _ = field.handle_mouse_click(
+                        mouse_event.column,
+                        mouse_event.row,
+                        section.inner,
+                    );
+                }
+                ConditionalUpdate::NeedsRedraw
+            }
+            _ => ConditionalUpdate::NoRedraw,
         }
     }
 }

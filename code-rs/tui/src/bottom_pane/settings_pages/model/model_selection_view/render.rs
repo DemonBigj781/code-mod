@@ -15,6 +15,7 @@ use crate::bottom_pane::settings_ui::toggle;
 use crate::colors;
 
 use super::super::model_selection_state::{reasoning_effort_label, EntryKind, ModelSelectionData};
+use super::endpoint_form::EndpointFormState;
 use super::{EditTarget, ModelSelectionView, ViewMode};
 
 impl ModelSelectionView {
@@ -323,6 +324,33 @@ impl ModelSelectionView {
         }
     }
 
+    fn push_add_direct_provider_section<'a>(
+        &self,
+        lines: &mut Vec<SelectableLineRun<'a, usize>>,
+    ) {
+        Self::push_blank_line(lines);
+        lines.push(SelectableLineRun::plain(vec![Line::from(vec![Span::styled(
+            "OpenAI-compatible endpoints",
+            Self::section_header_style(),
+        )])]));
+
+        let entry_index = self.data.entry_count().saturating_sub(1);
+        let is_selected = self.selected_index == entry_index;
+        let row_style = Self::highlighted(Style::new().fg(colors::primary()), is_selected);
+        let arrow_style = if is_selected {
+            Style::new().bg(colors::selection()).bold()
+        } else {
+            Style::new().fg(colors::text_dim())
+        };
+        lines.push(SelectableLineRun::selectable(
+            entry_index,
+            vec![Line::from(vec![
+                Span::styled(crate::icons::selection_prefix(is_selected), arrow_style),
+                Span::styled("+ Add OpenAI-compatible /v1 endpoint", row_style),
+            ])],
+        ));
+    }
+
     pub(super) fn build_render_runs<'a>(&'a self) -> Vec<SelectableLineRun<'a, usize>> {
         let mut runs = Vec::new();
         if self.data.supports_fast_mode() {
@@ -335,6 +363,7 @@ impl ModelSelectionView {
             self.push_follow_chat_section(&mut runs);
         }
         self.push_preset_lines(&mut runs);
+        self.push_add_direct_provider_section(&mut runs);
         runs
     }
 
@@ -448,6 +477,25 @@ impl ModelSelectionView {
         let _ = Self::edit_page(target, error).render_in_chrome(chrome, area, buf, field);
     }
 
+    fn render_direct_provider_form_in_chrome(
+        &self,
+        chrome: ChromeMode,
+        area: Rect,
+        buf: &mut Buffer,
+        form: &EndpointFormState,
+    ) {
+        let page = form.page(self.data.target.panel_title());
+        let fields = form.fields();
+        let buttons = form.button_specs();
+        let _ = page.render_with_standard_actions_end_in_chrome(
+            chrome,
+            area,
+            buf,
+            &fields,
+            &buttons,
+        );
+    }
+
     pub(super) fn render_in_chrome(&self, chrome: ChromeMode, area: Rect, buf: &mut Buffer) {
         match &self.mode {
             ViewMode::Main | ViewMode::Transition => self.render_main_in_chrome(chrome, area, buf),
@@ -456,6 +504,9 @@ impl ModelSelectionView {
                 field,
                 error,
             } => self.render_edit_in_chrome(chrome, area, buf, *target, field, error.as_deref()),
+            ViewMode::AddDirectProvider(form) => {
+                self.render_direct_provider_form_in_chrome(chrome, area, buf, form)
+            }
         }
     }
 

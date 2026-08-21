@@ -59,6 +59,45 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
+    pub(crate) fn finish_direct_provider_add(
+        &mut self,
+        result: Result<Vec<code_protocol::openai_models::ModelInfo>, String>,
+    ) {
+        let models = match result {
+            Ok(models) => models,
+            Err(error) => {
+                self.bottom_pane.finish_direct_provider_add(Err(error));
+                return;
+            }
+        };
+
+        let auth_mode = self
+            .auth_manager
+            .auth()
+            .map(|auth| auth.mode)
+            .or({
+                if self.config.using_chatgpt_auth {
+                    Some(AuthMode::ChatGPT)
+                } else {
+                    Some(AuthMode::ApiKey)
+                }
+            });
+        let supports_pro_only_models = self.auth_manager.supports_pro_only_models();
+        let local_presets = self.remote_model_presets.take().unwrap_or_else(|| {
+            builtin_model_presets(auth_mode, supports_pro_only_models)
+        });
+        self.remote_model_presets = Some(crate::remote_model_presets::merge_remote_models(
+            models,
+            local_presets,
+            auth_mode,
+            supports_pro_only_models,
+        ));
+        let presets = self.available_model_presets();
+        self.bottom_pane.update_model_selection_presets(presets);
+        self.bottom_pane.finish_direct_provider_add(Ok(()));
+        self.request_redraw();
+    }
+
     fn maybe_apply_remote_default_model(&mut self, default_model: String) {
         if !self.allow_remote_default_at_startup {
             return;

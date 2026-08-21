@@ -16,6 +16,7 @@ const FAST_MODE_SECTION_HEIGHT: u16 = 5;
 const CONTEXT_MODE_SECTION_HEIGHT: u16 = 7;
 const CONTEXT_MODE_UNAVAILABLE_NOTICE_HEIGHT: u16 = 1;
 const FOLLOW_CHAT_SECTION_HEIGHT: u16 = 4;
+const ADD_DIRECT_PROVIDER_SECTION_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 2;
 const FAST_MODE_ROW_OFFSET: usize = 2;
 const CONTEXT_MODE_ROW_OFFSET: usize = 3;
@@ -62,6 +63,7 @@ pub(crate) enum EntryKind {
     AutoCompact,
     FollowChat,
     Preset(usize),
+    AddDirectProvider,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -213,6 +215,9 @@ impl ModelSelectionData {
                     next_selected = Some(new_idx + prefix);
                 }
             }
+            Some(EntryKind::AddDirectProvider) => {
+                next_selected = Some(self.entry_count().saturating_sub(1));
+            }
             None => {}
         }
 
@@ -316,6 +321,7 @@ impl ModelSelectionData {
         for idx in self.sorted_preset_indices.iter().copied() {
             entries.push(EntryKind::Preset(idx));
         }
+        entries.push(EntryKind::AddDirectProvider);
         entries
     }
 
@@ -324,6 +330,7 @@ impl ModelSelectionData {
             + usize::from(self.target.supports_context_mode()) * 3
             + usize::from(self.target.supports_follow_chat())
             + self.flat_presets.len()
+            + 1
     }
 
     pub(crate) fn context_mode_entry_index(&self) -> Option<usize> {
@@ -377,8 +384,10 @@ impl ModelSelectionData {
         }
 
         let preset_index = entry_index.checked_sub(next_index)?;
-        let flat_index = *self.sorted_preset_indices.get(preset_index)?;
-        Some(EntryKind::Preset(flat_index))
+        if let Some(flat_index) = self.sorted_preset_indices.get(preset_index) {
+            return Some(EntryKind::Preset(*flat_index));
+        }
+        (preset_index == self.sorted_preset_indices.len()).then_some(EntryKind::AddDirectProvider)
     }
 
     pub(crate) fn content_line_count(&self) -> u16 {
@@ -416,7 +425,9 @@ impl ModelSelectionData {
             lines = lines.saturating_add(1);
         }
 
-        lines.saturating_add(FOOTER_HEIGHT)
+        lines
+            .saturating_add(ADD_DIRECT_PROVIDER_SECTION_HEIGHT)
+            .saturating_add(FOOTER_HEIGHT)
     }
 
     pub(crate) fn entry_line(&self, entry_index: usize) -> usize {
@@ -453,7 +464,7 @@ impl ModelSelectionData {
             line += usize::from(FOLLOW_CHAT_SECTION_HEIGHT);
         }
 
-        let preset_prefix = self.entry_count() - self.sorted_preset_indices.len();
+        let preset_prefix = self.entry_count() - self.sorted_preset_indices.len() - 1;
         let mut previous_model: Option<&str> = None;
         for (preset_pos, preset_index) in self.sorted_preset_indices.iter().copied().enumerate() {
             let flat_preset = &self.flat_presets[preset_index];
@@ -477,7 +488,7 @@ impl ModelSelectionData {
             line += 1;
         }
 
-        line
+        line + 2
     }
 
     pub(crate) fn apply_selection(&mut self, entry: EntryKind) -> Option<SelectionAction> {
@@ -527,6 +538,7 @@ impl ModelSelectionData {
                     effort: flat_preset.effort,
                 })
             }
+            EntryKind::AddDirectProvider => None,
         }
     }
 

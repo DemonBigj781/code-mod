@@ -240,6 +240,16 @@ impl<'a> BottomPane<'a> {
         self.request_redraw();
     }
 
+    pub(crate) fn finish_direct_provider_add(&mut self, result: Result<(), String>) {
+        let Some(model_view) = self.active_view_as::<settings_pages::model::ModelSelectionView>()
+        else {
+            return;
+        };
+
+        model_view.finish_direct_provider_add(result);
+        self.request_redraw_with_height_change();
+    }
+
     // Immediate redraw path removed; all UI updates flow through the
     // debounced RequestRedraw/App::Redraw scheduler to reduce thrash.
 
