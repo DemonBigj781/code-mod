@@ -178,11 +178,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-            artifact: code-x86_64-unknown-linux-musl
+            target: x86_64-unknown-linux-gnu
+            artifact: code-x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-            artifact: code-aarch64-unknown-linux-musl
+            target: aarch64-unknown-linux-gnu
+            artifact: code-aarch64-unknown-linux-gnu
           - os: macos-14
             target: x86_64-apple-darwin
             artifact: code-x86_64-apple-darwin
@@ -219,21 +219,24 @@ jobs:
         run: |
           set -eu
           sudo apt-get update
-          sudo apt-get install -y musl-tools pkg-config
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            libssl-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
           {
-            echo 'CC=musl-gcc'
-            echo 'PKG_CONFIG_ALLOW_CROSS=1'
-            echo 'OPENSSL_STATIC=1'
+            echo 'CC=clang'
+            echo 'CXX=clang++'
+            echo 'OPENSSL_NO_VENDOR=1'
             echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort'
           } >> "$GITHUB_ENV"
-          case "${{ matrix.target }}" in
-            x86_64-unknown-linux-musl)
-              echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
-              ;;
-            aarch64-unknown-linux-musl)
-              echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
-              ;;
-          esac
 
       - name: Configure macOS compiler
         if: runner.os == 'macOS'
