@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "AbsolutePathBuf": {
-      "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
+      "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [`AbsolutePathBufGuard::new`]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
     "AccountLoginCompletedNotification": {
@@ -286,21 +286,21 @@
       "description": "Authentication mode for OpenAI-backed providers.",
       "oneOf": [
         {
-          "description": "OpenAI API key provided by the caller and stored by Codex.",
+          "description": "`OpenAI` API key provided by the caller and stored by Codex.",
           "enum": [
             "apikey"
           ],
           "type": "string"
         },
         {
-          "description": "ChatGPT OAuth managed by Codex (tokens persisted and refreshed by Codex).",
+          "description": "`ChatGPT` OAuth managed by Codex (tokens persisted and refreshed by Codex).",
           "enum": [
             "chatgpt"
           ],
           "type": "string"
         },
         {
-          "description": "\\[UNSTABLE\\] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\nChatGPT auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
+          "description": "\\[UNSTABLE\\] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\n`ChatGPT` auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
           "enum": [
             "chatgptAuthTokens"
           ],
@@ -309,7 +309,7 @@
       ]
     },
     "AuthStatusChangeNotification": {
-      "description": "Deprecated notification. Use AccountUpdatedNotification instead.",
+      "description": "Deprecated notification. Use `AccountUpdatedNotification` instead.",
       "properties": {
         "authMethod": {
           "anyOf": [
@@ -1763,7 +1763,7 @@
         {
           "properties": {
             "call_id": {
-              "description": "Identifier so this can be paired with the McpToolCallEnd event.",
+              "description": "Identifier so this can be paired with the `McpToolCallEnd` event.",
               "type": "string"
             },
             "invocation": {
@@ -1788,7 +1788,7 @@
         {
           "properties": {
             "call_id": {
-              "description": "Identifier for the corresponding McpToolCallBegin that finished.",
+              "description": "Identifier for the corresponding `McpToolCallBegin` that finished.",
               "type": "string"
             },
             "duration": {
@@ -1939,7 +1939,7 @@
           "description": "Notification that the server is about to execute a command.",
           "properties": {
             "call_id": {
-              "description": "Identifier so this can be paired with the ExecCommandEnd event.",
+              "description": "Identifier so this can be paired with the `ExecCommandEnd` event.",
               "type": "string"
             },
             "command": {
@@ -2009,7 +2009,7 @@
           "description": "Incremental chunk of output from a running command.",
           "properties": {
             "call_id": {
-              "description": "Identifier for the ExecCommandBegin that produced this chunk.",
+              "description": "Identifier for the `ExecCommandBegin` that produced this chunk.",
               "type": "string"
             },
             "chunk": {
@@ -2045,7 +2045,7 @@
           "description": "Terminal interaction for an in-progress command (stdin sent and stdout observed).",
           "properties": {
             "call_id": {
-              "description": "Identifier for the ExecCommandBegin that produced this chunk.",
+              "description": "Identifier for the `ExecCommandBegin` that produced this chunk.",
               "type": "string"
             },
             "process_id": {
@@ -2081,7 +2081,7 @@
               "type": "string"
             },
             "call_id": {
-              "description": "Identifier for the ExecCommandBegin that finished.",
+              "description": "Identifier for the `ExecCommandBegin` that finished.",
               "type": "string"
             },
             "command": {
@@ -2178,7 +2178,7 @@
           "type": "object"
         },
         {
-          "description": "Notification that the agent attached a local image via the view_image tool.",
+          "description": "Notification that the agent attached a local image via the `view_image` tool.",
           "properties": {
             "call_id": {
               "description": "Identifier for the originating tool call.",
@@ -2316,6 +2316,80 @@
             "type"
           ],
           "title": "RequestUserInputEventMsg",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "description": "Responses API call id for the associated tool call, if available.",
+              "type": "string"
+            },
+            "permissions": {
+              "$ref": "#/definitions/RequestPermissionProfile"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "turn_id": {
+              "default": "",
+              "description": "Turn ID that this request belongs to. Uses `#[serde(default)]` for backwards compatibility.",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "request_permissions"
+              ],
+              "title": "RequestPermissionsEventMsgType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "permissions",
+            "type"
+          ],
+          "title": "RequestPermissionsEventMsg",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "current": {
+              "$ref": "#/definitions/ResourceRequestProfile"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "requested": {
+              "$ref": "#/definitions/ResourceRequestProfile"
+            },
+            "turn_id": {
+              "default": "",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "request_resources"
+              ],
+              "title": "RequestResourcesEventMsgType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "current",
+            "requested",
+            "type"
+          ],
+          "title": "RequestResourcesEventMsg",
           "type": "object"
         },
         {
@@ -2570,11 +2644,11 @@
           "description": "Notification that the agent is about to apply a code patch. Mirrors `ExecCommandBegin` so front‑ends can show progress indicators.",
           "properties": {
             "auto_approved": {
-              "description": "If true, there was no ApplyPatchApprovalRequest for this patch.",
+              "description": "If true, there was no `ApplyPatchApprovalRequest` for this patch.",
               "type": "boolean"
             },
             "call_id": {
-              "description": "Identifier so this can be paired with the PatchApplyEnd event.",
+              "description": "Identifier so this can be paired with the `PatchApplyEnd` event.",
               "type": "string"
             },
             "changes": {
@@ -2610,7 +2684,7 @@
           "description": "Notification that a patch application has finished.",
           "properties": {
             "call_id": {
-              "description": "Identifier for the PatchApplyBegin that finished.",
+              "description": "Identifier for the `PatchApplyBegin` that finished.",
               "type": "string"
             },
             "changes": {
@@ -2618,7 +2692,7 @@
                 "$ref": "#/definitions/FileChange"
               },
               "default": {},
-              "description": "The changes that were applied (mirrors PatchApplyBeginEvent::changes).",
+              "description": "The changes that were applied (mirrors `PatchApplyBeginEvent::changes`).",
               "type": "object"
             },
             "stderr": {
@@ -2626,7 +2700,7 @@
               "type": "string"
             },
             "stdout": {
-              "description": "Captured stdout (summary printed by apply_patch).",
+              "description": "Captured stdout (summary printed by `apply_patch`).",
               "type": "string"
             },
             "success": {
@@ -2677,7 +2751,7 @@
           "type": "object"
         },
         {
-          "description": "Response to GetHistoryEntryRequest.",
+          "description": "Response to `GetHistoryEntryRequest`.",
           "properties": {
             "entry": {
               "anyOf": [
@@ -3279,7 +3353,7 @@
               "type": "string"
             },
             "prompt": {
-              "description": "Initial prompt sent to the agent. Can be empty to prevent CoT leaking at the beginning.",
+              "description": "Initial prompt sent to the agent. Can be empty to prevent `CoT` leaking at the beginning.",
               "type": "string"
             },
             "sender_thread_id": {
@@ -3326,7 +3400,7 @@
               "description": "Thread ID of the newly spawned agent, if it was created."
             },
             "prompt": {
-              "description": "Initial prompt sent to the agent. Can be empty to prevent CoT leaking at the beginning.",
+              "description": "Initial prompt sent to the agent. Can be empty to prevent `CoT` leaking at the beginning.",
               "type": "string"
             },
             "sender_thread_id": {
@@ -3371,7 +3445,7 @@
               "type": "string"
             },
             "prompt": {
-              "description": "Prompt sent from the sender to the receiver. Can be empty to prevent CoT leaking at the beginning.",
+              "description": "Prompt sent from the sender to the receiver. Can be empty to prevent `CoT` leaking at the beginning.",
               "type": "string"
             },
             "receiver_thread_id": {
@@ -3416,7 +3490,7 @@
               "type": "string"
             },
             "prompt": {
-              "description": "Prompt sent from the sender to the receiver. Can be empty to prevent CoT leaking at the beginning.",
+              "description": "Prompt sent from the sender to the receiver. Can be empty to prevent `CoT` leaking at the beginning.",
               "type": "string"
             },
             "receiver_thread_id": {
@@ -3829,6 +3903,29 @@
       ],
       "type": "object"
     },
+    "FileSystemPermissions": {
+      "properties": {
+        "read": {
+          "items": {
+            "$ref": "#/definitions/AbsolutePathBuf"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "write": {
+          "items": {
+            "$ref": "#/definitions/AbsolutePathBuf"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "FileUpdateChange": {
       "properties": {
         "diff": {
@@ -3862,7 +3959,7 @@
       ]
     },
     "FunctionCallOutputContentItem": {
-      "description": "Responses API compatible content items that can be returned by a tool call. This is a subset of ContentItem with the types we support as function call outputs.",
+      "description": "Responses API compatible content items that can be returned by a tool call. This is a subset of `ContentItem` with the types we support as function call outputs.",
       "oneOf": [
         {
           "properties": {
@@ -3917,7 +4014,7 @@
       ]
     },
     "FunctionCallOutputPayload": {
-      "description": "The payload we send back to OpenAI when reporting a tool call result.\n\n`body` serializes directly as the wire value for `function_call_output.output`. `success` remains internal metadata for downstream handling.",
+      "description": "The payload we send back to `OpenAI` when reporting a tool call result.\n\n`body` serializes directly as the wire value for `function_call_output.output`. `success` remains internal metadata for downstream handling.",
       "properties": {
         "body": {
           "$ref": "#/definitions/FunctionCallOutputBody"
@@ -4108,7 +4205,7 @@
       "type": "string"
     },
     "LoginChatGptCompleteNotification": {
-      "description": "Deprecated in favor of AccountLoginCompletedNotification.",
+      "description": "Deprecated in favor of `AccountLoginCompletedNotification`.",
       "properties": {
         "error": {
           "type": [
@@ -4397,6 +4494,17 @@
       ],
       "type": "string"
     },
+    "NetworkPermissions": {
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ParsedCommand": {
       "oneOf": [
         {
@@ -4428,7 +4536,7 @@
               "type": "string"
             },
             "path": {
-              "description": "(Best effort) Path to the file being read by the command. When possible, this is an absolute path, though when relative, it should be resolved against the `cwd`` that will be used to run the command to derive the absolute path.",
+              "description": "(Best effort) Path to the file being read by the command. When possible, this is an absolute path, though when relative, it should be resolved against the `cwd` that will be used to run the command to derive the absolute path.",
               "type": "string"
             },
             "type": {
@@ -4850,7 +4958,7 @@
       "type": "object"
     },
     "ReasoningEffort": {
-      "description": "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
+      "description": "See <https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning>",
       "enum": [
         "none",
         "minimal",
@@ -5073,6 +5181,32 @@
       ],
       "description": "ID of a request, which can be either a string or an integer."
     },
+    "RequestPermissionProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "file_system": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileSystemPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NetworkPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
     "RequestUserInputQuestion": {
       "properties": {
         "header": {
@@ -5172,6 +5306,28 @@
         "name",
         "uri"
       ],
+      "type": "object"
+    },
+    "ResourceRequestProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "memory_max_mb": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "pids_max": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ResourceTemplate": {
@@ -6223,7 +6379,7 @@
           "$ref": "#/definitions/SkillScope"
         },
         "short_description": {
-          "description": "Legacy short_description from SKILL.md. Prefer SKILL.json interface.short_description.",
+          "description": "Legacy `short_description` from SKILL.md. Prefer SKILL.json `interface.short_description`.",
           "type": [
             "string",
             "null"
@@ -6530,7 +6686,7 @@
               "$ref": "#/definitions/SessionSource"
             }
           ],
-          "description": "Origin of the thread (CLI, VSCode, codex exec, codex app-server, etc.)."
+          "description": "Origin of the thread (CLI, `VSCode`, codex exec, codex app-server, etc.)."
         },
         "turns": {
           "description": "Only populated on `thread/resume`, `thread/rollback`, `thread/fork`, and `thread/read` (when `includeTurns` is true) responses. For all other responses and notifications returning a Thread, the turns field will be an empty list.",
@@ -6687,7 +6843,7 @@
               "type": "string"
             },
             "commandActions": {
-              "description": "A best-effort parsing of the command to understand the action(s) it will perform. This returns a list of CommandAction objects because a single shell command may be composed of many commands piped together.",
+              "description": "A best-effort parsing of the command to understand the action(s) it will perform. This returns a list of `CommandAction` objects because a single shell command may be composed of many commands piped together.",
               "items": {
                 "$ref": "#/definitions/CommandAction"
               },
@@ -7899,7 +8055,7 @@
           "type": "object"
         },
         {
-          "description": "Explicit mention selected by the user (name + app://connector id).",
+          "description": "Explicit structured mention selected by the user.\n\n`path` identifies the exact mention target, for example `app://<connector-id>` or `plugin://<plugin-name>@<marketplace-name>`.",
           "properties": {
             "name": {
               "type": "string"
