@@ -357,7 +357,7 @@ jobs:
         shell: sh
         run: |
           set -eu
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 5
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 1
           (
             cd release-assets
             sha256sum ./* > SHA256SUMS
