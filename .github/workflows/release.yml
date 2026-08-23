@@ -16,9 +16,19 @@ on:
       - "*.md"
       - "CHANGELOG.md"
       - "codex-cli/package.json"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Build channel
+        required: true
+        default: beta
+        type: choice
+        options:
+          - beta
+          - stable
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'stable' }}
   cancel-in-progress: false
 
 permissions:
@@ -27,7 +37,10 @@ permissions:
 jobs:
   preflight-tests:
     name: Preflight Tests
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || inputs.channel == 'stable') &&
+      !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
@@ -108,7 +121,10 @@ jobs:
 
   determine-version:
     name: Determine Version
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || inputs.channel == 'stable') &&
+      !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -339,7 +355,10 @@ jobs:
       - determine-version
       - build-binaries
       - preflight-tests
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || inputs.channel == 'stable') &&
+      !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -373,3 +392,93 @@ jobs:
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  beta-linux:
+    name: Beta Linux x86_64
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.channel == 'beta'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read Rust toolchain channel
+        id: rust_toolchain
+        shell: sh
+        run: |
+          set -eu
+          channel=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' code-rs/rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust_toolchain.outputs.channel }}
+
+      - name: Install Linux build dependencies
+        shell: sh
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            libssl-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+          {
+            echo 'CC=clang'
+            echo 'CXX=clang++'
+            echo 'OPENSSL_NO_VENDOR=1'
+          } >> "$GITHUB_ENV"
+
+      - name: Restore beta build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v7-beta-linux
+          shared-key: x86_64-${{ steps.rust_toolchain.outputs.channel }}-dev-fast
+          workspaces: |
+            code-rs -> target
+          cache-targets: true
+          cache-workspace-crates: true
+          cache-on-failure: true
+
+      - name: Build beta CLI
+        working-directory: code-rs
+        run: cargo build --locked --profile dev-fast --bin code
+
+      - name: Smoke test beta CLI
+        shell: sh
+        run: |
+          set -eu
+          executable="code-rs/target/dev-fast/code"
+          "$executable" --version
+          "$executable" completion bash > /dev/null
+
+      - name: Prepare beta archive
+        shell: sh
+        run: |
+          set -eu
+          mkdir -p beta-artifact
+          cp "code-rs/target/dev-fast/code" beta-artifact/code-x86_64-unknown-linux-gnu
+          tar -C beta-artifact -czf beta-artifact/code-x86_64-unknown-linux-gnu-beta.tar.gz code-x86_64-unknown-linux-gnu
+          rm beta-artifact/code-x86_64-unknown-linux-gnu
+
+      - name: Upload beta archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: code-beta-linux-x86_64-${{ github.run_number }}
+          path: beta-artifact/code-x86_64-unknown-linux-gnu-beta.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
