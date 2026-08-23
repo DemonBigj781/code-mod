@@ -66,21 +66,27 @@ impl ChatWidget<'_> {
 
         let ps_ref = self.history_render.prefix_sums.borrow();
         let ps: &[u32] = &ps_ref;
-        let (screen_y, has_visible_animation) =
-            self.paint_visible_cells_window(cell_paint::PaintVisibleCellsArgs {
-                history_area,
-                content_area,
-                request_count,
-                start_idx: selection.start_idx,
-                start_y,
-                scroll_pos,
-                visible_slice,
-                visible_requests_slice,
-                rendered_cells_from_subset: selection.visible_cells.is_owned(),
-                ps,
-                buf,
-            });
+        let paint_result = self.paint_visible_cells_window(cell_paint::PaintVisibleCellsArgs {
+            history_area,
+            content_area,
+            request_count,
+            start_idx: selection.start_idx,
+            start_y,
+            scroll_pos,
+            visible_slice,
+            visible_requests_slice,
+            rendered_cells_from_subset: selection.visible_cells.is_owned(),
+            ps,
+            buf,
+        });
         drop(ps_ref);
+
+        if !paint_result.height_mismatches.is_empty() {
+            self.recover_history_height_mismatches(&paint_result.height_mismatches);
+        }
+
+        let screen_y = paint_result.screen_y;
+        let has_visible_animation = paint_result.has_visible_animation;
 
         // Schedule next frame if any visible cell is animating (flag accumulated
         // during the paint loop to avoid a separate O(n) scan).

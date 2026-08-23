@@ -1,6 +1,15 @@
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use code_core::history::state::{
+    HistoryId,
+    InlineSpan,
+    ReasoningBlock,
+    ReasoningSection,
+    ReasoningState,
+    TextEmphasis,
+    TextTone,
+};
 use code_core::protocol::{
     AgentMessageDeltaEvent,
     AgentMessageEvent,
@@ -27,6 +36,8 @@ const STREAM_SENTINEL: &str = "SENTINEL-STREAM";
 const EXEC_SENTINEL: &str = "SENTINEL-EXEC";
 const BROWSER_SENTINEL: &str = "SENTINEL-BROWSER";
 const COLLAPSED_EXEC_SENTINEL: &str = "SENTINEL-COLLAPSED-EXEC";
+const LONG_SESSION_SENTINEL: &str = "SENTINEL-LONG-SESSION-COMPLETE";
+const LONG_SESSION_USER_BOUNDARY: &str = "LONG-SESSION-USER-BOUNDARY";
 
 fn seed_plain_transcript(harness: &mut ChatWidgetHarness) {
     for idx in 0..8 {
@@ -356,6 +367,95 @@ fn streaming_history_growth_keeps_last_line() {
         "streaming transcript should keep the last sentinel visible"
     );
     assert_eq!(metrics.scroll_offset, 0, "streaming transcript should stay pinned to bottom");
+}
+
+#[test]
+fn long_collapsed_history_preserves_tail_message_boundaries() {
+    let mut harness = ChatWidgetHarness::new();
+
+    // Three cells per turn puts the final reasoning entries beyond the 2,000-cell
+    // range where stale row offsets previously corrupted the visible tail.
+    for idx in 0..675_u64 {
+        harness.push_user_prompt(format!("User message #{idx}"));
+        harness.push_reasoning_state(
+            ReasoningState {
+                id: HistoryId(10_000 + idx),
+                sections: vec![ReasoningSection {
+                    heading: Some(format!("Reasoning note #{idx}")),
+                    summary: None,
+                    blocks: vec![ReasoningBlock::Paragraph(vec![InlineSpan {
+                        text: "Checking long-session row offsets.".to_string(),
+                        tone: TextTone::Default,
+                        emphasis: TextEmphasis::default(),
+                        entity: None,
+                    }])],
+                }],
+                effort: None,
+                in_progress: false,
+            },
+            false,
+        );
+        harness.push_assistant_markdown(format!("Assistant reply #{idx}"));
+    }
+
+    let _ = render_chat_widget_to_vt100(&mut harness, 80, 30);
+    harness.send_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    let _ = render_chat_widget_to_vt100(&mut harness, 80, 30);
+
+    harness.push_user_prompt(LONG_SESSION_USER_BOUNDARY);
+    harness.handle_event(Event {
+        id: "long-session-tail".into(),
+        event_seq: 0,
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Complete response ".into(),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 10_000,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        }),
+    });
+    harness.handle_event(Event {
+        id: "long-session-tail".into(),
+        event_seq: 1,
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: LONG_SESSION_SENTINEL.into(),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 10_000,
+            output_index: Some(0),
+            sequence_number: Some(1),
+        }),
+    });
+    harness.handle_event(Event {
+        id: "long-session-tail".into(),
+        event_seq: 2,
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: format!("Complete response {LONG_SESSION_SENTINEL}"),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 10_000,
+            output_index: Some(0),
+            sequence_number: Some(2),
+        }),
+    });
+    harness.flush_into_widget();
+
+    let _ = render_chat_widget_to_vt100(&mut harness, 80, 30);
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 30);
+    let user_row = output
+        .lines()
+        .position(|line| line.contains(LONG_SESSION_USER_BOUNDARY))
+        .expect("the final user message should remain visible");
+    let assistant_row = output
+        .lines()
+        .position(|line| line.contains(LONG_SESSION_SENTINEL))
+        .expect("the complete streamed response should remain visible");
+
+    assert!(
+        assistant_row > user_row,
+        "the final user and assistant messages should render on distinct rows:\n{output}"
+    );
 }
 
 #[test]

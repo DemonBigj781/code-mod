@@ -74,14 +74,6 @@ impl HistoryRenderState {
     }
 
     pub(crate) fn invalidate_history_id(&self, id: HistoryId) {
-        self.invalidate_history_id_inner(id, true);
-    }
-
-    pub(crate) fn invalidate_history_id_preserving_prefix_sums(&self, id: HistoryId) {
-        self.invalidate_history_id_inner(id, false);
-    }
-
-    fn invalidate_history_id_inner(&self, id: HistoryId, clear_prefix_sums: bool) {
         if id == HistoryId::ZERO {
             return;
         }
@@ -92,9 +84,7 @@ impl HistoryRenderState {
             .borrow_mut()
             .retain(|key, _| key.history_id != id);
         self.fallback_cache.borrow_mut().remove(&id);
-        if clear_prefix_sums {
-            self.prefix_sums.borrow_mut().clear();
-        }
+        self.prefix_sums.borrow_mut().clear();
         self.last_total_height.set(0);
         self.last_history_count.set(0);
         self.prefix_valid.set(false);
@@ -184,6 +174,34 @@ impl HistoryRenderState {
         }
         let key = CacheKey::new(history_id, settings);
         self.height_cache.borrow().get(&key).copied()
+    }
+
+    pub(crate) fn update_cached_height(
+        &self,
+        history_id: HistoryId,
+        settings: RenderSettings,
+        height: u16,
+    ) {
+        if history_id == HistoryId::ZERO {
+            return;
+        }
+        self.height_cache
+            .borrow_mut()
+            .insert(CacheKey::new(history_id, settings), height);
+    }
+
+    pub(crate) fn reconcile_history_height(
+        &self,
+        history_id: HistoryId,
+        settings: RenderSettings,
+        height: u16,
+    ) {
+        if history_id == HistoryId::ZERO {
+            return;
+        }
+
+        self.invalidate_history_id(history_id);
+        self.update_cached_height(history_id, settings, height);
     }
 
     pub(crate) fn update_spacing_ranges(&self, ranges: Vec<(u32, u32)>) {

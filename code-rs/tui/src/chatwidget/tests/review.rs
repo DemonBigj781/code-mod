@@ -3563,18 +3563,106 @@
     }
 
     #[test]
-    fn stale_reasoning_height_cache_recovers_without_panicking() {
+    fn stale_reasoning_height_cache_reconciles_height_and_prefix_sums() {
     let _rt = enter_test_runtime_guard();
     let mut harness = ChatWidgetHarness::new();
     harness.with_chat(|chat| {
-        let _prefix = chat.history_render.prefix_sums.borrow();
+        let history_id = HistoryId(1635);
+        let render_settings = RenderSettings::new(76, 9, false);
+        let stale_settings = RenderSettings::new(72, 8, true);
+        chat.last_render_settings.set(render_settings);
+        chat.history_render
+            .update_cached_height(history_id, render_settings, 36);
+        chat.history_render
+            .update_cached_height(history_id, stale_settings, 28);
+        chat.history_render
+            .update_prefix_cache(80, vec![0, 36], 36, 1, 1);
+        chat.history_prefix_append_only.set(true);
+        chat.history_virtualization_sync_pending.set(false);
+
         chat.recover_history_height_mismatch_for_test(
-            HistoryId(1635),
+            history_id,
             1539,
             36,
             1,
             "Confirming part combinations and dependencies",
         );
+
+        assert_eq!(
+            chat.history_render.cached_height(history_id, render_settings),
+            Some(1),
+            "recovery should retain the freshly recomputed height"
+        );
+        assert_eq!(
+            chat.history_render.cached_height(history_id, stale_settings),
+            None,
+            "recovery should discard stale heights from other render settings"
+        );
+        assert!(
+            chat.history_render.prefix_sums.borrow().is_empty(),
+            "row offsets must rebuild after a cell height changes"
+        );
+        assert!(!chat.history_render.prefix_valid.get());
+        assert_eq!(chat.history_render.last_total_height(), 0);
+        assert!(chat.history_render.should_rebuild_prefix(80, 1));
+        assert!(!chat.history_prefix_append_only.get());
+        assert!(chat.history_virtualization_sync_pending.get());
+    });
+    }
+
+    #[test]
+    fn stale_reasoning_height_rebuilds_after_prefix_borrow_is_released() {
+    let mut harness = ChatWidgetHarness::new();
+    let history_id = HistoryId(1636);
+    let sentinel = "SENTINEL-RECOVERED-AFTER-PREFIX-BORROW";
+    harness.push_user_prompt("Verify stale reasoning height recovery.");
+    harness.push_reasoning_state(
+        code_core::history::state::ReasoningState {
+            id: history_id,
+            sections: vec![code_core::history::state::ReasoningSection {
+                heading: Some("Checking cached row offsets".to_string()),
+                summary: None,
+                blocks: vec![code_core::history::state::ReasoningBlock::Paragraph(vec![
+                    InlineSpan {
+                        text: "The visible height should remain compact.".to_string(),
+                        tone: TextTone::Default,
+                        emphasis: TextEmphasis::default(),
+                        entity: None,
+                    },
+                ])],
+            }],
+            effort: None,
+            in_progress: false,
+        },
+        false,
+    );
+    harness.push_assistant_markdown(format!("Complete response {sentinel}"));
+
+    let initial = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 80, 18);
+    assert!(initial.contains(sentinel));
+
+    let render_settings = harness.with_chat(|chat| {
+        let render_settings = chat.last_render_settings.get();
+        chat.history_render
+            .update_cached_height(history_id, render_settings, 36);
+        assert!(chat.history_render.prefix_valid.get());
+        render_settings
+    });
+
+    let _ = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 80, 18);
+    let recovered = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 80, 18);
+
+    assert!(
+        recovered.contains(sentinel),
+        "the follow-up frame should restore the complete assistant response:\n{recovered}"
+    );
+    harness.with_chat(|chat| {
+        assert_ne!(
+            chat.history_render.cached_height(history_id, render_settings),
+            Some(36),
+            "the stale height must not survive the recovery redraw"
+        );
+        assert!(chat.history_render.prefix_valid.get());
     });
     }
     

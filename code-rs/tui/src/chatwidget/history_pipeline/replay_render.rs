@@ -354,7 +354,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    #[cfg(debug_assertions)]
     pub(in super::super) fn reasoning_preview(lines: &[Line<'static>]) -> String {
         const MAX_LINES: usize = 3;
         const MAX_CHARS: usize = 120;

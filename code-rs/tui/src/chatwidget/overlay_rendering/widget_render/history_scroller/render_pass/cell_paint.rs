@@ -1,13 +1,18 @@
 use super::*;
 
-#[cfg(debug_assertions)]
 #[derive(Debug)]
-struct HeightMismatch {
+pub(super) struct HeightMismatch {
     history_id: HistoryId,
     cached: u16,
     recomputed: u16,
     idx: usize,
     preview: String,
+}
+
+pub(super) struct PaintVisibleCellsResult {
+    pub screen_y: u16,
+    pub has_visible_animation: bool,
+    pub height_mismatches: Vec<HeightMismatch>,
 }
 
 pub(super) struct PaintVisibleCellsArgs<'a> {
@@ -28,7 +33,7 @@ impl ChatWidget<'_> {
     pub(super) fn paint_visible_cells_window<'a>(
         &'a self,
         args: PaintVisibleCellsArgs<'a>,
-    ) -> (u16, bool) {
+    ) -> PaintVisibleCellsResult {
         let PaintVisibleCellsArgs {
             history_area,
             content_area,
@@ -37,7 +42,7 @@ impl ChatWidget<'_> {
             start_y,
             scroll_pos,
             visible_slice,
-            visible_requests_slice: _visible_requests_slice,
+            visible_requests_slice,
             rendered_cells_from_subset,
             ps,
             buf,
@@ -63,7 +68,6 @@ impl ChatWidget<'_> {
 
         let render_loop_start = self.perf_state.enabled.then(std::time::Instant::now);
 
-        #[cfg(debug_assertions)]
         let mut height_mismatches: Vec<HeightMismatch> = Vec::new();
 
         let is_collapsed_reasoning_at = |idx: usize| {
@@ -142,11 +146,11 @@ impl ChatWidget<'_> {
                 .map(super::history_render::LayoutRef::layout);
 
             let item_height = visible.height;
-            #[cfg(debug_assertions)]
             if content_area.width > 0
-                && let Some(req) = _visible_requests_slice.get(offset)
+                && let Some(req) = visible_requests_slice.get(offset)
                 && req.history_id != HistoryId::ZERO
                 && matches!(item_kind, history_cell::HistoryCellType::Reasoning)
+                && matches!(visible.height_source, history_render::HeightSource::Cached)
             {
                 if item_height == 0 && content_width == 0 {
                     continue;
@@ -755,11 +759,6 @@ impl ChatWidget<'_> {
         drop(regions);
         drop(hovered_action_ref);
 
-        #[cfg(debug_assertions)]
-        if !height_mismatches.is_empty() {
-            self.recover_history_height_mismatches(&height_mismatches);
-        }
-
         if let Some(start) = render_loop_start && self.perf_state.enabled {
             let elapsed = start.elapsed().as_nanos();
             let pending_scroll = self.perf_state.pending_scroll_rows.get();
@@ -775,11 +774,15 @@ impl ChatWidget<'_> {
             }
         }
 
-        (screen_y, has_visible_animation)
+        PaintVisibleCellsResult {
+            screen_y,
+            has_visible_animation,
+            height_mismatches,
+        }
     }
 
-    #[cfg(debug_assertions)]
-    fn recover_history_height_mismatches(&self, mismatches: &[HeightMismatch]) {
+    pub(super) fn recover_history_height_mismatches(&self, mismatches: &[HeightMismatch]) {
+        let render_settings = self.last_render_settings.get();
         for mismatch in mismatches {
             tracing::error!(
                 target: "code_tui::history_cells",
@@ -788,10 +791,14 @@ impl ChatWidget<'_> {
                 cached = mismatch.cached,
                 recomputed = mismatch.recomputed,
                 preview = %mismatch.preview,
-                "History cell height mismatch detected; invalidating stale cache",
+                "History cell height mismatch detected; reconciling cached height",
             );
             self.history_render
-                .invalidate_history_id_preserving_prefix_sums(mismatch.history_id);
+                .reconcile_history_height(
+                    mismatch.history_id,
+                    render_settings,
+                    mismatch.recomputed,
+                );
         }
 
         self.mark_render_requests_dirty();
