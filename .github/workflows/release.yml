@@ -24,9 +24,6 @@ concurrency:
 permissions:
   contents: write
 
-env:
-  CARGO_BUILD_JOBS: "1"
-
 jobs:
   preflight-tests:
     name: Preflight Tests
@@ -92,7 +89,7 @@ jobs:
 
       - name: Build CLI
         working-directory: code-rs
-        run: cargo build --locked -j1 --profile dev-fast --bin code
+        run: cargo build --locked --profile dev-fast --bin code
 
       - name: Run CLI smoke suite
         env:
@@ -286,7 +283,7 @@ jobs:
       - name: Build release binary
         if: matrix.enabled
         working-directory: code-rs
-        run: cargo build --release --frozen --locked -j1 --target ${{ matrix.target }} --bin code
+        run: cargo build --release --frozen --locked --target ${{ matrix.target }} --bin code
 
       - name: Smoke test binary on Unix
         if: |
