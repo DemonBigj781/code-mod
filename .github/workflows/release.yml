@@ -180,25 +180,32 @@ jobs:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             artifact: code-x86_64-unknown-linux-gnu
+            enabled: true
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact: code-aarch64-unknown-linux-gnu
+            enabled: false
           - os: macos-14
             target: x86_64-apple-darwin
             artifact: code-x86_64-apple-darwin
+            enabled: false
           - os: macos-14
             target: aarch64-apple-darwin
             artifact: code-aarch64-apple-darwin
+            enabled: false
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: code-x86_64-pc-windows-msvc.exe
+            enabled: false
     steps:
       - name: Check out repository
+        if: matrix.enabled
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Read Rust toolchain channel
+        if: matrix.enabled
         id: rust_toolchain
         shell: sh
         run: |
@@ -208,13 +215,14 @@ jobs:
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
+        if: matrix.enabled
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.rust_toolchain.outputs.channel }}
           targets: ${{ matrix.target }}
 
       - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
+        if: matrix.enabled && runner.os == 'Linux'
         shell: sh
         run: |
           set -eu
@@ -239,12 +247,12 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Configure macOS compiler
-        if: runner.os == 'macOS'
+        if: matrix.enabled && runner.os == 'macOS'
         shell: sh
         run: echo 'RUSTFLAGS=-C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
 
       - name: Configure Windows compiler
-        if: runner.os == 'Windows'
+        if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
           "LIBGIT2_SYS_USE_SCHANNEL=1" >> $env:GITHUB_ENV
@@ -252,6 +260,7 @@ jobs:
           "RUSTFLAGS=-C debuginfo=0 -C strip=symbols -C panic=abort" >> $env:GITHUB_ENV
 
       - name: Set up Rust cache
+        if: matrix.enabled
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v6-release
@@ -263,23 +272,27 @@ jobs:
           cache-on-failure: true
 
       - name: Export release version
+        if: matrix.enabled
         shell: sh
         run: echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
 
       - name: Fetch locked dependencies
+        if: matrix.enabled
         working-directory: code-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
 
       - name: Build release binary
+        if: matrix.enabled
         working-directory: code-rs
         run: cargo build --release --frozen --locked -j1 --target ${{ matrix.target }} --bin code
 
       - name: Smoke test binary on Unix
         if: |
-          (runner.os == 'Linux') ||
-          (runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin')
+          matrix.enabled &&
+          ((runner.os == 'Linux') ||
+          (runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'))
         shell: sh
         run: |
           set -eu
@@ -288,7 +301,7 @@ jobs:
           "$executable" completion bash > /dev/null
 
       - name: Smoke test binary on Windows
-        if: runner.os == 'Windows'
+        if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
           $executable = "code-rs/target/${{ matrix.target }}/release/code.exe"
@@ -296,7 +309,7 @@ jobs:
           & $executable completion bash | Out-Null
 
       - name: Prepare Unix release archive
-        if: runner.os != 'Windows'
+        if: matrix.enabled && runner.os != 'Windows'
         shell: sh
         run: |
           set -eu
@@ -306,7 +319,7 @@ jobs:
           rm "artifacts/${{ matrix.artifact }}"
 
       - name: Prepare Windows release archive
-        if: runner.os == 'Windows'
+        if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
@@ -315,6 +328,7 @@ jobs:
           Remove-Item "artifacts/${{ matrix.artifact }}" -Force
 
       - name: Upload release archive
+        if: matrix.enabled
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.target }}
