@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn local_build_fallback_matches_current_stable_cli() {
-        assert_eq!(DEFAULT_CODE_VERSION, "0.144.6");
+        assert_eq!(DEFAULT_CODE_VERSION, "0.149.0");
     }
 
     #[test]

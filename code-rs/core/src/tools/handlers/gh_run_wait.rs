@@ -14,6 +14,9 @@ use code_protocol::models::ResponseInputItem;
 
 pub(crate) struct GhRunWaitToolHandler;
 
+const RUN_VIEW_JSON_FIELDS: &str =
+    "databaseId,status,conclusion,createdAt,updatedAt,url";
+
 #[async_trait]
 impl ToolHandler for GhRunWaitToolHandler {
     fn scheduling_hints(&self) -> crate::tools::registry::ToolSchedulingHints {
@@ -411,7 +414,7 @@ pub(crate) async fn handle_gh_run_wait(
                         "view",
                         &run_id,
                         "--json",
-                        "databaseId,status,conclusion,createdAt,updatedAt,url,htmlURL",
+                        RUN_VIEW_JSON_FIELDS,
                     ],
                     repo,
                 )
@@ -434,12 +437,7 @@ pub(crate) async fn handle_gh_run_wait(
                 };
 
                 let summary = RunSummary::from_json(&parsed_view);
-                let html_url = parsed_view
-                    .get("htmlURL")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-                    .filter(|s| !s.trim().is_empty())
-                    .or_else(|| summary.html_url.clone());
+                let html_url = summary.html_url.clone();
 
                 let list_jobs = run_gh(
                     &[
@@ -623,4 +621,18 @@ pub(crate) async fn handle_gh_run_wait(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RUN_VIEW_JSON_FIELDS;
+
+    #[test]
+    fn run_view_requests_only_supported_url_field() {
+        assert_eq!(
+            RUN_VIEW_JSON_FIELDS,
+            "databaseId,status,conclusion,createdAt,updatedAt,url"
+        );
+        assert!(!RUN_VIEW_JSON_FIELDS.split(',').any(|field| field == "htmlURL"));
+    }
 }

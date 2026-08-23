@@ -122,12 +122,14 @@ impl ChatWidget<'_> {
             return Ok(changed);
         }
 
-        if self.config.model_provider_id != OPENROUTER_PROVIDER_ID
-            || self.config.active_profile.as_deref() != Some(OPENROUTER_FREE_PROFILE)
-        {
+        if self.config.model_provider_id != OPENROUTER_PROVIDER_ID {
             return Ok(direct_provider_changed);
         }
 
+        // A previous session may have persisted the OpenRouter provider without
+        // the temporary profile marker. Normal model presets are OpenAI presets,
+        // so selecting one must heal that stranded provider state as well as the
+        // in-memory OpenRouter Free profile transition.
         let (provider_id, provider, profile) = self
             .model_provider_before_openrouter
             .take()

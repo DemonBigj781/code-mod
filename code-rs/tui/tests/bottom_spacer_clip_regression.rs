@@ -300,6 +300,16 @@ fn scrub_intro_art(text: String) -> String {
         }
     }
 
+    // The welcome cell animates for two seconds. On a busy CI runner the
+    // second render can land on a partially revealed text frame even though
+    // the first render was still blank. These labels belong only to that
+    // animation and are unrelated to the spacer geometry under test.
+    for line in &mut lines {
+        if line.contains("AI coding") || line.contains("Interactive:") {
+            *line = String::new();
+        }
+    }
+
     for line in lines.iter_mut() {
         *line = line.trim_end().to_string();
     }

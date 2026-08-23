@@ -3672,27 +3672,48 @@
 
     #[test]
     fn selecting_openrouter_profile_switches_provider_and_normal_models_switch_back() {
-    let mut harness = ChatWidgetHarness::new();
-    let chat = harness.chat();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
 
-    chat.apply_model_selection(
-        code_common::model_presets::OPENROUTER_FREE_PROFILE_MODEL.to_owned(),
-        Some(ReasoningEffort::Medium),
-    );
+        chat.apply_model_selection(
+            code_common::model_presets::OPENROUTER_FREE_PROFILE_MODEL.to_owned(),
+            Some(ReasoningEffort::Medium),
+        );
 
-    assert_eq!(
-        chat.config.model_provider_id,
-        code_common::model_presets::OPENROUTER_PROVIDER_ID
-    );
-    assert_eq!(
-        chat.config.model,
-        code_common::model_presets::OPENROUTER_FREE_PROFILE_MODEL
-    );
-    assert_eq!(chat.config.model_provider.name, "OpenRouter");
+        assert_eq!(
+            chat.config.model_provider_id,
+            code_common::model_presets::OPENROUTER_PROVIDER_ID
+        );
+        assert_eq!(
+            chat.config.model,
+            code_common::model_presets::OPENROUTER_FREE_PROFILE_MODEL
+        );
+        assert_eq!(chat.config.model_provider.name, "OpenRouter");
 
-    chat.apply_model_selection("gpt-5.5".to_owned(), Some(ReasoningEffort::Medium));
+        chat.apply_model_selection("gpt-5.5".to_owned(), Some(ReasoningEffort::Medium));
 
-    assert_eq!(chat.config.model_provider_id, "openai");
-    assert_eq!(chat.config.model_provider.name, "OpenAI");
+        assert_eq!(chat.config.model_provider_id, "openai");
+        assert_eq!(chat.config.model_provider.name, "OpenAI");
     }
-    
+
+    #[test]
+    fn selecting_openai_model_repairs_persisted_openrouter_provider_without_profile_marker() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        chat.config.model_provider_id =
+            code_common::model_presets::OPENROUTER_PROVIDER_ID.to_owned();
+        chat.config.model_provider = chat
+            .config
+            .model_providers
+            .get(code_common::model_presets::OPENROUTER_PROVIDER_ID)
+            .expect("OpenRouter provider")
+            .clone();
+        chat.config.active_profile = None;
+        chat.config.model = "gpt-5.5".to_owned();
+
+        chat.apply_model_selection("gpt-5.6-sol".to_owned(), Some(ReasoningEffort::Medium));
+
+        assert_eq!(chat.config.model_provider_id, "openai");
+        assert_eq!(chat.config.model_provider.name, "OpenAI");
+        assert_eq!(chat.config.model, "gpt-5.6-sol");
+    }

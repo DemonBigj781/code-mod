@@ -603,7 +603,7 @@ impl McpConnectionManager {
                     },
                     client_info: Implementation {
                         name: "codex-mcp-client".to_owned(),
-                        version: env!("CARGO_PKG_VERSION").to_owned(),
+                        version: code_version::wire_compatible_version().to_owned(),
                         title: Some("Codex".into()),
                         // This field is used by Codex when it is an MCP
                         // server: it should not be used when Codex is
@@ -1405,7 +1405,7 @@ impl McpConnectionManager {
             },
             client_info: Implementation {
                 name: "codex-mcp-client".to_owned(),
-                version: env!("CARGO_PKG_VERSION").to_owned(),
+                version: code_version::wire_compatible_version().to_owned(),
                 title: Some("Codex".into()),
                 user_agent: None,
             },
