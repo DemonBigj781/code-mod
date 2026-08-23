@@ -387,10 +387,16 @@ async fn rewrite_response_routing(
     envelope: OutgoingEnvelope,
     request_routes: &Arc<tokio::sync::Mutex<HashMap<RequestId, RequestRoute>>>,
 ) -> Option<OutgoingEnvelope> {
-    match envelope {
-        OutgoingEnvelope::Broadcast {
-            message: OutgoingMessage::Response(mut response),
-        } => {
+    let (connection_id, message) = match envelope {
+        OutgoingEnvelope::ToConnection {
+            connection_id,
+            message,
+        } => (Some(connection_id), message),
+        OutgoingEnvelope::Broadcast { message } => (None, message),
+    };
+
+    match message {
+        OutgoingMessage::Response(mut response) => {
             let route = {
                 let mut request_routes = request_routes.lock().await;
                 request_routes.remove(&response.id)
@@ -411,13 +417,12 @@ async fn rewrite_response_routing(
                 return None;
             }
 
-            Some(OutgoingEnvelope::Broadcast {
-                message: OutgoingMessage::Response(response),
-            })
+            Some(outgoing_envelope_for_connection(
+                connection_id,
+                OutgoingMessage::Response(response),
+            ))
         }
-        OutgoingEnvelope::Broadcast {
-            message: OutgoingMessage::Error(mut outgoing_error),
-        } => {
+        OutgoingMessage::Error(mut outgoing_error) => {
             let route = {
                 let mut request_routes = request_routes.lock().await;
                 request_routes.remove(&outgoing_error.id)
@@ -438,11 +443,25 @@ async fn rewrite_response_routing(
                 return None;
             }
 
-            Some(OutgoingEnvelope::Broadcast {
-                message: OutgoingMessage::Error(outgoing_error),
-            })
+            Some(outgoing_envelope_for_connection(
+                connection_id,
+                OutgoingMessage::Error(outgoing_error),
+            ))
         }
-        _ => Some(envelope),
+        message => Some(outgoing_envelope_for_connection(connection_id, message)),
+    }
+}
+
+fn outgoing_envelope_for_connection(
+    connection_id: Option<ConnectionId>,
+    message: OutgoingMessage,
+) -> OutgoingEnvelope {
+    match connection_id {
+        Some(connection_id) => OutgoingEnvelope::ToConnection {
+            connection_id,
+            message,
+        },
+        None => OutgoingEnvelope::Broadcast { message },
     }
 }
 
@@ -475,5 +494,98 @@ async fn wait_for_request_routes_for_connection(
         }
 
         sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::outgoing_message::OutgoingError;
+    use crate::outgoing_message::OutgoingResponse;
+    use mcp_types::JSONRPCErrorError;
+    use serde_json::json;
+
+    fn request_routes(
+        internal_request_id: RequestId,
+        connection_id: ConnectionId,
+        original_request_id: RequestId,
+    ) -> Arc<tokio::sync::Mutex<HashMap<RequestId, RequestRoute>>> {
+        Arc::new(tokio::sync::Mutex::new(HashMap::from([(
+            internal_request_id,
+            RequestRoute {
+                connection_id,
+                original_request_id,
+            },
+        )])))
+    }
+
+    #[tokio::test]
+    async fn rewrites_connection_scoped_response_to_original_request_id() {
+        let internal_request_id = RequestId::String(format!("{INTERNAL_REQUEST_ID_PREFIX}7:0"));
+        let routes = request_routes(
+            internal_request_id.clone(),
+            ConnectionId(7),
+            RequestId::Integer(42),
+        );
+        let envelope = OutgoingEnvelope::ToConnection {
+            connection_id: ConnectionId(7),
+            message: OutgoingMessage::Response(OutgoingResponse {
+                id: internal_request_id,
+                result: json!({ "ok": true }),
+            }),
+        };
+
+        let rewritten = rewrite_response_routing(envelope, &routes)
+            .await
+            .expect("response should be routed");
+
+        match rewritten {
+            OutgoingEnvelope::ToConnection {
+                connection_id,
+                message: OutgoingMessage::Response(response),
+            } => {
+                assert_eq!(connection_id, ConnectionId(7));
+                assert_eq!(response.id, RequestId::Integer(42));
+            }
+            other => panic!("unexpected envelope: {other:?}"),
+        }
+        assert!(routes.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn rewrites_connection_scoped_error_to_original_request_id() {
+        let internal_request_id = RequestId::String(format!("{INTERNAL_REQUEST_ID_PREFIX}9:0"));
+        let routes = request_routes(
+            internal_request_id.clone(),
+            ConnectionId(9),
+            RequestId::String("client-request".to_string()),
+        );
+        let envelope = OutgoingEnvelope::ToConnection {
+            connection_id: ConnectionId(9),
+            message: OutgoingMessage::Error(OutgoingError {
+                id: internal_request_id,
+                error: JSONRPCErrorError {
+                    code: -32000,
+                    message: "failure".to_string(),
+                    data: None,
+                },
+            }),
+        };
+
+        let rewritten = rewrite_response_routing(envelope, &routes)
+            .await
+            .expect("error should be routed");
+
+        match rewritten {
+            OutgoingEnvelope::ToConnection {
+                connection_id,
+                message: OutgoingMessage::Error(error),
+            } => {
+                assert_eq!(connection_id, ConnectionId(9));
+                assert_eq!(error.id, RequestId::String("client-request".to_string()));
+            }
+            other => panic!("unexpected envelope: {other:?}"),
+        }
+        assert!(routes.lock().await.is_empty());
     }
 }

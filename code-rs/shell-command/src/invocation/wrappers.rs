@@ -7,16 +7,6 @@ use super::ScriptWrapperFamily;
 
 pub(crate) fn extract_script_wrapper(command: &[String]) -> Option<ScriptWrapper> {
     match command {
-        [shell, flag, script]
-            if is_shell_like_executable(shell) && matches!(flag.as_str(), "-c" | "-lc") =>
-        {
-            Some(ScriptWrapper {
-                family: ScriptWrapperFamily::PosixLike,
-                mode_flag: flag.clone(),
-                script: strip_rc_source_wrapper(script).unwrap_or_else(|| script.trim().to_owned()),
-            })
-        }
-
         // Busybox applet form: `busybox sh -c "..."` (common on Android/Termux).
         [busybox, applet, flag, script]
             if is_busybox_executable(busybox)
@@ -61,6 +51,16 @@ pub(crate) fn extract_script_wrapper(command: &[String]) -> Option<ScriptWrapper
             mode_flag: flag.clone(),
             script: script.trim().to_owned(),
         }),
+
+        [shell, flag, script]
+            if is_shell_like_executable(shell) && matches!(flag.as_str(), "-c" | "-lc") =>
+        {
+            Some(ScriptWrapper {
+                family: ScriptWrapperFamily::PosixLike,
+                mode_flag: flag.clone(),
+                script: strip_rc_source_wrapper(script).unwrap_or_else(|| script.trim().to_owned()),
+            })
+        }
 
         _ => None,
     }

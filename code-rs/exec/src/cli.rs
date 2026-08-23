@@ -25,8 +25,7 @@ pub struct Cli {
         long = "image",
         short = 'i',
         value_name = "FILE",
-        value_delimiter = ',',
-        num_args = 1..
+        value_delimiter = ','
     )]
     pub images: Vec<PathBuf>,
 
@@ -165,8 +164,7 @@ struct ResumeArgsRaw {
         long = "image",
         short = 'i',
         value_name = "FILE",
-        value_delimiter = ',',
-        num_args = 1..
+        value_delimiter = ','
     )]
     images: Vec<PathBuf>,
 
@@ -310,6 +308,19 @@ mod tests {
         assert!(args.all);
         assert_eq!(args.prompt.as_deref(), Some("echo hi"));
         assert_eq!(args.images.len(), 2);
+    }
+
+    #[test]
+    fn initial_run_parses_images_without_consuming_prompt() {
+        let cli = Cli::parse_from([
+            "code-exec",
+            "--image",
+            "/tmp/a.png,/tmp/b.png",
+            "echo hi",
+        ]);
+
+        assert_eq!(cli.prompt.as_deref(), Some("echo hi"));
+        assert_eq!(cli.images.len(), 2);
     }
 
     #[test]

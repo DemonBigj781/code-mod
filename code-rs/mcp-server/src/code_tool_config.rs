@@ -341,6 +341,25 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    fn canonicalize_json(value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Array(values) => serde_json::Value::Array(
+                values.into_iter().map(canonicalize_json).collect(),
+            ),
+            serde_json::Value::Object(values) => {
+                let mut entries = values.into_iter().collect::<Vec<_>>();
+                entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                serde_json::Value::Object(
+                    entries
+                        .into_iter()
+                        .map(|(key, value)| (key, canonicalize_json(value)))
+                        .collect(),
+                )
+            }
+            value => value,
+        }
+    }
+
     /// We include a test to verify the exact JSON schema as "executable
     /// documentation" for the schema. When can track changes to this test as a
     /// way to audit changes to the generated schema.
@@ -383,7 +402,7 @@ mod tests {
                 "type": "string"
               },
               "config": {
-                "description": "Individual config settings that will override what is in CODEX_HOME/config.toml.",
+                "description": "Individual config settings that will override what is in `CODEX_HOME/config.toml`.",
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -445,7 +464,10 @@ mod tests {
             ]
           }
         });
-        assert_eq!(expected_tool_json, tool_json);
+        assert_eq!(
+            canonicalize_json(expected_tool_json),
+            canonicalize_json(tool_json)
+        );
     }
 
     #[test]

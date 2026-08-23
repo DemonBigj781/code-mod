@@ -168,6 +168,7 @@ pub(in super::super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget
         .keys()
         .cloned()
         .collect();
+    let had_stale_execs = !running_keys.is_empty();
 
     for call_id in running_keys {
         if let Some(running) = chat.exec.running_commands.remove(&call_id) {
@@ -289,6 +290,10 @@ pub(in super::super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget
                 }
             }
         }
+    }
+
+    if had_stale_execs {
+        chat.history_push_plain_paragraphs(PlainMessageKind::Notice, [STALE_MSG]);
     }
 
     if agg_was_updated {

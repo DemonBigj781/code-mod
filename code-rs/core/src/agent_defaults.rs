@@ -427,11 +427,27 @@ fn code_agent_track(model: &str) -> Option<CodeAgentTrack> {
     }
 }
 
+fn canonical_code_agent_track(model: &str) -> Option<CodeAgentTrack> {
+    let canonical = model.strip_prefix("code-").unwrap_or(model);
+    let version_and_suffix = canonical.strip_prefix("gpt-")?;
+    let suffix = version_and_suffix
+        .find('-')
+        .map(|index| &version_and_suffix[index..]);
+
+    match suffix {
+        None => Some(CodeAgentTrack::Base),
+        Some("-mini") => Some(CodeAgentTrack::Mini),
+        Some("-codex") => Some(CodeAgentTrack::Codex),
+        Some("-codex-spark") => Some(CodeAgentTrack::CodexSpark),
+        _ => None,
+    }
+}
+
 fn highest_static_code_track_version(track: CodeAgentTrack) -> Option<Vec<u32>> {
     AGENT_MODEL_SPECS
         .iter()
         .filter(|spec| spec.family == "code")
-        .filter(|spec| code_agent_track(spec.slug) == Some(track))
+        .filter(|spec| canonical_code_agent_track(spec.slug) == Some(track))
         .filter_map(|spec| parse_model_version_components(spec.slug))
         .max()
 }
