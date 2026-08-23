@@ -184,7 +184,7 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact: code-aarch64-unknown-linux-gnu
-            enabled: false
+            enabled: true
           - os: macos-14
             target: x86_64-apple-darwin
             artifact: code-x86_64-apple-darwin
@@ -357,7 +357,7 @@ jobs:
         shell: sh
         run: |
           set -eu
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 2
           (
             cd release-assets
             sha256sum ./* > SHA256SUMS
