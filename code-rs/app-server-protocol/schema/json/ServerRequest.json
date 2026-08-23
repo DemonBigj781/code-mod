@@ -114,7 +114,7 @@
     "ApplyPatchApprovalParams": {
       "properties": {
         "callId": {
-          "description": "Use to correlate this with [`codex_core::protocol::PatchApplyBeginEvent`] and [`codex_core::protocol::PatchApplyEndEvent`].",
+          "description": "Use to correlate this with `codex_core::protocol::PatchApplyBeginEvent` and `codex_core::protocol::PatchApplyEndEvent`.",
           "type": "string"
         },
         "conversationId": {

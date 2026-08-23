@@ -157,7 +157,7 @@ pub(in super::super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidge
 }
 
 pub(in super::super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
-    const STALE_MSG: &str = "Running in background after turn end.";
+    const STALE_MSG: &str = "Command continued in background after turn end.";
     const STREAM_TAIL_MAX_BYTES: usize = 64 * 1024;
 
     // Drain running execs so we can mark them stale and stop the spinner.
