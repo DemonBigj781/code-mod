@@ -5,7 +5,7 @@ import type { JsonValue } from "../serde_json/JsonValue";
 import type { GuardianApprovalReview } from "./GuardianApprovalReview";
 
 /**
- * [UNSTABLE] Temporary notification payload for guardian automatic approval
+ * \[UNSTABLE\] Temporary notification payload for guardian automatic approval
  * review. This shape is expected to change soon.
  *
  * TODO(ccunningham): Attach guardian review state to the reviewed tool item's

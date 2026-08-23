@@ -611,7 +611,7 @@
           "type": "string"
         },
         {
-          "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\n`ChatGPT` auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
+          "description": "\\[UNSTABLE\\] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\n`ChatGPT` auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
           "enum": [
             "chatgptAuthTokens"
           ],
@@ -2847,7 +2847,7 @@
               "type": "null"
             }
           ],
-          "description": "[UNSTABLE] Optional default for where approval requests are routed for review."
+          "description": "\\[UNSTABLE\\] Optional default for where approval requests are routed for review."
         },
         "compact_prompt": {
           "type": [
@@ -4431,7 +4431,7 @@
       "type": "object"
     },
     "FuzzyFileSearchResult": {
-      "description": "Superset of [`codex_file_search::FileMatch`]",
+      "description": "Superset of `codex_file_search::FileMatch`",
       "properties": {
         "file_name": {
           "type": "string"
@@ -4675,7 +4675,7 @@
       "type": "object"
     },
     "GuardianApprovalReview": {
-      "description": "[UNSTABLE] Temporary guardian approval review payload used by `item/autoApprovalReview/*` notifications. This shape is expected to change soon.",
+      "description": "\\[UNSTABLE\\] Temporary guardian approval review payload used by `item/autoApprovalReview/*` notifications. This shape is expected to change soon.",
       "properties": {
         "rationale": {
           "type": [
@@ -4711,7 +4711,7 @@
       "type": "object"
     },
     "GuardianApprovalReviewStatus": {
-      "description": "[UNSTABLE] Lifecycle state for a guardian approval review.",
+      "description": "\\[UNSTABLE\\] Lifecycle state for a guardian approval review.",
       "enum": [
         "inProgress",
         "approved",
@@ -4721,7 +4721,7 @@
       "type": "string"
     },
     "GuardianRiskLevel": {
-      "description": "[UNSTABLE] Risk level assigned by guardian approval review.",
+      "description": "\\[UNSTABLE\\] Risk level assigned by guardian approval review.",
       "enum": [
         "low",
         "medium",
@@ -5023,7 +5023,7 @@
     },
     "ItemGuardianApprovalReviewCompletedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "description": "[UNSTABLE] Temporary notification payload for guardian automatic approval review. This shape is expected to change soon.\n\nTODO(ccunningham): Attach guardian review state to the reviewed tool item's lifecycle instead of sending separate standalone review notifications so the app-server API can persist and replay review state via `thread/read`.",
+      "description": "\\[UNSTABLE\\] Temporary notification payload for guardian automatic approval review. This shape is expected to change soon.\n\nTODO(ccunningham): Attach guardian review state to the reviewed tool item's lifecycle instead of sending separate standalone review notifications so the app-server API can persist and replay review state via `thread/read`.",
       "properties": {
         "action": true,
         "review": {
@@ -5050,7 +5050,7 @@
     },
     "ItemGuardianApprovalReviewStartedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "description": "[UNSTABLE] Temporary notification payload for guardian automatic approval review. This shape is expected to change soon.\n\nTODO(ccunningham): Attach guardian review state to the reviewed tool item's lifecycle instead of sending separate standalone review notifications so the app-server API can persist and replay review state via `thread/read`.",
+      "description": "\\[UNSTABLE\\] Temporary notification payload for guardian automatic approval review. This shape is expected to change soon.\n\nTODO(ccunningham): Attach guardian review state to the reviewed tool item's lifecycle instead of sending separate standalone review notifications so the app-server API can persist and replay review state via `thread/read`.",
       "properties": {
         "action": true,
         "review": {
@@ -5246,7 +5246,7 @@
           "type": "object"
         },
         {
-          "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE. The access token must contain the same scopes that Codex-managed `ChatGPT` auth tokens have.",
+          "description": "\\[UNSTABLE\\] FOR OPENAI INTERNAL USE ONLY - DO NOT USE. The access token must contain the same scopes that Codex-managed `ChatGPT` auth tokens have.",
           "properties": {
             "accessToken": {
               "description": "Access token (JWT) supplied by the client. This token is used for backend API requests and email extraction.",
@@ -6518,7 +6518,7 @@
               "type": "null"
             }
           ],
-          "description": "[UNSTABLE] Optional profile-level override for where approval requests are routed for review. If omitted, the enclosing config default is used."
+          "description": "\\[UNSTABLE\\] Optional profile-level override for where approval requests are routed for review. If omitted, the enclosing config default is used."
         },
         "chatgpt_base_url": {
           "type": [
@@ -6700,7 +6700,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "type": "string"
     },
@@ -9374,7 +9375,7 @@
           "type": "string"
         },
         "path": {
-          "description": "[UNSTABLE] Path to the thread on disk.",
+          "description": "\\[UNSTABLE\\] Path to the thread on disk.",
           "type": [
             "string",
             "null"

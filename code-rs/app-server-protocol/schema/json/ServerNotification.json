@@ -300,7 +300,7 @@
           "type": "string"
         },
         {
-          "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\nChatGPT auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
+          "description": "\\[UNSTABLE\\] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\nChatGPT auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
           "enum": [
             "chatgptAuthTokens"
           ],
@@ -4857,7 +4857,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "type": "string"
     },
@@ -6513,7 +6514,7 @@
           "type": "string"
         },
         "path": {
-          "description": "[UNSTABLE] Path to the thread on disk.",
+          "description": "\\[UNSTABLE\\] Path to the thread on disk.",
           "type": [
             "string",
             "null"

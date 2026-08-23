@@ -23,7 +23,7 @@ createdAt: number,
  */
 updatedAt: number, 
 /**
- * [UNSTABLE] Path to the thread on disk.
+ * \[UNSTABLE\] Path to the thread on disk.
  */
 path: string | null, 
 /**

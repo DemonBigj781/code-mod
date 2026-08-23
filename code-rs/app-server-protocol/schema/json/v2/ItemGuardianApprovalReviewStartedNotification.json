@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GuardianApprovalReview": {
-      "description": "[UNSTABLE] Temporary guardian approval review payload used by `item/autoApprovalReview/*` notifications. This shape is expected to change soon.",
+      "description": "\\[UNSTABLE\\] Temporary guardian approval review payload used by `item/autoApprovalReview/*` notifications. This shape is expected to change soon.",
       "properties": {
         "rationale": {
           "type": [
@@ -38,7 +38,7 @@
       "type": "object"
     },
     "GuardianApprovalReviewStatus": {
-      "description": "[UNSTABLE] Lifecycle state for a guardian approval review.",
+      "description": "\\[UNSTABLE\\] Lifecycle state for a guardian approval review.",
       "enum": [
         "inProgress",
         "approved",
@@ -48,7 +48,7 @@
       "type": "string"
     },
     "GuardianRiskLevel": {
-      "description": "[UNSTABLE] Risk level assigned by guardian approval review.",
+      "description": "\\[UNSTABLE\\] Risk level assigned by guardian approval review.",
       "enum": [
         "low",
         "medium",
@@ -57,7 +57,7 @@
       "type": "string"
     }
   },
-  "description": "[UNSTABLE] Temporary notification payload for guardian automatic approval review. This shape is expected to change soon.\n\nTODO(ccunningham): Attach guardian review state to the reviewed tool item's lifecycle instead of sending separate standalone review notifications so the app-server API can persist and replay review state via `thread/read`.",
+  "description": "\\[UNSTABLE\\] Temporary notification payload for guardian automatic approval review. This shape is expected to change soon.\n\nTODO(ccunningham): Attach guardian review state to the reviewed tool item's lifecycle instead of sending separate standalone review notifications so the app-server API can persist and replay review state via `thread/read`.",
   "properties": {
     "action": true,
     "review": {

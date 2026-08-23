@@ -504,7 +504,7 @@
           ]
         },
         "callId": {
-          "description": "Use to correlate this with [`codex_core::protocol::ExecCommandBeginEvent`] and [`codex_core::protocol::ExecCommandEndEvent`].",
+          "description": "Use to correlate this with `codex_core::protocol::ExecCommandBeginEvent` and `codex_core::protocol::ExecCommandEndEvent`.",
           "type": "string"
         },
         "command": {
@@ -614,7 +614,7 @@
     "FileChangeRequestApprovalParams": {
       "properties": {
         "grantRoot": {
-          "description": "[UNSTABLE] When set, the agent is asking the user to allow writes under this root for the remainder of the session (unclear if this is honored today).",
+          "description": "\\[UNSTABLE\\] When set, the agent is asking the user to allow writes under this root for the remainder of the session (unclear if this is honored today).",
           "type": [
             "string",
             "null"

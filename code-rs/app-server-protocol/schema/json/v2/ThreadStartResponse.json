@@ -573,7 +573,8 @@
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "type": "string"
     },
@@ -807,7 +808,7 @@
           "type": "string"
         },
         "path": {
-          "description": "[UNSTABLE] Path to the thread on disk.",
+          "description": "\\[UNSTABLE\\] Path to the thread on disk.",
           "type": [
             "string",
             "null"
