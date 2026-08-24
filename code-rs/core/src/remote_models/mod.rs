@@ -30,6 +30,9 @@ use crate::model_provider_info::{
     ModelProviderInfo,
     CHATGPT_CODEX_BASE_URL,
     OPENAI_API_BASE_URL,
+    STABLEHORDE_API_BASE_URL,
+    STABLEHORDE_PROVIDER_ID,
+    STABLEHORDE_V2_API_BASE_URL,
 };
 use crate::tool_apply_patch::ApplyPatchToolType;
 use crate::CodexAuth;
@@ -195,6 +198,10 @@ impl RemoteModelsManager {
     }
 
     async fn refresh_remote_models_inner(&self, stale_etag: Option<String>) -> RemoteModelsCatalog {
+        if self.provider_id == STABLEHORDE_PROVIDER_ID {
+            return self.refresh_stablehorde_models_inner().await;
+        }
+
         let auth = self.auth_manager.auth();
         let auth_mode = auth.as_ref().map(|a| a.mode);
         let uses_codex_schema = self.uses_codex_models_schema();
@@ -354,6 +361,90 @@ impl RemoteModelsManager {
         self.current_catalog().await
     }
 
+    async fn refresh_stablehorde_models_inner(&self) -> RemoteModelsCatalog {
+        {
+            let mut state = self.state.write().await;
+            state.status = RemoteModelsStatus::Loading;
+        }
+
+        let v1_result = async {
+            let url = self.models_url(None).map_err(|error| error.to_string())?;
+            let request = self
+                .provider
+                .create_request_builder_for_url(&self.client, None, Method::GET, url)
+                .await
+                .map_err(|error| error.to_string())?
+                .timeout(REMOTE_MODELS_REQUEST_TIMEOUT);
+            let response = request.send().await.map_err(|error| error.to_string())?;
+            if !response.status().is_success() {
+                return Err(format!("HTTP {}", response.status()));
+            }
+            let body = response.text().await.map_err(|error| error.to_string())?;
+            parse_models_response(&body).map_err(|error| format!("invalid response: {error}"))
+        }
+        .await;
+
+        let models = match v1_result {
+            Ok(models) => models,
+            Err(v1_error) => {
+                tracing::warn!(
+                    "Stable Horde v1 model discovery failed; falling back to v2: {v1_error}"
+                );
+                match self.fetch_stablehorde_v2_models().await {
+                    Ok(models) => models,
+                    Err(v2_error) => {
+                        tracing::warn!(
+                            "Stable Horde v2 model discovery failed after v1 failure: {v2_error}"
+                        );
+                        return self
+                            .set_failure(RemoteModelsStatus::ConnectionError {
+                                message: format!(
+                                    "Stable Horde model discovery failed: v1: {v1_error}; v2: {v2_error}"
+                                ),
+                            })
+                            .await;
+                    }
+                }
+            }
+        };
+
+        let fetched_at = Utc::now();
+        {
+            let mut state = self.state.write().await;
+            state.models = models;
+            state.etag = None;
+            state.fetched_at = Some(fetched_at);
+            state.status = RemoteModelsStatus::Fresh;
+        }
+
+        let models = self.state.read().await.models.clone();
+        if let Err(error) = cache::save_cache(&self.cache_path(), &cache::ModelsCache {
+            fetched_at,
+            etag: None,
+            models,
+        }) {
+            tracing::debug!("failed to write Stable Horde model cache: {error}");
+        }
+        self.current_catalog().await
+    }
+
+    async fn fetch_stablehorde_v2_models(&self) -> Result<Vec<ModelInfo>, String> {
+        let url = self.stablehorde_v2_models_url().map_err(|error| error.to_string())?;
+        let response = self
+            .client
+            .get(url)
+            .timeout(REMOTE_MODELS_REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("HTTP {}", response.status()));
+        }
+        let body = response.text().await.map_err(|error| error.to_string())?;
+        parse_stablehorde_v2_models_response(&body)
+            .map_err(|error| format!("invalid response: {error}"))
+    }
+
     pub async fn apply_remote_overrides(&self, model: &str, family: ModelFamily) -> ModelFamily {
         self.apply_remote_overrides_with_personality(model, family, None)
             .await
@@ -472,6 +563,35 @@ impl RemoteModelsManager {
         Ok(url)
     }
 
+    fn stablehorde_v2_models_url(&self) -> crate::error::Result<Url> {
+        let configured_base = self
+            .provider
+            .base_url
+            .as_deref()
+            .unwrap_or(STABLEHORDE_API_BASE_URL)
+            .trim_end_matches('/');
+        let base_url = if configured_base == STABLEHORDE_API_BASE_URL {
+            STABLEHORDE_V2_API_BASE_URL.to_owned()
+        } else if let Some(prefix) = configured_base.strip_suffix("/v1") {
+            format!("{prefix}/v2")
+        } else {
+            STABLEHORDE_V2_API_BASE_URL.to_owned()
+        };
+        let mut url = Url::parse(&base_url).map_err(|error| {
+            crate::error::CodexErr::ServerError(format!(
+                "invalid Stable Horde v2 base_url {base_url}: {error}"
+            ))
+        })?;
+        let base_path = url.path().trim_end_matches('/');
+        url.set_path(&format!("{base_path}/status/models"));
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("type", "text");
+            pairs.append_pair("min_count", "1");
+        }
+        Ok(url)
+    }
+
     fn cache_path(&self) -> PathBuf {
         cache::cache_path(&self.code_home, &self.provider_id)
     }
@@ -489,6 +609,13 @@ struct OpenAiModel {
     id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct StableHordeActiveModel {
+    name: String,
+    #[serde(default)]
+    count: u64,
+}
+
 fn parse_models_response(body: &str) -> serde_json::Result<Vec<ModelInfo>> {
     let parsed = serde_json::from_str::<ModelsWireResponse>(body)?;
     Ok(match parsed {
@@ -501,6 +628,22 @@ fn parse_models_response(body: &str) -> serde_json::Result<Vec<ModelInfo>> {
             })
             .collect(),
     })
+}
+
+fn parse_stablehorde_v2_models_response(body: &str) -> serde_json::Result<Vec<ModelInfo>> {
+    let models = serde_json::from_str::<Vec<StableHordeActiveModel>>(body)?;
+    Ok(models
+        .into_iter()
+        .filter_map(|model| {
+            let name = model.name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            let mut info = direct_model_info(name.to_owned());
+            info.description = Some(format!("{} active worker threads", model.count));
+            Some(info)
+        })
+        .collect())
 }
 
 fn direct_model_info(id: String) -> ModelInfo {

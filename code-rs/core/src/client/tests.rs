@@ -13,8 +13,8 @@ use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 // ────────────────────────────
 
 #[test]
-fn openrouter_free_max_stops_on_global_payment_failure() {
-    assert!(!should_try_next_openrouter_model(
+fn openrouter_free_max_tries_next_candidate_on_payment_required() {
+    assert!(should_try_next_openrouter_model(
         &CodexErr::UnexpectedStatus(UnexpectedResponseError {
             status: StatusCode::PAYMENT_REQUIRED,
             body: String::new(),
@@ -80,7 +80,6 @@ fn utc_ymd_hms_or_panic(
 fn openrouter_free_max_only_retries_model_specific_failures() {
     for status in [
         StatusCode::UNAUTHORIZED,
-        StatusCode::PAYMENT_REQUIRED,
         StatusCode::FORBIDDEN,
         StatusCode::TOO_MANY_REQUESTS,
     ] {
@@ -92,6 +91,14 @@ fn openrouter_free_max_only_retries_model_specific_failures() {
             })
         ));
     }
+
+    assert!(should_try_next_openrouter_model(
+        &CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::PAYMENT_REQUIRED,
+            body: String::new(),
+            request_id: None,
+        })
+    ));
 
     assert!(should_try_next_openrouter_model(
         &CodexErr::UnexpectedStatus(UnexpectedResponseError {

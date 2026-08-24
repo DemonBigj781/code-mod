@@ -443,6 +443,28 @@ pub(crate) async fn stream_chat_completions(
                         }),
                     );
                 }
+                let is_event_stream = resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| {
+                        value
+                            .split(';')
+                            .next()
+                            .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/event-stream"))
+                    });
+                if !is_event_stream {
+                    let body = resp.text().await?;
+                    if let Ok(logger) = debug_logger.lock() {
+                        let _ = logger.append_response_event(
+                            &request_id,
+                            "non_stream_response",
+                            &serde_json::json!({ "body": &body }),
+                        );
+                        let _ = logger.end_request_log(&request_id);
+                    }
+                    return response_stream_from_chat_completion_json(&body);
+                }
                 let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
                 let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
                 let debug_logger_clone = Arc::clone(debug_logger);
@@ -539,6 +561,126 @@ pub(crate) async fn stream_chat_completions(
                 tokio::time::sleep(delay).await;
             }
         }
+    }
+}
+
+fn response_stream_from_chat_completion_json(body: &str) -> Result<ResponseStream> {
+    let response: Value = serde_json::from_str(body)?;
+    let response_id = response
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("chat-completion")
+        .to_owned();
+    let response_model = response
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let message = response
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .ok_or_else(|| {
+            CodexErr::ServerError(
+                "chat completion response did not contain choices[0].message".to_owned(),
+            )
+        })?;
+
+    let mut pending_events = std::collections::VecDeque::new();
+    pending_events.push_back(Ok(ResponseEvent::Created {
+        response_id: Some(response_id.clone()),
+        response_model,
+    }));
+
+    if let Some(reasoning) = message
+        .get("reasoning")
+        .or_else(|| message.get("reasoning_content"))
+        .and_then(Value::as_str)
+        .filter(|reasoning| !reasoning.is_empty())
+    {
+        pending_events.push_back(Ok(ResponseEvent::OutputItemDone {
+            item: ResponseItem::Reasoning {
+                id: response_id.clone(),
+                summary: Vec::new(),
+                content: Some(vec![ReasoningItemContent::ReasoningText {
+                    text: reasoning.to_owned(),
+                }]),
+                encrypted_content: None,
+            },
+            sequence_number: None,
+            output_index: None,
+        }));
+    }
+
+    if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+        for tool_call in tool_calls {
+            let function = tool_call.get("function").unwrap_or(tool_call);
+            pending_events.push_back(Ok(ResponseEvent::OutputItemDone {
+                item: ResponseItem::FunctionCall {
+                    id: tool_call.get("id").and_then(Value::as_str).map(str::to_owned),
+                    name: function
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    namespace: None,
+                    arguments: function
+                        .get("arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or("{}")
+                        .to_owned(),
+                    call_id: tool_call
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                },
+                sequence_number: None,
+                output_index: None,
+            }));
+        }
+    } else if let Some(content) = chat_message_content(message.get("content")) {
+        pending_events.push_back(Ok(ResponseEvent::OutputItemDone {
+            item: ResponseItem::Message {
+                role: "assistant".to_owned(),
+                content: vec![ContentItem::OutputText { text: content }],
+                id: Some(response_id.clone()),
+                end_turn: None,
+                phase: None,
+            },
+            sequence_number: None,
+            output_index: None,
+        }));
+    }
+
+    pending_events.push_back(Ok(ResponseEvent::Completed {
+        response_id,
+        token_usage: None,
+    }));
+    let (tx_event, rx_event) = mpsc::channel(1);
+    drop(tx_event);
+    Ok(ResponseStream {
+        pending_events,
+        rx_event,
+    })
+}
+
+fn chat_message_content(content: Option<&Value>) -> Option<String> {
+    match content? {
+        Value::String(text) if !text.is_empty() => Some(text.clone()),
+        Value::Array(parts) => {
+            let text = parts
+                .iter()
+                .filter_map(|part| {
+                    part.get("text")
+                        .and_then(Value::as_str)
+                        .or_else(|| part.as_str())
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            (!text.is_empty()).then_some(text)
+        }
+        _ => None,
     }
 }
 
@@ -1303,6 +1445,46 @@ impl<S> AggregatedChatStream<S> {
 mod tests {
     use super::*;
     use futures::stream;
+    use futures::TryStreamExt;
+
+    #[tokio::test]
+    async fn non_stream_chat_completion_is_adapted_to_response_events() {
+        let stream = response_stream_from_chat_completion_json(
+            r#"{
+                "id": "horde-response",
+                "model": "koboldcpp/example",
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "hello from horde"}
+                }]
+            }"#,
+        )
+        .expect("valid chat completion response");
+
+        let events = stream
+            .try_collect::<Vec<_>>()
+            .await
+            .expect("response stream should complete");
+
+        assert!(matches!(
+            &events[0],
+            ResponseEvent::Created {
+                response_id: Some(response_id),
+                response_model: Some(model),
+            } if response_id == "horde-response" && model == "koboldcpp/example"
+        ));
+        assert!(matches!(
+            &events[1],
+            ResponseEvent::OutputItemDone {
+                item: ResponseItem::Message { content, .. },
+                ..
+            } if matches!(content.as_slice(), [ContentItem::OutputText { text }] if text == "hello from horde")
+        ));
+        assert!(matches!(
+            &events[2],
+            ResponseEvent::Completed { response_id, .. } if response_id == "horde-response"
+        ));
+    }
 
     #[tokio::test]
     async fn streaming_mode_emits_one_final_message_after_deltas() {

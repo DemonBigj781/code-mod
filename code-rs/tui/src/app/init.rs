@@ -72,7 +72,8 @@ impl App<'_> {
             let remote_auth_manager = auth_manager;
             let remote_provider_id = config.model_provider_id.clone();
             let remote_provider = config.model_provider.clone();
-            let remote_provider_is_direct = crate::direct_provider::is_direct_provider_definition(
+            let remote_provider_has_own_catalog =
+                crate::direct_provider::is_model_catalog_provider_definition(
                 &remote_provider_id,
                 &remote_provider,
             );
@@ -88,7 +89,7 @@ impl App<'_> {
                             remote_code_home,
                         );
                     let catalog = remote_manager.refresh_remote_models().await;
-                    if remote_provider_is_direct {
+                    if remote_provider_has_own_catalog {
                         remote_tx.send(AppEvent::DirectModelCatalogUpdated { catalog });
                         return;
                     }

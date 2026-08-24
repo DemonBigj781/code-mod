@@ -39,13 +39,13 @@ impl ChatWidget<'_> {
         presets
     }
 
-    fn configured_direct_model_providers(&self) -> Vec<(String, ModelProviderInfo)> {
+    fn configured_model_catalog_providers(&self) -> Vec<(String, ModelProviderInfo)> {
         let mut providers: Vec<(String, ModelProviderInfo)> = self
             .config
             .model_providers
             .iter()
             .filter_map(|(provider_id, provider)| {
-                crate::direct_provider::is_direct_provider_definition(provider_id, provider)
+                crate::direct_provider::is_model_catalog_provider_definition(provider_id, provider)
                     .then(|| (provider_id.clone(), provider.clone()))
             })
             .collect();
@@ -59,7 +59,7 @@ impl ChatWidget<'_> {
     }
 
     pub(super) fn available_direct_provider_catalogs(&self) -> Vec<DirectProviderModelCatalog> {
-        self.configured_direct_model_providers()
+        self.configured_model_catalog_providers()
             .into_iter()
             .map(|(provider_id, provider)| {
                 let catalog = self.direct_model_catalogs.get(&provider_id);
@@ -82,7 +82,7 @@ impl ChatWidget<'_> {
     }
 
     pub(super) fn refresh_direct_provider_catalogs(&mut self) {
-        let providers = self.configured_direct_model_providers();
+        let providers = self.configured_model_catalog_providers();
         let configured_ids: HashSet<String> = providers
             .iter()
             .map(|(provider_id, _)| provider_id.clone())

@@ -1342,6 +1342,41 @@
     }
 
     #[test]
+    fn model_selection_switches_between_openai_openrouter_and_stablehorde() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let original_provider_id = chat.config.model_provider_id.clone();
+    let original_provider = chat.config.model_provider.clone();
+
+    chat.apply_model_selection_with_provider(
+        "koboldcpp/example".to_owned(),
+        Some(ReasoningEffort::None),
+        Some(code_core::STABLEHORDE_PROVIDER_ID.to_owned()),
+    );
+    assert_eq!(chat.config.model_provider_id, code_core::STABLEHORDE_PROVIDER_ID);
+    assert_eq!(chat.config.model_provider.name, "Stable Horde");
+
+    chat.apply_model_selection_with_provider(
+        "openai/gpt-oss-20b:free".to_owned(),
+        Some(ReasoningEffort::None),
+        Some(OPENROUTER_PROVIDER_ID.to_owned()),
+    );
+    assert_eq!(chat.config.model_provider_id, OPENROUTER_PROVIDER_ID);
+    assert_eq!(chat.config.model_provider.name, "OpenRouter");
+
+    chat.apply_model_selection_with_provider(
+        "koboldcpp/example".to_owned(),
+        Some(ReasoningEffort::None),
+        Some(code_core::STABLEHORDE_PROVIDER_ID.to_owned()),
+    );
+    assert_eq!(chat.config.model_provider_id, code_core::STABLEHORDE_PROVIDER_ID);
+
+    chat.apply_model_selection("gpt-5.5".to_owned(), Some(ReasoningEffort::Medium));
+    assert_eq!(chat.config.model_provider_id, original_provider_id);
+    assert_eq!(chat.config.model_provider, original_provider);
+    }
+
+    #[test]
     fn direct_provider_endpoint_selection_updates_provider_and_preserves_profile() {
     let mut harness = ChatWidgetHarness::new();
     let chat = harness.chat();

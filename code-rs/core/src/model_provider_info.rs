@@ -42,6 +42,11 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 pub(crate) const OPENAI_API_BASE_URL: &str = "https://api.openai.com/v1";
 pub(crate) const OPENAI_API_PROBE_URL: &str = "https://api.openai.com";
 pub(crate) const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+pub const STABLEHORDE_PROVIDER_ID: &str = "stablehorde";
+pub const STABLEHORDE_API_KEY_ENV: &str = "AI_HORDE_API_KEY";
+pub const STABLEHORDE_ANONYMOUS_API_KEY: &str = "0000000000";
+pub const STABLEHORDE_API_BASE_URL: &str = "https://oai.aihorde.net/v1";
+pub const STABLEHORDE_V2_API_BASE_URL: &str = "https://aihorde.net/api/v2";
 
 const DIRECT_PROVIDER_ID_PREFIX: &str = "direct";
 const DIRECT_PROVIDER_SECRET_PREFIX: &str = "CODE_MODEL_PROVIDER";
@@ -568,7 +573,12 @@ impl ModelProviderInfo {
                     return self.api_key_with_context(code_home, cwd);
                 }
 
-                api_key_from_environment(env_key, self.env_key_instructions.clone())
+                match api_key_from_environment(env_key, self.env_key_instructions.clone()) {
+                    Err(CodexErr::EnvVar(_)) if env_key == STABLEHORDE_API_KEY_ENV => {
+                        Ok(Some(STABLEHORDE_ANONYMOUS_API_KEY.to_owned()))
+                    }
+                    result => result,
+                }
             }
             None => Ok(None),
         }
@@ -595,11 +605,11 @@ impl ModelProviderInfo {
             return Ok(None);
         };
 
-        let outcome = crate::secrets_resolver::resolve_secret_env_or_store(
-            env_key,
-            cwd,
-            Some(secrets),
-        );
+        let outcome = if env_key == STABLEHORDE_API_KEY_ENV {
+            crate::secrets_resolver::resolve_secret_store_or_env(env_key, cwd, Some(secrets))
+        } else {
+            crate::secrets_resolver::resolve_secret_env_or_store(env_key, cwd, Some(secrets))
+        };
         if let Some(secret) = outcome.resolved {
             return Ok(Some(secret.value));
         }
@@ -609,10 +619,19 @@ impl ModelProviderInfo {
             )));
         }
 
-        Err(CodexErr::EnvVar(EnvVarError {
-            var: env_key.clone(),
-            instructions: self.env_key_instructions.clone(),
-        }))
+        if env_key == STABLEHORDE_API_KEY_ENV {
+            Ok(Some(STABLEHORDE_ANONYMOUS_API_KEY.to_owned()))
+        } else {
+            Err(CodexErr::EnvVar(EnvVarError {
+                var: env_key.clone(),
+                instructions: self.env_key_instructions.clone(),
+            }))
+        }
+    }
+
+    pub fn uses_stablehorde_anonymous_auth(&self) -> bool {
+        self.env_key.as_deref() == Some(STABLEHORDE_API_KEY_ENV)
+            && self.api_key().ok().flatten().as_deref() == Some(STABLEHORDE_ANONYMOUS_API_KEY)
     }
 
     /// Effective maximum number of request retries for this provider.
@@ -868,9 +887,9 @@ pub fn built_in_model_providers(
     use ModelProviderInfo as P;
 
     // We do not want to be in the business of adjucating which third-party
-    // providers are bundled with Codex CLI, so we only include the OpenAI and
-    // open source ("oss") providers by default. Users are encouraged to add to
-    // `model_providers` in config.toml to add their own providers.
+    // providers are bundled with Codex CLI. Code includes the providers that
+    // have first-class model discovery and account setup, plus the local OSS
+    // provider. Users can still add custom providers in config.toml.
     [
         (
             "openai",
@@ -921,7 +940,7 @@ pub fn built_in_model_providers(
                 ),
                 experimental_bearer_token: None,
                 auth: None,
-                wire_api: WireApi::Responses,
+                wire_api: WireApi::Chat,
                 query_params: None,
                 http_headers: None,
                 env_http_headers: Some(HashMap::from([
@@ -940,6 +959,29 @@ pub fn built_in_model_providers(
                 websocket_connect_timeout_ms: None,
                 requires_openai_auth: false,
                 openrouter: Some(OpenRouterConfig::default()),
+            },
+        ),
+        (
+            STABLEHORDE_PROVIDER_ID,
+            P {
+                name: "Stable Horde".into(),
+                base_url: Some(STABLEHORDE_API_BASE_URL.into()),
+                env_key: Some(STABLEHORDE_API_KEY_ENV.into()),
+                env_key_instructions: Some(
+                    "Optionally set AI_HORDE_API_KEY; anonymous access uses 0000000000.".into(),
+                ),
+                experimental_bearer_token: None,
+                auth: None,
+                wire_api: WireApi::Responses,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                websocket_connect_timeout_ms: None,
+                requires_openai_auth: false,
+                openrouter: None,
             },
         ),
         (BUILT_IN_OSS_MODEL_PROVIDER_ID, create_oss_provider()),
@@ -1283,6 +1325,19 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         assert_eq!(openrouter.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
         assert_eq!(openrouter.wire_api, WireApi::Responses);
         assert!(openrouter.openrouter.is_some());
+    }
+
+    #[test]
+    fn built_in_model_providers_include_stablehorde_with_anonymous_fallback() {
+        let providers = built_in_model_providers(None);
+        let stablehorde = providers
+            .get(STABLEHORDE_PROVIDER_ID)
+            .expect("Stable Horde provider should exist");
+
+        assert_eq!(stablehorde.name, "Stable Horde");
+        assert_eq!(stablehorde.base_url.as_deref(), Some(STABLEHORDE_API_BASE_URL));
+        assert_eq!(stablehorde.env_key.as_deref(), Some(STABLEHORDE_API_KEY_ENV));
+        assert_eq!(stablehorde.wire_api, WireApi::Chat);
     }
 
     #[test]

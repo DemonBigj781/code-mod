@@ -1,36 +1,39 @@
 impl ChatWidget<'_> {
-    fn is_configured_direct_provider(&self, provider_id: &str) -> bool {
+    fn is_configured_model_catalog_provider(&self, provider_id: &str) -> bool {
         self.config
             .model_providers
             .get(provider_id)
             .is_some_and(|provider| {
-                crate::direct_provider::is_direct_provider_definition(provider_id, provider)
+                crate::direct_provider::is_model_catalog_provider_definition(provider_id, provider)
             })
     }
 
-    fn active_provider_is_direct(&self) -> bool {
-        crate::direct_provider::is_direct_provider_definition(
+    fn active_provider_has_own_catalog(&self) -> bool {
+        crate::direct_provider::is_model_catalog_provider_definition(
             &self.config.model_provider_id,
             &self.config.model_provider,
         )
     }
 
-    fn configured_non_direct_provider(
+    fn configured_non_catalog_provider(
         &self,
         provider_id: &str,
     ) -> Option<(String, ModelProviderInfo)> {
         let provider = self.config.model_providers.get(provider_id)?;
-        (!crate::direct_provider::is_direct_provider_definition(provider_id, provider))
+        (!crate::direct_provider::is_model_catalog_provider_definition(provider_id, provider))
             .then(|| (provider_id.to_owned(), provider.clone()))
     }
 
-    fn fallback_non_direct_provider(&self) -> Option<(String, ModelProviderInfo)> {
-        self.configured_non_direct_provider("openai").or_else(|| {
+    fn fallback_non_catalog_provider(&self) -> Option<(String, ModelProviderInfo)> {
+        self.configured_non_catalog_provider("openai").or_else(|| {
             self.config
                 .model_providers
                 .iter()
                 .filter(|(provider_id, provider)| {
-                    !crate::direct_provider::is_direct_provider_definition(provider_id, provider)
+                    !crate::direct_provider::is_model_catalog_provider_definition(
+                        provider_id,
+                        provider,
+                    )
                 })
                 .min_by(|(left_id, _), (right_id, _)| left_id.cmp(right_id))
                 .map(|(provider_id, provider)| (provider_id.clone(), provider.clone()))
@@ -38,16 +41,16 @@ impl ChatWidget<'_> {
     }
 
     fn restore_provider_before_direct(&mut self) -> Result<bool, String> {
-        if !self.active_provider_is_direct() {
+        if !self.active_provider_has_own_catalog() {
             return Ok(false);
         }
 
         let previous_provider_id = self.model_provider_before_direct.as_deref();
         let (provider_id, provider) = previous_provider_id
-            .and_then(|provider_id| self.configured_non_direct_provider(provider_id))
-            .or_else(|| self.fallback_non_direct_provider())
+            .and_then(|provider_id| self.configured_non_catalog_provider(provider_id))
+            .or_else(|| self.fallback_non_catalog_provider())
             .ok_or_else(|| {
-                "No non-direct model provider is available for this selection.".to_owned()
+                "No primary model provider is available for this selection.".to_owned()
             })?;
         let changed =
             self.config.model_provider_id != provider_id || self.config.model_provider != provider;
@@ -63,9 +66,9 @@ impl ChatWidget<'_> {
         requested_provider_id: Option<&str>,
     ) -> Result<bool, String> {
         if let Some(provider_id) = requested_provider_id {
-            if !self.is_configured_direct_provider(provider_id) {
+            if !self.is_configured_model_catalog_provider(provider_id) {
                 return Err(format!(
-                    "The selected endpoint provider '{provider_id}' is no longer configured."
+                    "The selected model provider '{provider_id}' is no longer configured."
                 ));
             }
             let provider = self
@@ -74,17 +77,26 @@ impl ChatWidget<'_> {
                 .get(provider_id)
                 .cloned()
                 .ok_or_else(|| {
-                    format!("The selected endpoint provider '{provider_id}' is unavailable.")
+                    format!("The selected model provider '{provider_id}' is unavailable.")
                 })?;
 
-            if !self.active_provider_is_direct() && self.config.model_provider_id != provider_id {
+            if !self.active_provider_has_own_catalog()
+                && self.config.model_provider_id != provider_id
+            {
                 self.model_provider_before_direct = Some(self.config.model_provider_id.clone());
             }
 
+            let clear_openrouter_profile =
+                self.config.active_profile.as_deref() == Some(OPENROUTER_FREE_PROFILE);
             let changed = self.config.model_provider_id != provider_id
-                || self.config.model_provider != provider;
+                || self.config.model_provider != provider
+                || clear_openrouter_profile;
             self.config.model_provider_id = provider_id.to_owned();
             self.config.model_provider = provider;
+            if clear_openrouter_profile {
+                self.config.active_profile = None;
+                self.model_provider_before_openrouter = None;
+            }
             return Ok(changed);
         }
 

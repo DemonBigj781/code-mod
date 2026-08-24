@@ -92,6 +92,81 @@ pub fn resolve_secret_env_or_store(
     }
 }
 
+pub fn resolve_secret_store_or_env(
+    name: &str,
+    cwd: &Path,
+    secrets: Option<&code_secrets::SecretsManager>,
+) -> SecretLookupOutcome {
+    if let Some(secrets) = secrets {
+        let secret_name = match code_secrets::SecretName::new(name) {
+            Ok(name) => name,
+            Err(err) => {
+                return SecretLookupOutcome {
+                    resolved: None,
+                    error: Some(err.to_string()),
+                };
+            }
+        };
+        let env_scope =
+            code_secrets::SecretScope::Environment(code_secrets::environment_id_from_cwd(cwd));
+        match secrets.get(&env_scope, &secret_name) {
+            Ok(Some(value)) if !value.trim().is_empty() => {
+                return SecretLookupOutcome {
+                    resolved: Some(ResolvedSecret {
+                        value,
+                        source: SecretValueSource::SecretsEnvScope,
+                    }),
+                    error: None,
+                };
+            }
+            Ok(_) => {}
+            Err(err) => {
+                return SecretLookupOutcome {
+                    resolved: None,
+                    error: Some(format!(
+                        "failed to read secrets store for {name} (env scope): {err}"
+                    )),
+                };
+            }
+        }
+
+        match secrets.get(&code_secrets::SecretScope::Global, &secret_name) {
+            Ok(Some(value)) if !value.trim().is_empty() => {
+                return SecretLookupOutcome {
+                    resolved: Some(ResolvedSecret {
+                        value,
+                        source: SecretValueSource::SecretsGlobal,
+                    }),
+                    error: None,
+                };
+            }
+            Ok(_) => {}
+            Err(err) => {
+                return SecretLookupOutcome {
+                    resolved: None,
+                    error: Some(format!(
+                        "failed to read secrets store for {name} (global): {err}"
+                    )),
+                };
+            }
+        }
+    }
+
+    if let Ok(value) = std::env::var(name)
+        && !value.trim().is_empty()
+    {
+        return SecretLookupOutcome {
+            resolved: Some(ResolvedSecret {
+                value,
+                source: SecretValueSource::EnvVar,
+            }),
+            error: None,
+        };
+    }
+
+    SecretLookupOutcome::default()
+}
+
 pub fn resolve_secret_env_or_store_for_code_home(
     name: &str,
     code_home: &Path,
@@ -196,5 +271,34 @@ mod tests {
         );
         Ok(())
     }
-}
 
+    #[test]
+    fn store_first_resolution_prefers_encrypted_secret_over_environment() -> anyhow::Result<()> {
+        let _guard = EnvVarGuard::new("AI_HORDE_API_KEY");
+        unsafe { std::env::set_var("AI_HORDE_API_KEY", "env-token") };
+
+        let code_home = tempfile::tempdir().expect("tempdir");
+        let keyring = Arc::new(MockKeyringStore::default());
+        let secrets = code_secrets::SecretsManager::new_with_keyring_store(
+            code_home.path().to_path_buf(),
+            code_secrets::SecretsBackendKind::Local,
+            keyring,
+        );
+        let cwd = tempfile::tempdir().expect("cwd");
+        secrets.set(
+            &code_secrets::SecretScope::Global,
+            &code_secrets::SecretName::new("AI_HORDE_API_KEY")?,
+            "stored-token",
+        )?;
+
+        let outcome = resolve_secret_store_or_env("AI_HORDE_API_KEY", cwd.path(), Some(&secrets));
+        assert_eq!(
+            outcome.resolved,
+            Some(ResolvedSecret {
+                value: "stored-token".to_string(),
+                source: SecretValueSource::SecretsGlobal,
+            })
+        );
+        Ok(())
+    }
+}

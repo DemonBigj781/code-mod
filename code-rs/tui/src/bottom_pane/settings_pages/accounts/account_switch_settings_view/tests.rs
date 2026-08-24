@@ -77,3 +77,46 @@ fn content_only_body_geometry_differs_from_framed_for_mouse_routing() {
     }
 }
 
+#[test]
+fn accounts_page_exposes_openrouter_and_stablehorde_authentication() {
+    let (tx, _rx) = channel();
+    let view = AccountSwitchSettingsView::new(
+        AppEventSender::new(tx),
+        false,
+        false,
+        AuthCredentialsStoreMode::File,
+    );
+
+    let rendered = view
+        .main_runs(None)
+        .into_iter()
+        .flat_map(|run| run.lines)
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("OpenRouter authentication"));
+    assert!(rendered.contains("Stable Horde authentication"));
+    assert!(rendered.contains("AI_HORDE_API_KEY"));
+}
+
+#[test]
+fn stablehorde_authentication_row_opens_secrets_settings() {
+    let (tx, rx) = channel();
+    let mut view = AccountSwitchSettingsView::new(
+        AppEventSender::new(tx),
+        false,
+        false,
+        AuthCredentialsStoreMode::File,
+    );
+    view.main_state.selected_idx = Some(4);
+
+    view.activate_selected_main();
+
+    match rx.recv().expect("settings event") {
+        AppEvent::OpenSettings { section } => {
+            assert_eq!(section, Some(crate::bottom_pane::SettingsSection::Secrets));
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}

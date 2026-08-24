@@ -33,7 +33,7 @@ pub(crate) struct AccountSwitchSettingsView {
 crate::bottom_pane::chrome_view::impl_chrome_view!(AccountSwitchSettingsView, framed);
 
 impl AccountSwitchSettingsView {
-    const MAIN_OPTION_COUNT: usize = 6;
+    const MAIN_OPTION_COUNT: usize = 8;
     const CONFIRM_OPTION_COUNT: usize = 3;
 
     pub(crate) fn new(

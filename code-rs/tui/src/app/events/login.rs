@@ -22,10 +22,11 @@ impl App<'_> {
         let remote_auth_manager = self._server.auth_manager();
         let remote_provider_id = self.config.model_provider_id.clone();
         let remote_provider = self.config.model_provider.clone();
-        let remote_provider_is_direct = crate::direct_provider::is_direct_provider_definition(
-            &remote_provider_id,
-            &remote_provider,
-        );
+        let remote_provider_has_own_catalog =
+            crate::direct_provider::is_model_catalog_provider_definition(
+                &remote_provider_id,
+                &remote_provider,
+            );
         let remote_code_home = self.config.code_home.clone();
         let remote_using_chatgpt_hint = self.config.using_chatgpt_auth;
         tokio::spawn(async move {
@@ -36,7 +37,7 @@ impl App<'_> {
                 remote_code_home,
             );
             let catalog = remote_manager.refresh_remote_models().await;
-            if remote_provider_is_direct {
+            if remote_provider_has_own_catalog {
                 remote_tx.send(AppEvent::DirectModelCatalogUpdated { catalog });
                 return;
             }

@@ -81,6 +81,20 @@ fn standard_models(ids: &[&str]) -> serde_json::Value {
     })
 }
 
+fn stablehorde_v2_models(ids: &[(&str, u64)]) -> serde_json::Value {
+    serde_json::Value::Array(
+        ids.iter()
+            .map(|(name, count)| {
+                serde_json::json!({
+                    "name": name,
+                    "count": count,
+                    "type": "text",
+                })
+            })
+            .collect(),
+    )
+}
+
 fn provider_cache_files(code_home: &std::path::Path) -> TestResult<Vec<std::path::PathBuf>> {
     let mut files = std::fs::read_dir(code_home)?
         .filter_map(|entry| entry.ok())
@@ -588,6 +602,128 @@ async fn remote_models_provider_refresh_leaves_other_provider_unchanged() -> Tes
     ));
     assert_eq!(first_after.models[0].slug, "first-model");
     assert_eq!(second_after, second_before);
+    Ok(())
+}
+
+#[tokio::test]
+async fn stablehorde_models_use_v1_without_contacting_v2_when_available() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(standard_models(&[
+            "koboldcpp/example-v1",
+        ])))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let code_home = tempdir()?;
+    let manager = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        code_core::STABLEHORDE_PROVIDER_ID,
+        provider_for(format!("{}/v1", server.uri())),
+        code_home.path().to_path_buf(),
+    );
+
+    let catalog = manager.refresh_remote_models().await;
+
+    assert_eq!(catalog.status, RemoteModelsStatus::Fresh);
+    assert_eq!(catalog.models.len(), 1);
+    assert_eq!(catalog.models[0].slug, "koboldcpp/example-v1");
+    assert_eq!(
+        server
+            .received_requests()
+            .await
+            .ok_or_else(|| std::io::Error::other("request log unavailable"))?
+            .len(),
+        1
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn stablehorde_models_fall_back_to_v2_after_v1_failure() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/status/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(stablehorde_v2_models(&[
+            ("koboldcpp/example-v2", 3),
+        ])))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let code_home = tempdir()?;
+    let manager = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        code_core::STABLEHORDE_PROVIDER_ID,
+        provider_for(format!("{}/v1", server.uri())),
+        code_home.path().to_path_buf(),
+    );
+
+    let catalog = manager.refresh_remote_models().await;
+
+    assert_eq!(catalog.status, RemoteModelsStatus::Fresh);
+    assert_eq!(catalog.models.len(), 1);
+    assert_eq!(catalog.models[0].slug, "koboldcpp/example-v2");
+    assert_eq!(
+        catalog.models[0].description.as_deref(),
+        Some("3 active worker threads")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn stablehorde_models_report_both_transport_failures() -> TestResult {
+    if skip_if_no_network() {
+        return Ok(());
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/status/models"))
+        .respond_with(ResponseTemplate::new(502))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+
+    let code_home = tempdir()?;
+    let manager = RemoteModelsManager::new_for_provider(
+        auth_manager_chatgpt(),
+        code_core::STABLEHORDE_PROVIDER_ID,
+        provider_for(format!("{}/v1", server.uri())),
+        code_home.path().to_path_buf(),
+    );
+
+    let catalog = manager.refresh_remote_models().await;
+
+    match catalog.status {
+        RemoteModelsStatus::ConnectionError { message } => {
+            assert!(message.contains("v1: HTTP 503"));
+            assert!(message.contains("v2: HTTP 502"));
+        }
+        status => panic!("unexpected status: {status:?}"),
+    }
     Ok(())
 }
 

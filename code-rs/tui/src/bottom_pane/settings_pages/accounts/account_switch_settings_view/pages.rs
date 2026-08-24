@@ -14,6 +14,38 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 
 impl AccountSwitchSettingsView {
+    fn provider_auth_label(provider_id: &str) -> (&'static str, &'static str) {
+        let providers = code_core::built_in_model_providers(None);
+        let Some(provider) = providers.get(provider_id) else {
+            return ("Unavailable", "Provider is not registered in this build.");
+        };
+
+        if provider_id == code_core::STABLEHORDE_PROVIDER_ID {
+            if provider.uses_stablehorde_anonymous_auth() {
+                return (
+                    "Anonymous",
+                    "Uses 0000000000 at lowest queue priority; set AI_HORDE_API_KEY for authenticated access.",
+                );
+            }
+            return (
+                "Authenticated",
+                "AI_HORDE_API_KEY is available from the encrypted store or environment.",
+            );
+        }
+
+        if provider.api_key().ok().flatten().is_some() {
+            (
+                "Configured",
+                "OPENROUTER_API_KEY is available from the encrypted store or environment.",
+            )
+        } else {
+            (
+                "Required",
+                "Set OPENROUTER_API_KEY in the encrypted store or environment before use.",
+            )
+        }
+    }
+
     pub(super) fn main_page(&self) -> SettingsMenuPage<'static> {
         SettingsMenuPage::new(
             "Accounts",
@@ -87,7 +119,40 @@ impl AccountSwitchSettingsView {
 
         runs.push(SelectableLineRun::plain(vec![Line::from("")]));
 
-        let mut manage = SettingsMenuRow::new(3usize, "Manage connected accounts")
+        let (openrouter_status, openrouter_detail) = Self::provider_auth_label(
+            code_common::model_presets::OPENROUTER_PROVIDER_ID,
+        );
+        let mut openrouter = SettingsMenuRow::new(3usize, "OpenRouter authentication")
+            .with_value(StyledText::new(
+                format!("[{openrouter_status}]"),
+                Style::new().fg(colors::primary()).bold(),
+            ))
+            .with_selected_hint("Enter to manage secrets")
+            .into_run(selected_id);
+        openrouter.lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(openrouter_detail, Style::new().fg(colors::text_dim())),
+        ]));
+        runs.push(openrouter);
+
+        let (stablehorde_status, stablehorde_detail) =
+            Self::provider_auth_label(code_core::STABLEHORDE_PROVIDER_ID);
+        let mut stablehorde = SettingsMenuRow::new(4usize, "Stable Horde authentication")
+            .with_value(StyledText::new(
+                format!("[{stablehorde_status}]"),
+                Style::new().fg(colors::primary()).bold(),
+            ))
+            .with_selected_hint("Enter to manage secrets")
+            .into_run(selected_id);
+        stablehorde.lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(stablehorde_detail, Style::new().fg(colors::text_dim())),
+        ]));
+        runs.push(stablehorde);
+
+        runs.push(SelectableLineRun::plain(vec![Line::from("")]));
+
+        let mut manage = SettingsMenuRow::new(5usize, "Manage connected accounts")
             .with_selected_hint("Enter to open")
             .into_run(selected_id);
         manage.lines.push(Line::from(vec![
@@ -99,7 +164,7 @@ impl AccountSwitchSettingsView {
         ]));
         runs.push(manage);
 
-        let mut add = SettingsMenuRow::new(4usize, "Add account")
+        let mut add = SettingsMenuRow::new(6usize, "Add account")
             .with_selected_hint("Enter to open")
             .into_run(selected_id);
         add.lines.push(Line::from(vec![
@@ -114,7 +179,7 @@ impl AccountSwitchSettingsView {
         runs.push(SelectableLineRun::plain(vec![Line::from("")]));
 
         runs.push(
-            SettingsMenuRow::new(5usize, "Close")
+            SettingsMenuRow::new(7usize, "Close")
                 .with_selected_hint("Enter to close")
                 .into_run(selected_id),
         );

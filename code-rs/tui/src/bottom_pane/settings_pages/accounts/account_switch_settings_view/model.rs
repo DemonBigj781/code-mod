@@ -50,6 +50,12 @@ impl AccountSwitchSettingsView {
         self.app_event_tx.send(AppEvent::ShowLoginAddAccount);
     }
 
+    fn show_provider_secrets(&self) {
+        self.app_event_tx.send(AppEvent::OpenSettings {
+            section: Some(crate::bottom_pane::SettingsSection::Secrets),
+        });
+    }
+
     fn request_store_mode_change(&self, target: AuthCredentialsStoreMode, migrate_existing: bool) {
         self.app_event_tx.send(AppEvent::RequestSetAuthCredentialsStoreMode {
             mode: target,
@@ -74,9 +80,10 @@ impl AccountSwitchSettingsView {
             0 => self.toggle_auto_switch(),
             1 => self.toggle_api_key_fallback(),
             2 => self.open_store_mode_confirm(),
-            3 => self.show_login_accounts(),
-            4 => self.show_login_add_account(),
-            5 => self.close(),
+            3 | 4 => self.show_provider_secrets(),
+            5 => self.show_login_accounts(),
+            6 => self.show_login_add_account(),
+            7 => self.close(),
             _ => {}
         }
     }

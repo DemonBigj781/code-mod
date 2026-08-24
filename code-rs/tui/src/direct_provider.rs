@@ -9,6 +9,29 @@ use code_core::{
 };
 use code_protocol::openai_models::ModelInfo;
 
+pub(crate) fn store_provider_api_key(
+    code_home: &std::path::Path,
+    secret_name: &str,
+    value: Option<&str>,
+) -> Result<(), String> {
+    let manager = code_secrets::SecretsManager::new(
+        code_home.to_path_buf(),
+        code_secrets::SecretsBackendKind::Local,
+    );
+    let name = code_secrets::SecretName::new(secret_name)
+        .map_err(|error| format!("invalid provider key reference: {error}"))?;
+    let scope = code_secrets::SecretScope::Global;
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => manager
+            .set(&scope, &name, value)
+            .map_err(|error| format!("failed to store provider key: {error}")),
+        None => manager
+            .delete(&scope, &name)
+            .map(|_| ())
+            .map_err(|error| format!("failed to clear provider key: {error}")),
+    }
+}
+
 pub(crate) struct DirectProviderRequest {
     pub(crate) display_name: String,
     pub(crate) base_url: String,
@@ -42,6 +65,16 @@ pub(crate) fn is_direct_provider_definition(
         .base_url
         .as_deref()
         .is_some_and(|base_url| direct_model_provider_id(&provider.name, base_url) == provider_id)
+}
+
+pub(crate) fn is_model_catalog_provider_definition(
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+) -> bool {
+    matches!(
+        provider_id,
+        code_common::model_presets::OPENROUTER_PROVIDER_ID | code_core::STABLEHORDE_PROVIDER_ID
+    ) || is_direct_provider_definition(provider_id, provider)
 }
 
 impl StagedSecret {
@@ -210,6 +243,58 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn built_in_remote_catalog_providers_are_discoverable() {
+        let providers = code_core::built_in_model_providers(None);
+
+        assert!(is_model_catalog_provider_definition(
+            code_common::model_presets::OPENROUTER_PROVIDER_ID,
+            providers
+                .get(code_common::model_presets::OPENROUTER_PROVIDER_ID)
+                .expect("OpenRouter provider"),
+        ));
+        assert!(is_model_catalog_provider_definition(
+            code_core::STABLEHORDE_PROVIDER_ID,
+            providers
+                .get(code_core::STABLEHORDE_PROVIDER_ID)
+                .expect("Stable Horde provider"),
+        ));
+        assert!(!is_model_catalog_provider_definition(
+            "openai",
+            providers.get("openai").expect("OpenAI provider"),
+        ));
+    }
+
+    #[test]
+    fn provider_api_key_storage_supports_set_and_clear() {
+        let code_home = tempdir().expect("code home");
+        let secret_name = "OPENROUTER_API_KEY";
+
+        store_provider_api_key(code_home.path(), secret_name, Some("stored-key"))
+            .expect("store key");
+        let manager = code_secrets::SecretsManager::new_with_keyring_store(
+            code_home.path().to_path_buf(),
+            code_secrets::SecretsBackendKind::Local,
+            Arc::new(MockKeyringStore::default()),
+        );
+        let name = code_secrets::SecretName::new(secret_name).expect("secret name");
+        assert_eq!(
+            manager
+                .get(&code_secrets::SecretScope::Global, &name)
+                .expect("read key")
+                .as_deref(),
+            Some("stored-key")
+        );
+
+        store_provider_api_key(code_home.path(), secret_name, None).expect("clear key");
+        assert_eq!(
+            manager
+                .get(&code_secrets::SecretScope::Global, &name)
+                .expect("read cleared key"),
+            None
+        );
+    }
 
     #[test]
     fn direct_provider_endpoint_no_key_persistence_omits_secret_reference() {

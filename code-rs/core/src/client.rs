@@ -69,6 +69,7 @@ use crate::error::UsageLimitReachedError;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_family::{derive_default_model_family, find_family_for_model, ModelFamily};
 use crate::model_provider_info::ModelProviderInfo;
+use crate::model_provider_info::STABLEHORDE_PROVIDER_ID;
 use crate::model_provider_info::WireApi;
 use crate::openrouter_free_router::OPENROUTER_FREE_MAX_MODEL;
 use crate::openrouter_free_router::OpenRouterFreeRouter;
@@ -128,8 +129,7 @@ struct StreamCheckpoint {
 fn should_try_next_openrouter_model(error: &CodexErr) -> bool {
     match error {
         CodexErr::UnexpectedStatus(response) => {
-            response.status != StatusCode::PAYMENT_REQUIRED
-                && response.status != StatusCode::UNAUTHORIZED
+            response.status != StatusCode::UNAUTHORIZED
                 && response.status != StatusCode::FORBIDDEN
                 && response.status != StatusCode::TOO_MANY_REQUESTS
         }
@@ -699,7 +699,7 @@ impl ModelClient {
                     .as_deref()
                     .unwrap_or(self.config.model.as_str());
                 // Create the raw streaming connection first.
-                let response_stream = stream_chat_completions(
+                let response_stream = match stream_chat_completions(
                     prompt,
                     effective_family,
                     model_slug,
@@ -711,7 +711,26 @@ impl ModelClient {
                     self.otel_event_manager.clone(),
                     log_tag,
                 )
-                .await?;
+                .await
+                {
+                    Ok(stream) => stream,
+                    Err(v1_error) if self.config.model_provider_id == STABLEHORDE_PROVIDER_ID => {
+                        warn!(
+                            "Stable Horde v1 proxy failed; falling back to v2 direct API: {v1_error}"
+                        );
+                        crate::stablehorde::stream_stablehorde_v2(
+                            prompt,
+                            effective_family,
+                            model_slug,
+                            &self.client,
+                            &self.provider,
+                            self.config.responses_originator_header.as_str(),
+                            v1_error.to_string(),
+                        )
+                        .await?
+                    }
+                    Err(error) => return Err(error),
+                };
 
                 // Wrap it with the aggregation adapter so callers see *only*
                 // the final assistant message per turn (matching the
