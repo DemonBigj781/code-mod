@@ -972,7 +972,7 @@ pub fn built_in_model_providers(
                 ),
                 experimental_bearer_token: None,
                 auth: None,
-                wire_api: WireApi::Responses,
+                wire_api: WireApi::Chat,
                 query_params: None,
                 http_headers: None,
                 env_http_headers: None,
