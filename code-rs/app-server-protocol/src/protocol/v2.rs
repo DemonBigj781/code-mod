@@ -82,6 +82,9 @@ use serde_json::Value as JsonValue;
 use thiserror::Error;
 use ts_rs::TS;
 
+mod remote_control;
+pub use remote_control::*;
+
 // Macro to declare a camelCased API v2 enum mirroring a core enum which
 // tends to use either snake_case or kebab-case.
 macro_rules! v2_enum_from_core {
