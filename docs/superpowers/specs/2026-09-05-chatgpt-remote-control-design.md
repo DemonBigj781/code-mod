@@ -67,9 +67,9 @@ The subsystem will be split into five focused layers.
 - `remoteControl/status/read`;
 - `remoteControl/pairing/start`;
 - `remoteControl/pairing/status`;
-- `remoteControl/clients/list`;
-- `remoteControl/clients/revoke`;
-- `remoteControl/statusChanged` notifications.
+- `remoteControl/client/list`;
+- `remoteControl/client/revoke`;
+- `remoteControl/status/changed` notifications.
 
 The associated status, pairing, client, pagination, and response types will
 retain the upstream camel-case JSON representation. Protocol serialization
