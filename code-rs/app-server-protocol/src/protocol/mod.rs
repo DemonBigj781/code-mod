@@ -3,6 +3,7 @@
 
 pub mod common;
 mod mappers;
+pub mod remote_control;
 mod serde_helpers;
 pub mod thread_history;
 pub mod v1;

@@ -5,6 +5,7 @@ use crate::JSONRPCRequest;
 use crate::RequestId;
 use crate::export::GeneratedSchema;
 use crate::export::write_json_schema;
+use crate::protocol::remote_control;
 use crate::protocol::v1;
 use crate::protocol::v2;
 use code_experimental_api_macros::ExperimentalApi;
@@ -411,6 +412,41 @@ client_request_definitions! {
     ExperimentalFeatureList => "experimentalFeature/list" {
         params: v2::ExperimentalFeatureListParams,
         response: v2::ExperimentalFeatureListResponse,
+    },
+    #[experimental("remoteControl/enable")]
+    RemoteControlEnable => "remoteControl/enable" {
+        params: #[serde(skip_serializing_if = "Option::is_none")] remote_control::NullableRemoteControlEnableParams,
+        response: remote_control::RemoteControlEnableResponse,
+    },
+    #[experimental("remoteControl/disable")]
+    RemoteControlDisable => "remoteControl/disable" {
+        params: #[serde(skip_serializing_if = "Option::is_none")] remote_control::NullableRemoteControlDisableParams,
+        response: remote_control::RemoteControlDisableResponse,
+    },
+    #[experimental("remoteControl/status/read")]
+    RemoteControlStatusRead => "remoteControl/status/read" {
+        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
+        response: remote_control::RemoteControlStatusReadResponse,
+    },
+    #[experimental("remoteControl/pairing/start")]
+    RemoteControlPairingStart => "remoteControl/pairing/start" {
+        params: remote_control::RemoteControlPairingStartParams,
+        response: remote_control::RemoteControlPairingStartResponse,
+    },
+    #[experimental("remoteControl/pairing/status")]
+    RemoteControlPairingStatus => "remoteControl/pairing/status" {
+        params: remote_control::RemoteControlPairingStatusParams,
+        response: remote_control::RemoteControlPairingStatusResponse,
+    },
+    #[experimental("remoteControl/client/list")]
+    RemoteControlClientsList => "remoteControl/client/list" {
+        params: remote_control::RemoteControlClientsListParams,
+        response: remote_control::RemoteControlClientsListResponse,
+    },
+    #[experimental("remoteControl/client/revoke")]
+    RemoteControlClientsRevoke => "remoteControl/client/revoke" {
+        params: remote_control::RemoteControlClientsRevokeParams,
+        response: remote_control::RemoteControlClientsRevokeResponse,
     },
     #[experimental("collaborationMode/list")]
     /// Lists collaboration mode presets.
@@ -928,6 +964,7 @@ server_notification_definitions! {
     AccountUpdated => "account/updated" (v2::AccountUpdatedNotification),
     AccountRateLimitsUpdated => "account/rateLimits/updated" (v2::AccountRateLimitsUpdatedNotification),
     AppListUpdated => "app/list/updated" (v2::AppListUpdatedNotification),
+    RemoteControlStatusChanged => "remoteControl/status/changed" (remote_control::RemoteControlStatusChangedNotification),
     FsChanged => "fs/changed" (v2::FsChangedNotification),
     ReasoningSummaryTextDelta => "item/reasoning/summaryTextDelta" (v2::ReasoningSummaryTextDeltaNotification),
     ReasoningSummaryPartAdded => "item/reasoning/summaryPartAdded" (v2::ReasoningSummaryPartAddedNotification),
