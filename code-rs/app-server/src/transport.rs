@@ -41,6 +41,11 @@ use tracing::warn;
 
 /// Size of the bounded channels used to communicate between tasks.
 pub(crate) const CHANNEL_CAPACITY: usize = 128;
+static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) fn next_connection_id() -> ConnectionId {
+    ConnectionId(NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed))
+}
 
 fn colorize(text: &str, style: Style) -> String {
     text.if_supports_color(Stream::Stderr, |value| value.style(style))
@@ -268,14 +273,12 @@ pub(crate) async fn start_websocket_acceptor(
     print_websocket_startup_banner(local_addr);
     info!("app-server websocket listening on ws://{local_addr}");
 
-    let connection_counter = Arc::new(AtomicU64::new(1));
     Ok(tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, peer_addr)) => {
                     print_websocket_connection(peer_addr);
-                    let connection_id =
-                        ConnectionId(connection_counter.fetch_add(1, Ordering::Relaxed));
+                    let connection_id = next_connection_id();
                     let transport_event_tx_for_connection = transport_event_tx.clone();
                     tokio::spawn(async move {
                         run_websocket_connection(

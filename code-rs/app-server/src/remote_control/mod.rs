@@ -7,6 +7,10 @@ pub(crate) mod clients;
 #[cfg(test)]
 mod clients_tests;
 #[allow(dead_code)]
+pub(crate) mod client_tracker;
+#[cfg(test)]
+mod client_tracker_tests;
+#[allow(dead_code)]
 pub(crate) mod enroll;
 #[cfg(test)]
 mod enroll_tests;
@@ -26,6 +30,10 @@ pub(crate) mod segment;
 mod segment_tests;
 #[allow(dead_code)]
 pub(crate) mod state;
+#[allow(dead_code)]
+pub(crate) mod websocket;
+#[cfg(test)]
+mod websocket_tests;
 
 #[cfg(test)]
 mod state_tests;
