@@ -1,5 +1,7 @@
 use std::io;
 use std::io::ErrorKind;
+use serde::Deserialize;
+use serde::Serialize;
 use url::Host;
 use url::Url;
 
@@ -12,6 +14,29 @@ pub(crate) struct RemoteControlTarget {
     pub refresh_url: String,
     pub pair_url: String,
     pub pair_status_url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct EnrollRemoteServerRequest<'a> {
+    pub name: &'a str,
+    pub os: &'a str,
+    pub arch: &'a str,
+    pub app_server_version: &'static str,
+    pub installation_id: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct EnrollRemoteServerResponse {
+    pub server_id: String,
+    pub environment_id: String,
+    pub remote_control_token: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct RefreshRemoteServerRequest<'a> {
+    pub server_id: &'a str,
+    pub installation_id: &'a str,
 }
 
 pub(crate) fn normalize_remote_control_url(
