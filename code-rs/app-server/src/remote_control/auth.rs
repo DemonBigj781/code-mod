@@ -21,7 +21,7 @@ pub(crate) struct RemoteControlAuth {
 
 impl RemoteControlAuth {
     #[cfg(test)]
-    pub(super) fn for_testing(access_token: &str, account_id: &str) -> Self {
+    pub(crate) fn for_testing(access_token: &str, account_id: &str) -> Self {
         Self {
             access_token: access_token.to_string(),
             account_id: account_id.to_string(),

@@ -44,11 +44,16 @@ fn run_jsonrpc_script(requests: &[Value]) -> anyhow::Result<BTreeMap<i64, Value>
     for line in stdout.lines() {
         let message: Value = serde_json::from_str(line)
             .with_context(|| format!("invalid JSON-RPC line `{line}`"))?;
-        let id = message
-            .get("id")
-            .and_then(Value::as_i64)
-            .with_context(|| format!("JSON-RPC message missing numeric id: {message}"))?;
-        responses.insert(id, message);
+        if let Some(id) = message.get("id").and_then(Value::as_i64) {
+            responses.insert(id, message);
+            continue;
+        }
+        if message.get("id").is_none()
+            && message.get("method").and_then(Value::as_str).is_some()
+        {
+            continue;
+        }
+        anyhow::bail!("JSON-RPC message is neither a numeric-id response nor a notification: {message}");
     }
     Ok(responses)
 }

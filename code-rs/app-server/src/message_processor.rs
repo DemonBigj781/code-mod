@@ -15,6 +15,8 @@ use crate::fs_watch::FsWatchManager;
 use crate::outgoing_message::ConnectionRequestId;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingMessageSender;
+use crate::remote_control::RemoteControlHandle;
+use crate::remote_control_processor::RemoteControlRequestProcessor;
 use crate::thread_state::ThreadStateManager;
 use code_app_server_protocol::AuthMode;
 use code_app_server_protocol::ConfigRequirements;
@@ -73,6 +75,7 @@ pub(crate) struct MessageProcessor {
     thread_state_manager: ThreadStateManager,
     cli_overrides: Vec<(String, TomlValue)>,
     code_linux_sandbox_exe: Option<PathBuf>,
+    remote_control_processor: RemoteControlRequestProcessor,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -81,12 +84,14 @@ pub(crate) struct ConnectionSessionState {
     pub(crate) experimental_api_enabled: bool,
     pub(crate) user_agent_suffix: Option<String>,
     pub(crate) opted_out_notification_methods: HashSet<String>,
+    pub(crate) app_server_client_name: Option<String>,
 }
 
 impl MessageProcessor {
     /// Create a new `MessageProcessor`, retaining a handle to the outgoing
     /// `Sender` so handlers can enqueue messages to be written to the
     /// transport.
+    #[cfg(test)]
     pub(crate) fn new(
         outgoing: Arc<OutgoingMessageSender>,
         code_linux_sandbox_exe: Option<PathBuf>,
@@ -94,14 +99,36 @@ impl MessageProcessor {
         config_warnings: Vec<serde_json::Value>,
         cli_overrides: Vec<(String, TomlValue)>,
     ) -> Self {
+        Self::new_with_remote_control(
+            outgoing,
+            code_linux_sandbox_exe,
+            config,
+            config_warnings,
+            cli_overrides,
+            None,
+            None,
+        )
+    }
+
+    pub(crate) fn new_with_remote_control(
+        outgoing: Arc<OutgoingMessageSender>,
+        code_linux_sandbox_exe: Option<PathBuf>,
+        config: Arc<Config>,
+        config_warnings: Vec<serde_json::Value>,
+        cli_overrides: Vec<(String, TomlValue)>,
+        remote_control_handle: Option<RemoteControlHandle>,
+        shared_auth_manager: Option<Arc<AuthManager>>,
+    ) -> Self {
         let sandbox_exe = code_linux_sandbox_exe
             .clone()
             .or_else(|| config.code_linux_sandbox_exe.clone());
-        let auth_manager = AuthManager::shared_with_mode_and_originator(
-            config.code_home.clone(),
-            AuthMode::ApiKey,
-            config.responses_originator_header.clone(),
-        );
+        let auth_manager = shared_auth_manager.unwrap_or_else(|| {
+            AuthManager::shared_with_mode_and_originator(
+                config.code_home.clone(),
+                AuthMode::ApiKey,
+                config.responses_originator_header.clone(),
+            )
+        });
         let conversation_manager = Arc::new(ConversationManager::new(
             auth_manager.clone(),
             SessionSource::Mcp,
@@ -133,6 +160,7 @@ impl MessageProcessor {
             thread_state_manager: ThreadStateManager::default(),
             cli_overrides,
             code_linux_sandbox_exe: sandbox_exe,
+            remote_control_processor: RemoteControlRequestProcessor::new(remote_control_handle),
         }
     }
 
@@ -197,6 +225,7 @@ impl MessageProcessor {
                         session.experimental_api_enabled = experimental_api_enabled;
                         session.opted_out_notification_methods =
                             opted_out_notification_methods.into_iter().collect();
+                        session.app_server_client_name = Some(client_info.name.clone());
                         session.user_agent_suffix =
                             Some(format!("{}; {}", client_info.name, client_info.version));
 
@@ -215,6 +244,19 @@ impl MessageProcessor {
 
                         session.initialized = true;
                         outbound_initialized.store(true, Ordering::Release);
+                        let remote_control_processor = self.remote_control_processor.clone();
+                        let app_server_client_name = session.app_server_client_name.clone();
+                        tokio::spawn(async move {
+                            if let Err(error) = remote_control_processor
+                                .resolve_persisted_preference(app_server_client_name.as_deref())
+                                .await
+                            {
+                                tracing::warn!(
+                                    error = %error,
+                                    "failed to resolve persisted remote control preference"
+                                );
+                            }
+                        });
                         return;
                     }
                     _ => {}
@@ -240,6 +282,7 @@ impl MessageProcessor {
                 v2_request,
                 session.initialized,
                 session.experimental_api_enabled,
+                session.app_server_client_name.as_deref(),
             )
                 .await;
             return;
@@ -320,6 +363,19 @@ impl MessageProcessor {
                 )
                 .await;
         }
+        if let Some(status) = self.remote_control_processor.status_notification()
+            && let Ok(params) = serde_json::to_value(status)
+        {
+            self.outgoing
+                .send_notification_to_connection(
+                    connection_id,
+                    crate::outgoing_message::OutgoingNotification {
+                        method: "remoteControl/status/changed".to_owned(),
+                        params: Some(params),
+                    },
+                )
+                .await;
+        }
     }
 
     pub(crate) async fn on_connection_closed(&mut self, connection_id: ConnectionId) {
@@ -360,6 +416,7 @@ impl MessageProcessor {
         request: AppServerClientRequest,
         session_initialized: bool,
         experimental_api_enabled: bool,
+        app_server_client_name: Option<&str>,
     ) {
         if !session_initialized {
             let error = JSONRPCErrorError {
@@ -562,6 +619,118 @@ impl MessageProcessor {
             }
             AppServerClientRequest::GetAccountRateLimits { .. } => {
                 match self.code_message_processor.get_account_rate_limits_v2() {
+                    Ok(response) => {
+                        self.outgoing
+                            .send_response_to_connection(connection_id, request_id, response)
+                            .await;
+                    }
+                    Err(error) => {
+                        self.outgoing
+                            .send_error_to_connection(connection_id, request_id, error)
+                            .await;
+                    }
+                }
+            }
+            AppServerClientRequest::RemoteControlEnable { params, .. } => {
+                let ephemeral = params.unwrap_or_default().ephemeral;
+                match self
+                    .remote_control_processor
+                    .enable(ephemeral, app_server_client_name)
+                    .await
+                {
+                    Ok(response) => {
+                        self.outgoing
+                            .send_response_to_connection(connection_id, request_id, response)
+                            .await;
+                    }
+                    Err(error) => {
+                        self.outgoing
+                            .send_error_to_connection(connection_id, request_id, error)
+                            .await;
+                    }
+                }
+            }
+            AppServerClientRequest::RemoteControlDisable { params, .. } => {
+                let ephemeral = params.unwrap_or_default().ephemeral;
+                match self
+                    .remote_control_processor
+                    .disable(ephemeral, app_server_client_name)
+                    .await
+                {
+                    Ok(response) => {
+                        self.outgoing
+                            .send_response_to_connection(connection_id, request_id, response)
+                            .await;
+                    }
+                    Err(error) => {
+                        self.outgoing
+                            .send_error_to_connection(connection_id, request_id, error)
+                            .await;
+                    }
+                }
+            }
+            AppServerClientRequest::RemoteControlStatusRead { .. } => {
+                match self.remote_control_processor.status_read() {
+                    Ok(response) => {
+                        self.outgoing
+                            .send_response_to_connection(connection_id, request_id, response)
+                            .await;
+                    }
+                    Err(error) => {
+                        self.outgoing
+                            .send_error_to_connection(connection_id, request_id, error)
+                            .await;
+                    }
+                }
+            }
+            AppServerClientRequest::RemoteControlPairingStart { params, .. } => {
+                match self
+                    .remote_control_processor
+                    .pairing_start(params, app_server_client_name)
+                    .await
+                {
+                    Ok(response) => {
+                        self.outgoing
+                            .send_response_to_connection(connection_id, request_id, response)
+                            .await;
+                    }
+                    Err(error) => {
+                        self.outgoing
+                            .send_error_to_connection(connection_id, request_id, error)
+                            .await;
+                    }
+                }
+            }
+            AppServerClientRequest::RemoteControlPairingStatus { params, .. } => {
+                match self.remote_control_processor.pairing_status(params).await {
+                    Ok(response) => {
+                        self.outgoing
+                            .send_response_to_connection(connection_id, request_id, response)
+                            .await;
+                    }
+                    Err(error) => {
+                        self.outgoing
+                            .send_error_to_connection(connection_id, request_id, error)
+                            .await;
+                    }
+                }
+            }
+            AppServerClientRequest::RemoteControlClientsList { params, .. } => {
+                match self.remote_control_processor.clients_list(params).await {
+                    Ok(response) => {
+                        self.outgoing
+                            .send_response_to_connection(connection_id, request_id, response)
+                            .await;
+                    }
+                    Err(error) => {
+                        self.outgoing
+                            .send_error_to_connection(connection_id, request_id, error)
+                            .await;
+                    }
+                }
+            }
+            AppServerClientRequest::RemoteControlClientsRevoke { params, .. } => {
+                match self.remote_control_processor.clients_revoke(params).await {
                     Ok(response) => {
                         self.outgoing
                             .send_response_to_connection(connection_id, request_id, response)

@@ -17,6 +17,11 @@ use std::io::ErrorKind;
 use std::io::Result as IoResult;
 use std::io::Write;
 use std::net::SocketAddr;
+#[cfg(unix)]
+use std::os::unix::fs::FileTypeExt;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -29,9 +34,14 @@ use tokio::io::BufReader;
 use tokio::io::{self};
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+#[cfg(unix)]
+use tokio::net::UnixListener;
+#[cfg(unix)]
+use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
 use tracing::debug;
@@ -80,16 +90,19 @@ fn print_websocket_connection(peer_addr: SocketAddr) {
     write_stderr_line(format_args!("{connected_label} {peer_addr}"));
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppServerTransport {
     Stdio,
     WebSocket { bind_address: SocketAddr },
+    UnixSocket { socket_path: PathBuf },
+    Off,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AppServerTransportParseError {
     UnsupportedListenUrl(String),
     InvalidWebSocketListenUrl(String),
+    InvalidUnixSocketListenUrl(String),
 }
 
 impl std::fmt::Display for AppServerTransportParseError {
@@ -97,11 +110,15 @@ impl std::fmt::Display for AppServerTransportParseError {
         match self {
             AppServerTransportParseError::UnsupportedListenUrl(listen_url) => write!(
                 f,
-                "unsupported --listen URL `{listen_url}`; expected `stdio://` or `ws://IP:PORT`"
+                "unsupported --listen URL `{listen_url}`; expected `stdio://`, `unix:///absolute/path`, `ws://IP:PORT`, or `off://`"
             ),
             AppServerTransportParseError::InvalidWebSocketListenUrl(listen_url) => write!(
                 f,
                 "invalid websocket --listen URL `{listen_url}`; expected `ws://IP:PORT`"
+            ),
+            AppServerTransportParseError::InvalidUnixSocketListenUrl(listen_url) => write!(
+                f,
+                "invalid Unix socket --listen URL `{listen_url}`; expected `unix:///absolute/path`"
             ),
         }
     }
@@ -116,6 +133,9 @@ impl AppServerTransport {
         if listen_url == Self::DEFAULT_LISTEN_URL {
             return Ok(Self::Stdio);
         }
+        if listen_url == "off://" {
+            return Ok(Self::Off);
+        }
 
         if let Some(socket_addr) = listen_url.strip_prefix("ws://") {
             let bind_address = socket_addr.parse::<SocketAddr>().map_err(|_| {
@@ -123,11 +143,149 @@ impl AppServerTransport {
             })?;
             return Ok(Self::WebSocket { bind_address });
         }
+        if let Some(socket_path) = listen_url.strip_prefix("unix://") {
+            let socket_path = PathBuf::from(socket_path);
+            if !socket_path.is_absolute() {
+                return Err(AppServerTransportParseError::InvalidUnixSocketListenUrl(
+                    listen_url.to_owned(),
+                ));
+            }
+            return Ok(Self::UnixSocket { socket_path });
+        }
 
         Err(AppServerTransportParseError::UnsupportedListenUrl(
             listen_url.to_owned(),
         ))
     }
+}
+
+#[cfg(unix)]
+pub(crate) async fn start_unix_socket_acceptor(
+    socket_path: PathBuf,
+    transport_event_tx: mpsc::Sender<TransportEvent>,
+    shutdown: CancellationToken,
+) -> IoResult<JoinHandle<()>> {
+    match tokio::fs::symlink_metadata(&socket_path).await {
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                ErrorKind::AddrInUse,
+                format!("Unix socket path already exists: {}", socket_path.display()),
+            ));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let listener = UnixListener::bind(&socket_path)?;
+    let permissions = std::os::unix::fs::PermissionsExt::from_mode(0o600);
+    tokio::fs::set_permissions(&socket_path, permissions).await?;
+    let metadata = tokio::fs::symlink_metadata(&socket_path).await?;
+    let socket_identity = (metadata.dev(), metadata.ino(), metadata.uid());
+    Ok(tokio::spawn(async move {
+        loop {
+            let accepted = tokio::select! {
+                _ = shutdown.cancelled() => break,
+                accepted = listener.accept() => accepted,
+            };
+            match accepted {
+                Ok((stream, _)) => {
+                    let connection_id = next_connection_id();
+                    let transport_event_tx = transport_event_tx.clone();
+                    let shutdown = shutdown.clone();
+                    tokio::spawn(async move {
+                        run_unix_socket_connection(
+                            connection_id,
+                            stream,
+                            transport_event_tx,
+                            shutdown,
+                        )
+                        .await;
+                    });
+                }
+                Err(error) => warn!("failed to accept Unix socket connection: {error}"),
+            }
+        }
+        if let Ok(metadata) = tokio::fs::symlink_metadata(&socket_path).await
+            && metadata.file_type().is_socket()
+            && (metadata.dev(), metadata.ino(), metadata.uid()) == socket_identity
+        {
+            let _ = tokio::fs::remove_file(&socket_path).await;
+        }
+    }))
+}
+
+#[cfg(unix)]
+async fn run_unix_socket_connection(
+    connection_id: ConnectionId,
+    stream: UnixStream,
+    transport_event_tx: mpsc::Sender<TransportEvent>,
+    shutdown: CancellationToken,
+) {
+    let (reader, mut writer) = stream.into_split();
+    let (writer_tx, mut writer_rx) = mpsc::channel::<OutgoingMessage>(CHANNEL_CAPACITY);
+    let writer_tx_for_reader = writer_tx.clone();
+    let disconnect_notify = Arc::new(Notify::new());
+    if transport_event_tx
+        .send(TransportEvent::ConnectionOpened {
+            connection_id,
+            writer: writer_tx,
+            disconnect_notify: Some(Arc::clone(&disconnect_notify)),
+        })
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    let writer_disconnect = Arc::clone(&disconnect_notify);
+    let writer_shutdown = shutdown.clone();
+    let writer_task = tokio::spawn(async move {
+        loop {
+            let outgoing = tokio::select! {
+                _ = writer_disconnect.notified() => break,
+                _ = writer_shutdown.cancelled() => break,
+                outgoing = writer_rx.recv() => outgoing,
+            };
+            let Some(outgoing) = outgoing else {
+                break;
+            };
+            let Some(mut json) = serialize_outgoing_message(outgoing) else {
+                continue;
+            };
+            json.push('\n');
+            if writer.write_all(json.as_bytes()).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut lines = BufReader::new(reader).lines();
+    loop {
+        let line = tokio::select! {
+            _ = disconnect_notify.notified() => break,
+            _ = shutdown.cancelled() => break,
+            line = lines.next_line() => line,
+        };
+        match line {
+            Ok(Some(line)) => {
+                if !forward_incoming_message(
+                    &transport_event_tx,
+                    &writer_tx_for_reader,
+                    connection_id,
+                    &line,
+                )
+                .await
+                {
+                    break;
+                }
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    let _ = transport_event_tx
+        .send(TransportEvent::ConnectionClosed { connection_id })
+        .await;
+    disconnect_notify.notify_waiters();
+    let _ = writer_task.await;
 }
 
 impl FromStr for AppServerTransport {
@@ -199,6 +357,7 @@ impl OutboundConnectionState {
 pub(crate) async fn start_stdio_connection(
     transport_event_tx: mpsc::Sender<TransportEvent>,
     stdio_handles: &mut Vec<JoinHandle<()>>,
+    shutdown: CancellationToken,
 ) -> IoResult<()> {
     let connection_id = ConnectionId(0);
     let (writer_tx, mut writer_rx) = mpsc::channel::<OutgoingMessage>(CHANNEL_CAPACITY);
@@ -219,7 +378,11 @@ pub(crate) async fn start_stdio_connection(
         let mut lines = reader.lines();
 
         loop {
-            match lines.next_line().await {
+            let line = tokio::select! {
+                _ = shutdown.cancelled() => break,
+                line = lines.next_line() => line,
+            };
+            match line {
                 Ok(Some(line)) => {
                     if !forward_incoming_message(
                         &transport_event_tx_for_reader,
@@ -267,6 +430,7 @@ pub(crate) async fn start_stdio_connection(
 pub(crate) async fn start_websocket_acceptor(
     bind_address: SocketAddr,
     transport_event_tx: mpsc::Sender<TransportEvent>,
+    shutdown: CancellationToken,
 ) -> IoResult<JoinHandle<()>> {
     let listener = TcpListener::bind(bind_address).await?;
     let local_addr = listener.local_addr()?;
@@ -275,16 +439,22 @@ pub(crate) async fn start_websocket_acceptor(
 
     Ok(tokio::spawn(async move {
         loop {
-            match listener.accept().await {
+            let accepted = tokio::select! {
+                _ = shutdown.cancelled() => break,
+                accepted = listener.accept() => accepted,
+            };
+            match accepted {
                 Ok((stream, peer_addr)) => {
                     print_websocket_connection(peer_addr);
                     let connection_id = next_connection_id();
                     let transport_event_tx_for_connection = transport_event_tx.clone();
+                    let shutdown = shutdown.clone();
                     tokio::spawn(async move {
                         run_websocket_connection(
                             connection_id,
                             stream,
                             transport_event_tx_for_connection,
+                            shutdown,
                         )
                         .await;
                     });
@@ -301,6 +471,7 @@ async fn run_websocket_connection(
     connection_id: ConnectionId,
     stream: TcpStream,
     transport_event_tx: mpsc::Sender<TransportEvent>,
+    shutdown: CancellationToken,
 ) {
     let websocket_stream = match accept_async(stream).await {
         Ok(stream) => stream,
@@ -328,6 +499,9 @@ async fn run_websocket_connection(
     let (mut websocket_writer, mut websocket_reader) = websocket_stream.split();
     loop {
         tokio::select! {
+            _ = shutdown.cancelled() => {
+                break;
+            }
             _ = disconnect_notify.notified() => {
                 break;
             }
@@ -581,6 +755,21 @@ mod tests {
     }
 
     #[test]
+    fn app_server_transport_parses_unix_socket_and_off_listen_urls() {
+        assert_eq!(
+            AppServerTransport::from_listen_url("unix:///tmp/code-app-server.sock")
+                .expect("Unix socket URL should parse"),
+            AppServerTransport::UnixSocket {
+                socket_path: PathBuf::from("/tmp/code-app-server.sock"),
+            },
+        );
+        assert_eq!(
+            AppServerTransport::from_listen_url("off://").expect("off URL should parse"),
+            AppServerTransport::Off,
+        );
+    }
+
+    #[test]
     fn app_server_transport_rejects_invalid_websocket_listen_url() {
         let err = AppServerTransport::from_listen_url("ws://localhost:1234")
             .expect_err("hostname bind address should be rejected");
@@ -596,7 +785,107 @@ mod tests {
             .expect_err("unsupported scheme should fail");
         assert_eq!(
             err.to_string(),
-            "unsupported --listen URL `http://127.0.0.1:1234`; expected `stdio://` or `ws://IP:PORT`"
+            "unsupported --listen URL `http://127.0.0.1:1234`; expected `stdio://`, `unix:///absolute/path`, `ws://IP:PORT`, or `off://`"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_socket_connection_uses_normal_transport_lifecycle() {
+        let (client, server) = UnixStream::pair().expect("create Unix socket pair");
+        let (mut client_reader, mut client_writer) = client.into_split();
+        let (transport_tx, mut transport_rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let shutdown = CancellationToken::new();
+        let connection_id = ConnectionId(92);
+        let connection_task = tokio::spawn(run_unix_socket_connection(
+            connection_id,
+            server,
+            transport_tx,
+            shutdown.clone(),
+        ));
+
+        let writer = match transport_rx.recv().await.expect("connection opened") {
+            TransportEvent::ConnectionOpened {
+                connection_id: opened_id,
+                writer,
+                ..
+            } => {
+                assert_eq!(opened_id, connection_id);
+                writer
+            }
+            event => panic!("expected connection-opened event, got {event:?}"),
+        };
+
+        client_writer
+            .write_all(
+                b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getUserAgent\"}\n",
+            )
+            .await
+            .expect("write request");
+        match transport_rx.recv().await.expect("incoming request") {
+            TransportEvent::IncomingMessage {
+                connection_id: incoming_id,
+                message: JSONRPCMessage::Request(request),
+            } => {
+                assert_eq!(incoming_id, connection_id);
+                assert_eq!(request.method, "getUserAgent");
+            }
+            event => panic!("expected incoming request, got {event:?}"),
+        }
+
+        writer
+            .send(OutgoingMessage::Notification(
+                crate::outgoing_message::OutgoingNotification {
+                    method: "transport/test".to_owned(),
+                    params: Some(json!({"ok": true})),
+                },
+            ))
+            .await
+            .expect("send response");
+        let mut response = String::new();
+        BufReader::new(&mut client_reader)
+            .read_line(&mut response)
+            .await
+            .expect("read response");
+        let response: serde_json::Value =
+            serde_json::from_str(&response).expect("response JSON");
+        assert_eq!(response["method"], "transport/test");
+
+        drop(client_writer);
+        match transport_rx.recv().await.expect("connection closed") {
+            TransportEvent::ConnectionClosed {
+                connection_id: closed_id,
+            } => assert_eq!(closed_id, connection_id),
+            event => panic!("expected connection-closed event, got {event:?}"),
+        }
+        shutdown.cancel();
+        connection_task.await.expect("join connection task");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_socket_acceptor_does_not_replace_an_existing_path() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let socket_path = temp_dir.path().join("app-server.sock");
+        tokio::fs::write(&socket_path, "operator-owned")
+            .await
+            .expect("create existing path");
+        let (transport_tx, _transport_rx) = mpsc::channel(CHANNEL_CAPACITY);
+
+        let error = start_unix_socket_acceptor(
+            socket_path.clone(),
+            transport_tx,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("existing path must block socket startup");
+
+        assert_eq!(error.kind(), ErrorKind::AddrInUse);
+        assert_eq!(
+            tokio::fs::read_to_string(socket_path)
+                .await
+                .expect("existing path should remain"),
+            "operator-owned",
         );
     }
 

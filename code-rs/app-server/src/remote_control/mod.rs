@@ -90,8 +90,7 @@ pub(crate) enum RemoteControlPolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub(crate) enum RemoteControlStartupMode {
+pub enum RemoteControlStartupMode {
     ResolvePersisted,
     DisabledEphemeral,
     EnabledEphemeral,

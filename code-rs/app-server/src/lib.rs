@@ -11,31 +11,44 @@ use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 
 use code_common::CliConfigOverrides;
+use code_core::AuthManager;
 use code_core::config::Config;
 use code_core::config::ConfigOverrides;
+use code_app_server_protocol::AuthMode;
 use mcp_types::JSONRPCMessage;
 use mcp_types::RequestId;
+use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
-use serde_json::json;
 
+use crate::installation_id::resolve_installation_id;
 use crate::message_processor::MessageProcessor;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessage;
 use crate::outgoing_message::OutgoingMessageSender;
+use crate::outgoing_message::OutgoingNotification;
+use crate::remote_control::RemoteControlPolicy;
+use crate::remote_control::RemoteControlStartConfig;
+use crate::remote_control::auth::CoreRemoteControlAuthProvider;
+use crate::remote_control::host_device::HostDevice;
+use crate::remote_control::start_remote_control;
+use crate::remote_control::state::RemoteControlState;
 use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::ConnectionState;
 use crate::transport::OutboundConnectionState;
 use crate::transport::TransportEvent;
 use crate::transport::route_outgoing_envelope;
 use crate::transport::start_stdio_connection;
+#[cfg(unix)]
+use crate::transport::start_unix_socket_acceptor;
 use crate::transport::start_websocket_acceptor;
 
 pub mod code_message_processor;
@@ -45,15 +58,20 @@ mod error_code;
 mod external_agent_config_api;
 mod fs_api;
 mod fs_watch;
+mod installation_id;
 #[allow(dead_code)]
 mod fuzzy_file_search;
 mod message_processor;
 pub mod outgoing_message;
 mod remote_control;
+mod remote_control_processor;
+#[cfg(test)]
+mod remote_control_processor_tests;
 mod transport;
 mod thread_state;
 
 pub use crate::transport::AppServerTransport;
+pub use crate::remote_control::RemoteControlStartupMode;
 
 const INTERNAL_REQUEST_ID_PREFIX: &str = "__code_internal_request__";
 
@@ -77,6 +95,21 @@ struct RequestRoute {
     original_request_id: RequestId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppServerRuntimeOptions {
+    pub remote_control_startup_mode: RemoteControlStartupMode,
+    pub install_shutdown_signal_handler: bool,
+}
+
+impl Default for AppServerRuntimeOptions {
+    fn default() -> Self {
+        Self {
+            remote_control_startup_mode: RemoteControlStartupMode::ResolvePersisted,
+            install_shutdown_signal_handler: true,
+        }
+    }
+}
+
 pub async fn run_main(
     code_linux_sandbox_exe: Option<PathBuf>,
     cli_config_overrides: CliConfigOverrides,
@@ -94,6 +127,21 @@ pub async fn run_main_with_transport(
     cli_config_overrides: CliConfigOverrides,
     transport: AppServerTransport,
 ) -> IoResult<()> {
+    run_main_with_transport_options(
+        code_linux_sandbox_exe,
+        cli_config_overrides,
+        transport,
+        AppServerRuntimeOptions::default(),
+    )
+    .await
+}
+
+pub async fn run_main_with_transport_options(
+    code_linux_sandbox_exe: Option<PathBuf>,
+    cli_config_overrides: CliConfigOverrides,
+    transport: AppServerTransport,
+    runtime_options: AppServerRuntimeOptions,
+) -> IoResult<()> {
     let _ = tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
@@ -104,19 +152,6 @@ pub async fn run_main_with_transport(
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(CHANNEL_CAPACITY);
     let (outbound_control_tx, mut outbound_control_rx) =
         mpsc::channel::<OutboundControlEvent>(CHANNEL_CAPACITY);
-
-    let mut stdio_handles = Vec::<JoinHandle<()>>::new();
-    let mut websocket_accept_handle = None;
-    match transport {
-        AppServerTransport::Stdio => {
-            start_stdio_connection(transport_event_tx.clone(), &mut stdio_handles).await?;
-        }
-        AppServerTransport::WebSocket { bind_address } => {
-            websocket_accept_handle =
-                Some(start_websocket_acceptor(bind_address, transport_event_tx.clone()).await?);
-        }
-    }
-    let shutdown_when_no_connections = matches!(transport, AppServerTransport::Stdio);
 
     // Parse CLI overrides once and derive the base Config eagerly so later
     // components do not need to work with raw TOML values.
@@ -152,6 +187,154 @@ pub async fn run_main_with_transport(
             })?
         }
     };
+
+    let config = Arc::new(config);
+    let auth_manager = AuthManager::shared_with_mode_and_originator(
+        config.code_home.clone(),
+        AuthMode::ApiKey,
+        config.responses_originator_header.clone(),
+    );
+    let remote_control_state = match RemoteControlState::open(&config.code_home).await {
+        Ok(state) => Some(state),
+        Err(error) => {
+            warn!(error = %error, "remote control persistence is unavailable");
+            None
+        }
+    };
+    let installation_id = resolve_installation_id(&config.code_home).await?;
+    let shutdown = CancellationToken::new();
+    let remote_control_startup_mode = runtime_options.remote_control_startup_mode;
+
+    if matches!(transport, AppServerTransport::Off)
+        && matches!(
+            remote_control_startup_mode,
+            RemoteControlStartupMode::DisabledEphemeral
+        )
+    {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "no transport configured; use --listen or enable remote control",
+        ));
+    }
+    if matches!(transport, AppServerTransport::Off)
+        && matches!(
+            remote_control_startup_mode,
+            RemoteControlStartupMode::EnabledEphemeral
+        )
+        && remote_control_state.is_none()
+    {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "no transport configured; remote control persistence is unavailable",
+        ));
+    }
+
+    let (remote_control_task, remote_control_handle) = start_remote_control(
+        RemoteControlStartConfig {
+            remote_control_url: config.chatgpt_base_url.clone(),
+            installation_id,
+            host: HostDevice::detect(resolve_server_name()),
+            policy: RemoteControlPolicy::Allowed,
+        },
+        remote_control_state,
+        Arc::new(CoreRemoteControlAuthProvider::new(Arc::clone(&auth_manager))),
+        transport_event_tx.clone(),
+        shutdown.clone(),
+        remote_control_startup_mode,
+    )
+    .await?;
+
+    if matches!(transport, AppServerTransport::Off)
+        && matches!(
+            remote_control_startup_mode,
+            RemoteControlStartupMode::ResolvePersisted
+        )
+    {
+        let persisted_enabled = match remote_control_handle
+            .resolve_persisted_preference(None)
+            .await
+        {
+            Ok(enabled) => enabled,
+            Err(error) => {
+                warn!(error = %error, "failed to resolve persisted remote control preference");
+                false
+            }
+        };
+        if !persisted_enabled {
+            shutdown.cancel();
+            let _ = remote_control_task.await;
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                "no transport configured; use --listen or enable remote control",
+            ));
+        }
+    }
+
+    let mut stdio_handles = Vec::<JoinHandle<()>>::new();
+    let mut transport_accept_handles = Vec::<JoinHandle<()>>::new();
+    let transport_start_result = match &transport {
+        AppServerTransport::Stdio => {
+            start_stdio_connection(
+                transport_event_tx.clone(),
+                &mut stdio_handles,
+                shutdown.clone(),
+            )
+            .await
+        }
+        AppServerTransport::WebSocket { bind_address } => {
+            match start_websocket_acceptor(
+                *bind_address,
+                transport_event_tx.clone(),
+                shutdown.clone(),
+            )
+            .await
+            {
+                Ok(handle) => {
+                    transport_accept_handles.push(handle);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        }
+        #[cfg(unix)]
+        AppServerTransport::UnixSocket { socket_path } => {
+            match start_unix_socket_acceptor(
+                socket_path.clone(),
+                transport_event_tx.clone(),
+                shutdown.clone(),
+            )
+            .await
+            {
+                Ok(handle) => {
+                    transport_accept_handles.push(handle);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        }
+        #[cfg(not(unix))]
+        AppServerTransport::UnixSocket { .. } => Err(std::io::Error::new(
+            ErrorKind::Unsupported,
+            "Unix socket transport is unavailable on this platform",
+        )),
+        AppServerTransport::Off => Ok(()),
+    };
+    if let Err(error) = transport_start_result {
+        shutdown.cancel();
+        let _ = remote_control_task.await;
+        return Err(error);
+    }
+    let shutdown_when_no_connections = matches!(transport, AppServerTransport::Stdio);
+
+    let shutdown_signal_handle = runtime_options.install_shutdown_signal_handler.then(|| {
+        let shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            match tokio::signal::ctrl_c().await {
+                Ok(()) => shutdown.cancel(),
+                Err(error) => warn!(error = %error, "failed to listen for shutdown signal"),
+            }
+        })
+    });
 
     let request_routes = Arc::new(tokio::sync::Mutex::new(HashMap::<RequestId, RequestRoute>::new()));
     let request_routes_for_outbound = Arc::clone(&request_routes);
@@ -228,18 +411,50 @@ pub async fn run_main_with_transport(
             Arc::new(OutgoingMessageSender::new_with_routed_sender(outgoing_tx));
         let outbound_control_tx = outbound_control_tx;
         let request_routes = Arc::clone(&request_routes);
-        let mut processor = MessageProcessor::new(
+        let mut processor = MessageProcessor::new_with_remote_control(
             Arc::clone(&outgoing_message_sender),
             code_linux_sandbox_exe,
-            Arc::new(config),
+            config,
             config_warnings,
             cli_kv_overrides,
+            Some(remote_control_handle.clone()),
+            Some(auth_manager),
         );
         let mut connections = HashMap::<ConnectionId, ConnectionState>::new();
         let mut next_internal_request_ordinal = 0u64;
+        let mut remote_control_status_rx = remote_control_handle.status_receiver();
+        let mut remote_control_status = remote_control_status_rx.borrow().clone();
+        let processor_shutdown = shutdown.clone();
         async move {
             loop {
-                let Some(event) = transport_event_rx.recv().await else {
+                let event = tokio::select! {
+                    _ = processor_shutdown.cancelled() => break,
+                    changed = remote_control_status_rx.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                        let status = remote_control_status_rx.borrow().clone();
+                        if status != remote_control_status {
+                            remote_control_status = status.clone();
+                            match serde_json::to_value(status) {
+                                Ok(params) => {
+                                    outgoing_message_sender
+                                        .send_notification(OutgoingNotification {
+                                            method: "remoteControl/status/changed".to_owned(),
+                                            params: Some(params),
+                                        })
+                                        .await;
+                                }
+                                Err(error) => {
+                                    warn!(error = %error, "failed to serialize remote control status");
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    event = transport_event_rx.recv() => event,
+                };
+                let Some(event) = event else {
                     break;
                 };
                 match event {
@@ -364,6 +579,14 @@ pub async fn run_main_with_transport(
                 }
             }
 
+            for connection_id in connections.keys().copied().collect::<Vec<_>>() {
+                outgoing_message_sender
+                    .clear_callbacks_for_connection(connection_id)
+                    .await;
+                processor.on_connection_closed(connection_id).await;
+                remove_request_routes_for_connection(&request_routes, connection_id).await;
+            }
+
             info!("processor task exited (channel closed)");
         }
     });
@@ -371,17 +594,42 @@ pub async fn run_main_with_transport(
     drop(transport_event_tx);
 
     let _ = processor_handle.await;
-    let _ = outbound_handle.await;
-
-    if let Some(handle) = websocket_accept_handle {
+    shutdown.cancel();
+    if let Some(handle) = shutdown_signal_handle {
         handle.abort();
+        let _ = handle.await;
+    }
+    let _ = outbound_handle.await;
+    match remote_control_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => warn!(error = %error, "remote control task exited with an error"),
+        Err(error) if error.is_cancelled() => {}
+        Err(error) => warn!(error = %error, "remote control task failed"),
     }
 
+    for handle in transport_accept_handles {
+        let _ = handle.await;
+    }
     for handle in stdio_handles {
+        handle.abort();
         let _ = handle.await;
     }
 
     Ok(())
+}
+
+fn resolve_server_name() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .map(|hostname| hostname.trim().to_owned())
+        .filter(|hostname| !hostname.is_empty())
+        .or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|hostname| hostname.trim().to_owned())
+                .filter(|hostname| !hostname.is_empty())
+        })
+        .unwrap_or_else(|| "code-app-server".to_owned())
 }
 
 async fn rewrite_response_routing(
