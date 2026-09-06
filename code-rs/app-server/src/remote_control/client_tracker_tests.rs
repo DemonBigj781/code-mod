@@ -15,12 +15,13 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 async fn routes_two_remote_streams_bidirectionally_and_closes_them_independently() {
     let (server_tx, mut server_rx) = mpsc::channel(CHANNEL_CAPACITY);
     let (transport_tx, mut transport_rx) = mpsc::channel(CHANNEL_CAPACITY);
-    let mut tracker = ClientTracker::new(server_tx, transport_tx);
+    let mut tracker = ClientTracker::new(server_tx, transport_tx, CancellationToken::new());
 
     tracker
         .handle_envelope(initialize_envelope("client-1", "stream-1", 1))
@@ -100,7 +101,7 @@ async fn routes_two_remote_streams_bidirectionally_and_closes_them_independently
 async fn ignores_unknown_and_duplicate_messages_and_answers_ping_status() {
     let (server_tx, mut server_rx) = mpsc::channel(CHANNEL_CAPACITY);
     let (transport_tx, mut transport_rx) = mpsc::channel(CHANNEL_CAPACITY);
-    let mut tracker = ClientTracker::new(server_tx, transport_tx);
+    let mut tracker = ClientTracker::new(server_tx, transport_tx, CancellationToken::new());
 
     tracker
         .handle_envelope(message_envelope(

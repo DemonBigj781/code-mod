@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::Duration;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 
 const REMOTE_CONTROL_TRANSPORT_EVENT_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -43,6 +44,7 @@ pub(crate) struct ClientTracker {
     join_set: JoinSet<(ClientId, StreamId)>,
     server_event_tx: mpsc::Sender<QueuedServerEnvelope>,
     transport_event_tx: mpsc::Sender<TransportEvent>,
+    shutdown: CancellationToken,
     reassembler: ClientSegmentReassembler,
 }
 
@@ -50,6 +52,7 @@ impl ClientTracker {
     pub(crate) fn new(
         server_event_tx: mpsc::Sender<QueuedServerEnvelope>,
         transport_event_tx: mpsc::Sender<TransportEvent>,
+        shutdown: CancellationToken,
     ) -> Self {
         Self {
             clients: HashMap::new(),
@@ -57,6 +60,7 @@ impl ClientTracker {
             join_set: JoinSet::new(),
             server_event_tx,
             transport_event_tx,
+            shutdown,
             reassembler: ClientSegmentReassembler::default(),
         }
     }
@@ -259,13 +263,18 @@ impl ClientTracker {
     }
 
     async fn send_transport_event(&self, event: TransportEvent) -> io::Result<()> {
-        timeout(
-            REMOTE_CONTROL_TRANSPORT_EVENT_SEND_TIMEOUT,
-            self.transport_event_tx.send(event),
-        )
-        .await
-        .map_err(|_| io::Error::new(ErrorKind::TimedOut, "remote transport event timed out"))?
-        .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "app-server processor unavailable"))
+        tokio::select! {
+            _ = self.shutdown.cancelled() => Err(io::Error::new(
+                ErrorKind::Interrupted,
+                "remote transport event send cancelled",
+            )),
+            result = timeout(
+                REMOTE_CONTROL_TRANSPORT_EVENT_SEND_TIMEOUT,
+                self.transport_event_tx.send(event),
+            ) => result
+                .map_err(|_| io::Error::new(ErrorKind::TimedOut, "remote transport event timed out"))?
+                .map_err(|_| io::Error::new(ErrorKind::BrokenPipe, "app-server processor unavailable")),
+        }
     }
 }
 
