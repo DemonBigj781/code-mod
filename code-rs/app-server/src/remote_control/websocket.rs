@@ -1,5 +1,6 @@
 use super::auth::RemoteControlAuthProvider;
 use super::client_tracker::ClientTracker;
+use super::desired_state::RemoteControlDesiredState;
 use super::enroll::RemoteControlEnrollment;
 use super::enroll::RemoteControlEnrollmentSelection;
 use super::enroll::resolve_remote_control_enrollment;
@@ -14,6 +15,8 @@ use super::state::RemoteControlState;
 use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::TransportEvent;
 use base64::Engine;
+use code_app_server_protocol::RemoteControlConnectionStatus;
+use code_app_server_protocol::RemoteControlStatusChangedNotification;
 use futures::SinkExt;
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -49,11 +52,12 @@ pub(crate) struct RemoteControlWebsocketConfig {
     pub(crate) auth_provider: Arc<dyn RemoteControlAuthProvider>,
     pub(crate) installation_id: String,
     pub(crate) host: HostDevice,
-    pub(crate) app_server_client_name: Option<String>,
-    pub(crate) remote_control_enabled: Option<bool>,
+    pub(crate) app_server_client_name: Arc<Mutex<Option<String>>>,
     pub(crate) current_enrollment: Arc<Mutex<Option<RemoteControlEnrollment>>>,
     pub(crate) transport_event_tx: mpsc::Sender<TransportEvent>,
     pub(crate) shutdown: CancellationToken,
+    pub(crate) desired_state_rx: watch::Receiver<RemoteControlDesiredState>,
+    pub(crate) status_tx: Arc<watch::Sender<RemoteControlStatusChangedNotification>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,6 +81,52 @@ enum RetryOutcome {
 pub(crate) async fn run_remote_control_websocket(
     config: RemoteControlWebsocketConfig,
 ) -> io::Result<()> {
+    let mut desired_state_rx = config.desired_state_rx.clone();
+    loop {
+        if !desired_state_rx.borrow().is_enabled() {
+            let enabled = tokio::select! {
+                _ = config.shutdown.cancelled() => return Ok(()),
+                enabled = desired_state_rx.wait_for(|state| state.is_enabled()) => enabled,
+            };
+            if enabled.is_err() {
+                return Ok(());
+            }
+        }
+        publish_connection_status(&config.status_tx, RemoteControlConnectionStatus::Connecting);
+        let enabled_shutdown = config.shutdown.child_token();
+        let enabled_loop = run_enabled_remote_control_websocket(&config, enabled_shutdown.clone());
+        tokio::pin!(enabled_loop);
+        tokio::select! {
+            result = &mut enabled_loop => return result,
+            _ = config.shutdown.cancelled() => {
+                enabled_shutdown.cancel();
+                let _ = enabled_loop.await;
+                return Ok(());
+            }
+            disabled = async {
+                desired_state_rx
+                    .wait_for(|state| !state.is_enabled())
+                    .await
+                    .map(|_| ())
+            } => {
+                enabled_shutdown.cancel();
+                let _ = enabled_loop.await;
+                if disabled.is_err() {
+                    return Ok(());
+                }
+                publish_connection_status(
+                    &config.status_tx,
+                    RemoteControlConnectionStatus::Disabled,
+                );
+            }
+        }
+    }
+}
+
+async fn run_enabled_remote_control_websocket(
+    config: &RemoteControlWebsocketConfig,
+    shutdown: CancellationToken,
+) -> io::Result<()> {
     let mut subscribe_cursor = None;
     let mut reconnect_attempt = 0_u32;
     let mut selection = RemoteControlEnrollmentSelection::ReuseOrCreate;
@@ -84,7 +134,7 @@ pub(crate) async fn run_remote_control_websocket(
 
     loop {
         let enrollment = tokio::select! {
-            _ = config.shutdown.cancelled() => return Ok(()),
+            _ = shutdown.cancelled() => return Ok(()),
             changed = auth_change_rx.changed() => {
                 if changed.is_err() {
                     return Ok(());
@@ -98,7 +148,11 @@ pub(crate) async fn run_remote_control_websocket(
                     Ok(enrollment) => enrollment,
                     Err(error) => {
                         warn!(error = %error, error_kind = ?error.kind(), "failed to prepare remote control enrollment");
-                        match wait_for_reconnect(&config.shutdown, &mut auth_change_rx, &mut reconnect_attempt).await {
+                        publish_connection_status(
+                            &config.status_tx,
+                            RemoteControlConnectionStatus::Errored,
+                        );
+                        match wait_for_reconnect(&shutdown, &mut auth_change_rx, &mut reconnect_attempt).await {
                             RetryOutcome::Retry => {}
                             RetryOutcome::AuthChanged => reconnect_attempt = 0,
                             RetryOutcome::Shutdown => return Ok(()),
@@ -109,9 +163,13 @@ pub(crate) async fn run_remote_control_websocket(
                 }
             }
         };
+        publish_environment_id(
+            &config.status_tx,
+            Some(enrollment.environment_id.clone()),
+        );
 
         let connect_result = tokio::select! {
-            _ = config.shutdown.cancelled() => return Ok(()),
+            _ = shutdown.cancelled() => return Ok(()),
             changed = auth_change_rx.changed() => {
                 if changed.is_err() {
                     return Ok(());
@@ -148,7 +206,11 @@ pub(crate) async fn run_remote_control_websocket(
                     failure_kind = ?failure.kind,
                     "remote control websocket connection failed"
                 );
-                match wait_for_reconnect(&config.shutdown, &mut auth_change_rx, &mut reconnect_attempt).await {
+                publish_connection_status(
+                    &config.status_tx,
+                    RemoteControlConnectionStatus::Errored,
+                );
+                match wait_for_reconnect(&shutdown, &mut auth_change_rx, &mut reconnect_attempt).await {
                     RetryOutcome::Retry => {}
                     RetryOutcome::AuthChanged => {
                         reconnect_attempt = 0;
@@ -162,7 +224,11 @@ pub(crate) async fn run_remote_control_websocket(
 
         reconnect_attempt = 0;
         selection = RemoteControlEnrollmentSelection::ReuseOrCreate;
-        let connection_shutdown = config.shutdown.child_token();
+        publish_connection_status(
+            &config.status_tx,
+            RemoteControlConnectionStatus::Connected,
+        );
+        let connection_shutdown = shutdown.child_token();
         let connection = run_connected_websocket(
             websocket,
             config.transport_event_tx.clone(),
@@ -172,7 +238,7 @@ pub(crate) async fn run_remote_control_websocket(
         tokio::pin!(connection);
         let session_result = tokio::select! {
             result = &mut connection => Some(result),
-            _ = config.shutdown.cancelled() => {
+            _ = shutdown.cancelled() => {
                 connection_shutdown.cancel();
                 let _ = connection.await;
                 return Ok(());
@@ -194,8 +260,12 @@ pub(crate) async fn run_remote_control_websocket(
                 return Err(error);
             }
             warn!(error = %error, error_kind = ?error.kind(), "remote control websocket session ended with an error");
+            publish_connection_status(
+                &config.status_tx,
+                RemoteControlConnectionStatus::Errored,
+            );
         }
-        match wait_for_reconnect(&config.shutdown, &mut auth_change_rx, &mut reconnect_attempt).await {
+        match wait_for_reconnect(&shutdown, &mut auth_change_rx, &mut reconnect_attempt).await {
             RetryOutcome::Retry => {}
             RetryOutcome::AuthChanged => reconnect_attempt = 0,
             RetryOutcome::Shutdown => return Ok(()),
@@ -286,6 +356,11 @@ async fn resolve_enrollment_for_connection(
     config: &RemoteControlWebsocketConfig,
     selection: RemoteControlEnrollmentSelection,
 ) -> io::Result<RemoteControlEnrollment> {
+    let app_server_client_name = config.app_server_client_name.lock().await.clone();
+    let persistence_preference = config
+        .desired_state_rx
+        .borrow()
+        .persistence_preference();
     let mut current_enrollment = config.current_enrollment.lock().await;
     let enrollment = resolve_remote_control_enrollment(
         &config.state,
@@ -293,14 +368,46 @@ async fn resolve_enrollment_for_connection(
         config.auth_provider.as_ref(),
         &config.installation_id,
         &config.host,
-        config.app_server_client_name.as_deref(),
+        app_server_client_name.as_deref(),
         current_enrollment.as_ref(),
-        config.remote_control_enabled,
+        persistence_preference,
         selection,
     )
     .await?;
     *current_enrollment = Some(enrollment.clone());
     Ok(enrollment)
+}
+
+fn publish_connection_status(
+    status_tx: &watch::Sender<RemoteControlStatusChangedNotification>,
+    connection_status: RemoteControlConnectionStatus,
+) {
+    status_tx.send_if_modified(|status| {
+        let environment_id = if connection_status == RemoteControlConnectionStatus::Disabled {
+            None
+        } else {
+            status.environment_id.clone()
+        };
+        if status.status == connection_status && status.environment_id == environment_id {
+            return false;
+        }
+        status.status = connection_status;
+        status.environment_id = environment_id;
+        true
+    });
+}
+
+fn publish_environment_id(
+    status_tx: &watch::Sender<RemoteControlStatusChangedNotification>,
+    environment_id: Option<String>,
+) {
+    status_tx.send_if_modified(|status| {
+        if status.environment_id == environment_id {
+            return false;
+        }
+        status.environment_id = environment_id.clone();
+        true
+    });
 }
 
 async fn connect_remote_control_websocket(

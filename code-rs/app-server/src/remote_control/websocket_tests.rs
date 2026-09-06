@@ -1,5 +1,6 @@
 use super::auth::RemoteControlAuth;
 use super::auth::RemoteControlAuthProvider;
+use super::desired_state::RemoteControlDesiredState;
 use super::enroll::RemoteControlEnrollment;
 use super::host_device::HostDevice;
 use super::protocol::ClientEnvelope;
@@ -14,6 +15,8 @@ use super::websocket::RemoteControlWebsocketConfig;
 use super::websocket::run_remote_control_websocket;
 use super::websocket::run_remote_control_websocket_once;
 use async_trait::async_trait;
+use code_app_server_protocol::RemoteControlConnectionStatus;
+use code_app_server_protocol::RemoteControlStatusChangedNotification;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingMessage;
 use crate::outgoing_message::OutgoingNotification;
@@ -276,17 +279,21 @@ async fn websocket_loop_reconnects_with_the_last_subscribe_cursor() {
     let auth_provider = Arc::new(TestAuthProvider::new("access-token", "account-a"));
     let shutdown = CancellationToken::new();
     let (transport_tx, mut transport_rx) = mpsc::channel(CHANNEL_CAPACITY);
+    let (_desired_state_tx, desired_state_rx, status_tx) = enabled_lifecycle_channels();
     let relay = tokio::spawn(run_remote_control_websocket(RemoteControlWebsocketConfig {
         state,
         target,
         auth_provider,
         installation_id: "installation-a".to_string(),
         host: HostDevice::for_testing("deck", "linux", "x86_64", Some("desktop")),
-        app_server_client_name: Some("desktop".to_string()),
-        remote_control_enabled: Some(true),
+        app_server_client_name: Arc::new(tokio::sync::Mutex::new(Some(
+            "desktop".to_string(),
+        ))),
         current_enrollment,
         transport_event_tx: transport_tx,
         shutdown: shutdown.clone(),
+        desired_state_rx,
+        status_tx,
     }));
 
     let (first_connection, _) = opened_connection(&mut transport_rx).await;
@@ -350,7 +357,14 @@ async fn websocket_unauthorized_refreshes_the_token_without_replacing_identity()
         websocket.close(None).await.expect("close websocket");
     });
 
-    let (relay, shutdown, current_enrollment, mut transport_rx, _state_dir) = spawn_relay_loop(
+    let (
+        relay,
+        shutdown,
+        current_enrollment,
+        mut transport_rx,
+        _state_dir,
+        _desired_state_tx,
+    ) = spawn_relay_loop(
         address,
         Arc::new(TestAuthProvider::new("access-token", "account-a")),
         test_enrollment_for_address(address, "server-a", "server-token"),
@@ -440,7 +454,14 @@ async fn websocket_loop_reconnects_when_the_authenticated_account_changes() {
     });
 
     let auth_provider = Arc::new(TestAuthProvider::new("access-a", "account-a"));
-    let (relay, shutdown, current_enrollment, mut transport_rx, _state_dir) = spawn_relay_loop(
+    let (
+        relay,
+        shutdown,
+        current_enrollment,
+        mut transport_rx,
+        _state_dir,
+        _desired_state_tx,
+    ) = spawn_relay_loop(
         address,
         auth_provider.clone(),
         test_enrollment_for_address(address, "server-a", "token-a"),
@@ -473,7 +494,7 @@ async fn websocket_loop_shutdown_cancels_reconnect_backoff() {
         .expect("reserve unused address");
     let address = listener.local_addr().expect("unused address");
     drop(listener);
-    let (relay, shutdown, _, _, _state_dir) = spawn_relay_loop(
+    let (relay, shutdown, _, _, _state_dir, _desired_state_tx) = spawn_relay_loop(
         address,
         Arc::new(TestAuthProvider::new("access-token", "account-a")),
         test_enrollment_for_address(address, "server-a", "server-token"),
@@ -675,6 +696,7 @@ async fn spawn_relay_loop(
     Arc<tokio::sync::Mutex<Option<RemoteControlEnrollment>>>,
     mpsc::Receiver<TransportEvent>,
     tempfile::TempDir,
+    watch::Sender<RemoteControlDesiredState>,
 ) {
     let state_dir = tempfile::tempdir().expect("create state dir");
     let state = RemoteControlState::open(state_dir.path()).await.expect("open state");
@@ -683,17 +705,21 @@ async fn spawn_relay_loop(
     let current_enrollment = Arc::new(tokio::sync::Mutex::new(Some(enrollment)));
     let shutdown = CancellationToken::new();
     let (transport_event_tx, transport_event_rx) = mpsc::channel(CHANNEL_CAPACITY);
+    let (desired_state_tx, desired_state_rx, status_tx) = enabled_lifecycle_channels();
     let relay = tokio::spawn(run_remote_control_websocket(RemoteControlWebsocketConfig {
         state,
         target,
         auth_provider,
         installation_id: "installation-a".to_string(),
         host: HostDevice::for_testing("deck", "linux", "x86_64", Some("desktop")),
-        app_server_client_name: Some("desktop".to_string()),
-        remote_control_enabled: Some(true),
+        app_server_client_name: Arc::new(tokio::sync::Mutex::new(Some(
+            "desktop".to_string(),
+        ))),
         current_enrollment: current_enrollment.clone(),
         transport_event_tx,
         shutdown: shutdown.clone(),
+        desired_state_rx,
+        status_tx,
     }));
     (
         relay,
@@ -701,6 +727,7 @@ async fn spawn_relay_loop(
         current_enrollment,
         transport_event_rx,
         state_dir,
+        desired_state_tx,
     )
 }
 
@@ -751,7 +778,14 @@ async fn assert_stale_enrollment_behavior(
         websocket.close(None).await.expect("close websocket");
     });
 
-    let (relay, shutdown, current_enrollment, mut transport_rx, _state_dir) = spawn_relay_loop(
+    let (
+        relay,
+        shutdown,
+        current_enrollment,
+        mut transport_rx,
+        _state_dir,
+        _desired_state_tx,
+    ) = spawn_relay_loop(
         address,
         Arc::new(TestAuthProvider::new("access-token", "account-a")),
         test_enrollment_for_address(address, "server-old", "token-old"),
@@ -819,4 +853,21 @@ async fn write_http_response(stream: &mut tokio::net::TcpStream, status: &str, b
         .await
         .expect("write response headers");
     stream.write_all(body).await.expect("write response body");
+}
+
+fn enabled_lifecycle_channels() -> (
+    watch::Sender<RemoteControlDesiredState>,
+    watch::Receiver<RemoteControlDesiredState>,
+    Arc<watch::Sender<RemoteControlStatusChangedNotification>>,
+) {
+    let (desired_state_tx, desired_state_rx) = watch::channel(RemoteControlDesiredState::Enabled {
+        persistence_preference: Some(true),
+    });
+    let (status_tx, _) = watch::channel(RemoteControlStatusChangedNotification {
+        status: RemoteControlConnectionStatus::Connecting,
+        server_name: "deck".to_string(),
+        installation_id: "installation-a".to_string(),
+        environment_id: None,
+    });
+    (desired_state_tx, desired_state_rx, Arc::new(status_tx))
 }
