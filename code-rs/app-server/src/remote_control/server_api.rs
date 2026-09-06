@@ -15,7 +15,10 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+#[cfg(not(test))]
 const REMOTE_CONTROL_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const REMOTE_CONTROL_REQUEST_TIMEOUT: Duration = Duration::from_millis(100);
 pub(crate) const REMOTE_CONTROL_INSTALLATION_ID_HEADER: &str = "x-codex-installation-id";
 pub(crate) const REMOTE_CONTROL_HOST_DEVICE_KIND_HEADER: &str = "x-codex-host-device-kind";
 

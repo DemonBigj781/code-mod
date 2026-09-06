@@ -39,6 +39,33 @@ pub(crate) struct RefreshRemoteServerRequest<'a> {
     pub installation_id: &'a str,
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct StartRemoteControlPairingRequest {
+    pub manual_code: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct StartRemoteControlPairingResponse {
+    pub pairing_code: String,
+    pub manual_pairing_code: Option<String>,
+    pub server_id: String,
+    pub environment_id: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct RemoteControlPairingStatusRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pairing_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_pairing_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RemoteControlPairingStatusResponse {
+    pub claimed: bool,
+}
+
 pub(crate) fn normalize_remote_control_url(
     remote_control_url: &str,
 ) -> io::Result<RemoteControlTarget> {
@@ -82,7 +109,7 @@ pub(crate) fn normalize_remote_control_url(
     })
 }
 
-fn normalize_remote_control_base_url(remote_control_url: &str) -> io::Result<Url> {
+pub(crate) fn normalize_remote_control_base_url(remote_control_url: &str) -> io::Result<Url> {
     let mut url = Url::parse(remote_control_url).map_err(|error| {
         io::Error::new(
             ErrorKind::InvalidInput,

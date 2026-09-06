@@ -3,6 +3,10 @@ pub(crate) mod auth;
 #[cfg(test)]
 mod auth_tests;
 #[allow(dead_code)]
+pub(crate) mod clients;
+#[cfg(test)]
+mod clients_tests;
+#[allow(dead_code)]
 pub(crate) mod enroll;
 #[cfg(test)]
 mod enroll_tests;
