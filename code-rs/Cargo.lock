@@ -1406,6 +1406,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "code-app-server-daemon"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "code-app-server-protocol",
+ "futures",
+ "libc",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
 name = "code-app-server-protocol"
 version = "0.0.0"
 dependencies = [
