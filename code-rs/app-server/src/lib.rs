@@ -49,6 +49,7 @@ mod fs_watch;
 mod fuzzy_file_search;
 mod message_processor;
 pub mod outgoing_message;
+mod remote_control;
 mod transport;
 mod thread_state;
 

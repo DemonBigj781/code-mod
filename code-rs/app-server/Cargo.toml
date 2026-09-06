@@ -42,6 +42,7 @@ owo-colors = { workspace = true, features = ["supports-colors"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
+sqlx = { workspace = true }
 tokio = { workspace = true, features = [
     "io-std",
     "macros",
