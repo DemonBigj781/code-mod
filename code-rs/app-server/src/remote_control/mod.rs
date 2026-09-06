@@ -21,6 +21,10 @@ pub(crate) mod server_api;
 #[cfg(test)]
 mod server_api_tests;
 #[allow(dead_code)]
+pub(crate) mod segment;
+#[cfg(test)]
+mod segment_tests;
+#[allow(dead_code)]
 pub(crate) mod state;
 
 #[cfg(test)]

@@ -1,5 +1,8 @@
+use super::protocol::ClientEnvelope;
+use super::protocol::ServerEnvelope;
 use super::protocol::RemoteControlTarget;
 use super::protocol::normalize_remote_control_url;
+use serde_json::json;
 use std::io::ErrorKind;
 
 #[test]
@@ -63,5 +66,92 @@ fn rejects_insecure_or_lookalike_production_hosts() {
     ] {
         let error = normalize_remote_control_url(url).expect_err("URL must be rejected");
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+}
+
+#[test]
+fn client_envelope_variants_match_the_hosted_relay_wire_format() {
+    for fixture in [
+        json!({
+            "type": "client_message",
+            "message": {"jsonrpc": "2.0", "method": "initialized"},
+            "client_id": "client-1",
+            "stream_id": "stream-1",
+            "seq_id": 7,
+            "cursor": "cursor-1"
+        }),
+        json!({
+            "type": "client_message_chunk",
+            "segment_id": 0,
+            "segment_count": 2,
+            "message_size_bytes": 123,
+            "message_chunk_base64": "e30=",
+            "client_id": "client-1",
+            "stream_id": "stream-1",
+            "seq_id": 8
+        }),
+        json!({
+            "type": "ack",
+            "segment_id": 1,
+            "client_id": "client-1",
+            "stream_id": "stream-1",
+            "seq_id": 9
+        }),
+        json!({"type": "ping", "client_id": "client-1"}),
+        json!({
+            "type": "client_closed",
+            "client_id": "client-1",
+            "stream_id": "stream-1"
+        }),
+    ] {
+        let envelope: ClientEnvelope =
+            serde_json::from_value(fixture.clone()).expect("fixture must deserialize");
+        assert_eq!(
+            serde_json::to_value(envelope).expect("envelope must serialize"),
+            fixture
+        );
+    }
+}
+
+#[test]
+fn server_envelope_variants_match_the_hosted_relay_wire_format() {
+    for fixture in [
+        json!({
+            "type": "server_message",
+            "message": {"jsonrpc": "2.0", "id": 3, "result": {"ok": true}},
+            "client_id": "client-1",
+            "stream_id": "stream-1",
+            "seq_id": 10
+        }),
+        json!({
+            "type": "server_message_chunk",
+            "segment_id": 0,
+            "segment_count": 2,
+            "message_size_bytes": 123,
+            "message_chunk_base64": "e30=",
+            "client_id": "client-1",
+            "stream_id": "stream-1",
+            "seq_id": 11
+        }),
+        json!({
+            "type": "ack",
+            "client_id": "client-1",
+            "stream_id": "stream-1",
+            "seq_id": 12
+        }),
+        json!({
+            "type": "pong",
+            "status": "active",
+            "client_id": "client-1",
+            "stream_id": "stream-1",
+            "seq_id": 13
+        }),
+    ] {
+        let envelope: ServerEnvelope =
+            serde_json::from_value(fixture.clone()).expect("fixture must deserialize");
+        assert_eq!(
+            serde_json::to_value(envelope).expect("envelope must serialize"),
+            fixture
+        );
     }
 }

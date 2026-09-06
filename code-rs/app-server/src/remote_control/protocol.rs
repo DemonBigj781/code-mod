@@ -1,3 +1,4 @@
+use mcp_types::JSONRPCMessage;
 use std::io;
 use std::io::ErrorKind;
 use serde::Deserialize;
@@ -64,6 +65,98 @@ pub(crate) struct RemoteControlPairingStatusRequest {
 #[derive(Debug, Deserialize)]
 pub(crate) struct RemoteControlPairingStatusResponse {
     pub claimed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct ClientId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct StreamId(pub String);
+
+impl StreamId {
+    pub(crate) fn new_random() -> Self {
+        Self(uuid::Uuid::now_v7().to_string())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum ClientEvent {
+    ClientMessage {
+        message: JSONRPCMessage,
+    },
+    ClientMessageChunk {
+        segment_id: usize,
+        segment_count: usize,
+        message_size_bytes: usize,
+        message_chunk_base64: String,
+    },
+    Ack {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        segment_id: Option<usize>,
+    },
+    Ping,
+    ClientClosed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct ClientEnvelope {
+    #[serde(flatten)]
+    pub event: ClientEvent,
+    pub client_id: ClientId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_id: Option<StreamId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seq_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PongStatus {
+    Active,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum ServerEvent {
+    ServerMessage {
+        message: Box<JSONRPCMessage>,
+    },
+    ServerMessageChunk {
+        segment_id: usize,
+        segment_count: usize,
+        message_size_bytes: usize,
+        message_chunk_base64: String,
+    },
+    Ack,
+    Pong {
+        status: PongStatus,
+    },
+}
+
+impl ServerEvent {
+    pub(crate) fn segment_id(&self) -> Option<usize> {
+        match self {
+            Self::ServerMessageChunk { segment_id, .. } => Some(*segment_id),
+            Self::ServerMessage { .. } | Self::Ack | Self::Pong { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct ServerEnvelope {
+    #[serde(flatten)]
+    pub event: ServerEvent,
+    pub client_id: ClientId,
+    pub stream_id: StreamId,
+    pub seq_id: u64,
 }
 
 pub(crate) fn normalize_remote_control_url(
