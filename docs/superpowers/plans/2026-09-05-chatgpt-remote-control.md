@@ -221,9 +221,10 @@ typed API and contain no hand-edited drift.
 
 - [ ] **Step 1: Add schema presence assertions**
 
-Assert that the fixture tree contains the remote-control request, response,
-notification, client, and enum outputs and that the flat v2 bundle exposes the
-same types.
+Assert that the stable fixture tree contains the status notification and its
+referenced client, status, and parameter types. Generate an experimental tree
+in a temporary directory and assert that it additionally contains every
+remote-control request and response type.
 
 ```rust
 assert!(fixture_tree.contains_key(Path::new(
@@ -242,9 +243,11 @@ Expected: failure reports missing or stale generated remote-control files.
 
 - [ ] **Step 3: Regenerate fixtures through the repository generator**
 
-Run: `cd code-rs && CARGO_BUILD_JOBS=1 cargo run -p code-app-server-protocol --bin write_schema_fixtures -- --experimental`
+Run: `cd code-rs && rm -rf /tmp/code-remote-schema-stable && CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 cargo run -p code-app-server-protocol --bin write_schema_fixtures -- --schema-root /tmp/code-remote-schema-stable`
 
-Do not edit generated files manually.
+Apply the generated stable-tree diff to
+`code-rs/app-server-protocol/schema/`. Do not vendor the experimental tree and
+do not edit generated content manually.
 
 - [ ] **Step 4: Verify generated output**
 

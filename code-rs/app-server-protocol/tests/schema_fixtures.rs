@@ -1,7 +1,9 @@
 use anyhow::Context;
 use anyhow::Result;
+use code_app_server_protocol::SchemaFixtureOptions;
 use code_app_server_protocol::read_schema_fixture_tree;
 use code_app_server_protocol::write_schema_fixtures;
+use code_app_server_protocol::write_schema_fixtures_with_options;
 use similar::TextDiff;
 use std::path::Path;
 
@@ -63,6 +65,54 @@ Run `just write-app-server-schema` to overwrite with your changes.\n\n{diff}",
     Ok(())
 }
 
+#[test]
+fn stable_schema_includes_remote_control_notification_surface() -> Result<()> {
+    let fixture_tree = read_tree(&schema_root()?)?;
+
+    for path in [
+        "json/v2/RemoteControlStatusChangedNotification.json",
+        "typescript/v2/RemoteControlClient.ts",
+        "typescript/v2/RemoteControlClientsListOrder.ts",
+        "typescript/v2/RemoteControlConnectionStatus.ts",
+        "typescript/v2/RemoteControlDisableParams.ts",
+        "typescript/v2/RemoteControlEnableParams.ts",
+        "typescript/v2/RemoteControlStatusChangedNotification.ts",
+    ] {
+        assert!(fixture_tree.contains_key(Path::new(path)), "missing {path}");
+    }
+
+    assert!(!fixture_tree.contains_key(Path::new(
+        "typescript/v2/RemoteControlEnableResponse.ts"
+    )));
+    Ok(())
+}
+
+#[test]
+fn experimental_schema_includes_remote_control_rpc_surface() -> Result<()> {
+    let temp_dir = tempfile::tempdir().context("create temp dir")?;
+    write_schema_fixtures_with_options(
+        temp_dir.path(),
+        None,
+        SchemaFixtureOptions {
+            experimental_api: true,
+        },
+    )?;
+    let generated_tree = read_tree(temp_dir.path())?;
+
+    for path in [
+        "json/v2/RemoteControlEnableResponse.json",
+        "json/v2/RemoteControlPairingStatusResponse.json",
+        "json/v2/RemoteControlClientsListResponse.json",
+        "typescript/v2/RemoteControlDisableResponse.ts",
+        "typescript/v2/RemoteControlPairingStartResponse.ts",
+        "typescript/v2/RemoteControlClientsRevokeResponse.ts",
+    ] {
+        assert!(generated_tree.contains_key(Path::new(path)), "missing {path}");
+    }
+
+    Ok(())
+}
+
 fn schema_root() -> Result<std::path::PathBuf> {
     // In Bazel runfiles (especially manifest-only mode), resolving directories is not
     // reliable. Resolve a known file, then walk up to the schema root.
@@ -95,4 +145,3 @@ fn schema_root() -> Result<std::path::PathBuf> {
 fn read_tree(root: &Path) -> Result<std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>> {
     read_schema_fixture_tree(root).context("read schema fixture tree")
 }
-
