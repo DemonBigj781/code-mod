@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
+use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::watch;
 use std::time::Duration;
 
 use code_app_server_protocol::AuthMode;
@@ -1556,6 +1558,8 @@ pub struct AuthManager {
     code_home: PathBuf,
     originator: String,
     inner: RwLock<CachedAuth>,
+    auth_change_tx: watch::Sender<u64>,
+    unauthorized_recovery_lock: AsyncMutex<()>,
     enable_code_api_key_env: bool,
     auth_credentials_store_mode: RwLock<AuthCredentialsStoreMode>,
 }
@@ -1575,6 +1579,7 @@ impl AuthManager {
                 .ok()
                 .flatten()
         };
+        let (auth_change_tx, _auth_change_rx) = watch::channel(0);
         Self {
             code_home,
             originator,
@@ -1583,6 +1588,8 @@ impl AuthManager {
                 auth,
                 permanent_refresh_failure: None,
             }),
+            auth_change_tx,
+            unauthorized_recovery_lock: AsyncMutex::new(()),
             enable_code_api_key_env: true,
             auth_credentials_store_mode: RwLock::new(AuthCredentialsStoreMode::File),
         }
@@ -1596,10 +1603,13 @@ impl AuthManager {
             auth: Some(auth),
             permanent_refresh_failure: None,
         };
+        let (auth_change_tx, _auth_change_rx) = watch::channel(0);
         Arc::new(Self {
             code_home: PathBuf::new(),
             originator: "code_cli_rs".to_owned(),
             inner: RwLock::new(cached),
+            auth_change_tx,
+            unauthorized_recovery_lock: AsyncMutex::new(()),
             enable_code_api_key_env: false,
             auth_credentials_store_mode: RwLock::new(AuthCredentialsStoreMode::File),
         })
@@ -1614,13 +1624,14 @@ impl AuthManager {
         self.record_permanent_refresh_failure_if_unchanged(auth, &error);
     }
 
-        pub fn from_auth(
+    pub fn from_auth(
         auth: CodexAuth,
         code_home: PathBuf,
         originator: String,
         auth_credentials_store_mode: AuthCredentialsStoreMode,
     ) -> Arc<Self> {
         let preferred_auth_mode = auth.mode;
+        let (auth_change_tx, _auth_change_rx) = watch::channel(0);
         Arc::new(Self {
             code_home,
             originator,
@@ -1629,6 +1640,8 @@ impl AuthManager {
                 auth: Some(auth),
                 permanent_refresh_failure: None,
             }),
+            auth_change_tx,
+            unauthorized_recovery_lock: AsyncMutex::new(()),
             enable_code_api_key_env: false,
             auth_credentials_store_mode: RwLock::new(auth_credentials_store_mode),
         })
@@ -1647,6 +1660,14 @@ impl AuthManager {
     /// Current cached auth (clone). May be `None` if not logged in or load failed.
     pub fn auth(&self) -> Option<CodexAuth> {
         self.inner.read().ok().and_then(|c| c.auth.clone())
+    }
+
+    pub fn auth_revision(&self) -> u64 {
+        *self.auth_change_tx.borrow()
+    }
+
+    pub fn auth_change_receiver(&self) -> watch::Receiver<u64> {
+        self.auth_change_tx.subscribe()
     }
 
     pub fn refresh_failure_for_auth(&self, auth: &CodexAuth) -> Option<RefreshTokenError> {
@@ -1686,9 +1707,11 @@ impl AuthManager {
                 .ok()
                 .flatten()
         });
-        if let Ok(mut guard) = self.inner.write() {
+        let (changed, request_auth_changed) = if let Ok(mut guard) = self.inner.write() {
             let changed = !AuthManager::auths_equal(guard.auth.as_ref(), new_auth.as_ref());
             let auth_changed_for_refresh = !AuthManager::auths_equal_for_refresh(guard.auth.as_ref(), new_auth.as_ref());
+            let request_auth_changed =
+                !AuthManager::auths_equal_for_requests(guard.auth.as_ref(), new_auth.as_ref());
             if auth_changed_for_refresh {
                 guard.permanent_refresh_failure = None;
             }
@@ -1696,10 +1719,14 @@ impl AuthManager {
             guard.preferred_auth_mode = env_auth
                 .as_ref()
                 .map_or(preferred, |auth| auth.mode);
-            changed
+            (changed, request_auth_changed)
         } else {
-            false
+            (false, false)
+        };
+        if request_auth_changed {
+            self.auth_change_tx.send_modify(|revision| *revision += 1);
         }
+        changed
     }
 
     fn reload_if_account_id_matches(&self, expected_account_id: Option<&str>) -> ReloadOutcome {
@@ -1732,6 +1759,8 @@ impl AuthManager {
         tracing::info!("Reloading auth for account {expected_account_id}");
         if let Ok(mut guard) = self.inner.write() {
             let changed = !Self::auths_equal_for_refresh(guard.auth.as_ref(), new_auth.as_ref());
+            let request_auth_changed =
+                !Self::auths_equal_for_requests(guard.auth.as_ref(), new_auth.as_ref());
             if changed {
                 guard.permanent_refresh_failure = None;
             }
@@ -1740,6 +1769,9 @@ impl AuthManager {
                 .as_ref()
                 .map_or(preferred, |auth| auth.mode);
             if changed {
+                if request_auth_changed {
+                    self.auth_change_tx.send_modify(|revision| *revision += 1);
+                }
                 ReloadOutcome::ReloadedChanged
             } else {
                 ReloadOutcome::ReloadedNoChange
@@ -1761,6 +1793,29 @@ impl AuthManager {
                 (AuthMode::ChatGPT, AuthMode::ChatGPT)
                 | (AuthMode::ChatgptAuthTokens, AuthMode::ChatgptAuthTokens) => {
                     a.get_current_auth_json() == b.get_current_auth_json()
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    fn auths_equal_for_requests(a: Option<&CodexAuth>, b: Option<&CodexAuth>) -> bool {
+        match (a, b) {
+            (None, None) => true,
+            (Some(a), Some(b)) => match (a.mode, b.mode) {
+                (AuthMode::ApiKey, AuthMode::ApiKey) => a.api_key == b.api_key,
+                (AuthMode::ChatGPT, AuthMode::ChatGPT)
+                | (AuthMode::ChatgptAuthTokens, AuthMode::ChatgptAuthTokens) => {
+                    let a = a.get_current_token_data();
+                    let b = b.get_current_token_data();
+                    match (a, b) {
+                        (Some(a), Some(b)) => {
+                            a.access_token == b.access_token && a.account_id == b.account_id
+                        }
+                        (None, None) => true,
+                        _ => false,
+                    }
                 }
                 _ => false,
             },
@@ -1844,10 +1899,14 @@ impl AuthManager {
         }
 
         let attempted_auth = auth.clone();
+        let revision_before_refresh = self.auth_revision();
         let result = match auth.refresh_token().await {
             Ok(token) => {
                 // Reload to pick up persisted changes.
                 self.reload();
+                if self.auth_revision() == revision_before_refresh {
+                    self.auth_change_tx.send_modify(|revision| *revision += 1);
+                }
                 Ok(Some(token))
             }
             Err(e) => Err(e),
@@ -1858,6 +1917,17 @@ impl AuthManager {
         }
 
         result
+    }
+
+    pub async fn recover_unauthorized_since(
+        &self,
+        observed_revision: u64,
+    ) -> Result<bool, RefreshTokenError> {
+        let _guard = self.unauthorized_recovery_lock.lock().await;
+        if self.auth_revision() != observed_revision {
+            return Ok(true);
+        }
+        self.refresh_token_classified().await.map(|token| token.is_some())
     }
 
     pub async fn refresh_token(&self) -> std::io::Result<Option<String>> {
