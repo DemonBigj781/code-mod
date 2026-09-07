@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn local_build_fallback_matches_current_stable_cli() {
-        assert_eq!(DEFAULT_CODE_VERSION, "0.149.0");
+        assert_eq!(DEFAULT_CODE_VERSION, "0.153.4");
     }
 
     #[test]
@@ -247,6 +247,18 @@ mod tests {
         assert_eq!(
             wire_compatible_version_for_model("gpt-5.5"),
             wire_compatible_version()
+        );
+    }
+
+    #[test]
+    fn gpt_6_uses_its_catalog_minimum_client_version() {
+        assert_eq!(
+            MODEL_MINIMUM_CLIENT_VERSIONS.get("gpt-6-astra"),
+            Some(&"0.153.0".to_string())
+        );
+        assert_eq!(
+            wire_compatible_version_for_model("gpt-6-astra"),
+            "0.153.4"
         );
     }
 

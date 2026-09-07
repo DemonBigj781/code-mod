@@ -155,6 +155,12 @@ impl InterfaceSettingsView {
             RowKind::FuseHintKeyLabels => {
                 "When on, hints whose key letter matches the first letter of the action are shown compactly (e.g. `rRefresh` instead of `r refresh`). Turn off for color-blind accessibility.".into()
             }
+            RowKind::InputCompression => {
+                "Deterministically removes redundant prose only from the model-bound copy. Local history keeps the original operator text.".into()
+            }
+            RowKind::AggressiveCompression => {
+                "Adds stronger deterministic prose shortening. Stored independently and used only while input compression is enabled.".into()
+            }
             RowKind::HotkeyScope => {
                 "Choose which scope to edit. Platform scopes write to [tui.hotkeys.<platform>] and can inherit.".into()
             }

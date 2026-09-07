@@ -1,7 +1,23 @@
 use super::*;
 use crate::app_event::AppEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+
+#[test]
+fn shift_enter_inserts_newline_without_submitting() {
+    let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+    let app_tx = AppEventSender::new(tx);
+    let mut composer = ChatComposer::new(true, app_tx, true);
+    composer.textarea.set_text("first line");
+
+    let (result, handled) =
+        composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+
+    assert_eq!(result, InputResult::None);
+    assert!(handled);
+    assert_eq!(composer.textarea.text(), "first line\n");
+}
 
 #[test]
 fn auto_review_status_stays_left_with_auto_drive_footer() {

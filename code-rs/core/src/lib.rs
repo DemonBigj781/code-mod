@@ -75,6 +75,7 @@ mod mcp_tool_call;
 mod memories;
 mod model_provider_info;
 mod openrouter_free_router;
+mod operator_input_compression;
 mod stablehorde;
 #[cfg(test)]
 mod openrouter_free_router_tests;

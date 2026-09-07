@@ -9,7 +9,7 @@ use code_core::model_family::{
 use code_core::remote_models::RemoteModelsStatus;
 use code_protocol::num_format::format_with_separators_u64;
 
-use super::presets::{FlatPreset, compare_presets};
+use super::presets::{FlatPreset, compare_presets, openrouter_section};
 use super::target::ModelSelectionTarget;
 
 const SUMMARY_HEADER_LINES: u16 = 3;
@@ -142,7 +142,17 @@ impl ModelSelectionData {
                         .then_some(index)
                 })
                 .collect();
-            provider_indices.sort_by(|&a, &b| compare_presets(&flat_presets[a], &flat_presets[b]));
+            provider_indices.sort_by(|&a, &b| {
+                openrouter_section(
+                    flat_presets[a].provider_id.as_deref(),
+                    &flat_presets[a].model,
+                )
+                .cmp(&openrouter_section(
+                    flat_presets[b].provider_id.as_deref(),
+                    &flat_presets[b].model,
+                ))
+                .then_with(|| compare_presets(&flat_presets[a], &flat_presets[b]))
+            });
             indices.extend(provider_indices);
         }
         indices
@@ -602,6 +612,16 @@ impl ModelSelectionData {
             lines = lines.saturating_add(ADD_DIRECT_PROVIDER_SECTION_HEIGHT);
             for catalog in &self.direct_provider_catalogs {
                 lines = lines.saturating_add(1);
+                let section_count = self
+                    .preset_indices_for_provider(Some(&catalog.provider_id))
+                    .into_iter()
+                    .filter_map(|index| {
+                        let preset = &self.flat_presets[index];
+                        openrouter_section(preset.provider_id.as_deref(), &preset.model)
+                    })
+                    .collect::<std::collections::HashSet<_>>()
+                    .len();
+                lines = lines.saturating_add(u16::try_from(section_count).unwrap_or(u16::MAX));
                 lines = lines.saturating_add(
                     u16::try_from(
                         self.preset_indices_for_provider(Some(&catalog.provider_id))
@@ -680,7 +700,17 @@ impl ModelSelectionData {
             line += 2;
             for catalog in &self.direct_provider_catalogs {
                 line += 1;
+                let mut previous_section = None;
                 for preset_index in self.preset_indices_for_provider(Some(&catalog.provider_id)) {
+                    let preset = &self.flat_presets[preset_index];
+                    let section = openrouter_section(
+                        preset.provider_id.as_deref(),
+                        &preset.model,
+                    );
+                    if section.is_some() && section != previous_section {
+                        line += 1;
+                        previous_section = section;
+                    }
                     if selected_entry == Some(EntryKind::Preset(preset_index)) {
                         return line;
                     }

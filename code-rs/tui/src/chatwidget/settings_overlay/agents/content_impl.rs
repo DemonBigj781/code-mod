@@ -51,10 +51,18 @@ impl SettingsContent for AgentsSettingsContent {
                 let Some(next) = Self::overview_selection_at(state, area, mouse_event) else {
                     return false;
                 };
-                if state.selected == next {
+                let next_role = (next < state.rows.len())
+                    .then(|| Self::overview_role_at(state, area, mouse_event))
+                    .flatten();
+                if state.selected == next
+                    && next_role.is_none_or(|role| role == state.selected_role)
+                {
                     return false;
                 }
                 state.selected = next;
+                if let Some(role) = next_role {
+                    state.selected_role = role;
+                }
                 self.app_event_tx.send(AppEvent::AgentsOverviewSelectionChanged {
                     index: state.selected,
                 });
@@ -64,13 +72,24 @@ impl SettingsContent for AgentsSettingsContent {
                 let Some(next) = Self::overview_selection_at(state, area, mouse_event) else {
                     return false;
                 };
+                let clicked_role = (next < state.rows.len())
+                    .then(|| Self::overview_role_at(state, area, mouse_event))
+                    .flatten();
                 state.selected = next;
+                if let Some(role) = clicked_role {
+                    state.selected_role = role;
+                }
                 self.app_event_tx.send(AppEvent::AgentsOverviewSelectionChanged {
                     index: state.selected,
                 });
+                let activation = if clicked_role.is_some() {
+                    KeyCode::Char(' ')
+                } else {
+                    KeyCode::Enter
+                };
                 Self::handle_overview_key(
                     state,
-                    KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                    KeyEvent::new(activation, KeyModifiers::NONE),
                     &self.app_event_tx,
                 )
             }
@@ -88,4 +107,3 @@ impl SettingsContent for AgentsSettingsContent {
         }
     }
 }
-

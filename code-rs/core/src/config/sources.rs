@@ -1590,6 +1590,46 @@ pub fn set_tui_settings_menu(
     Ok(())
 }
 
+/// Persist deterministic operator-input compression at `[input_compression]`.
+pub fn set_input_compression(
+    code_home: &Path,
+    settings: &crate::config_types::OperatorInputCompressionConfig,
+) -> anyhow::Result<()> {
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = read_config_doc(&read_path)?;
+
+    doc["input_compression"]["enabled"] = toml_edit::value(settings.enabled);
+    doc["input_compression"]["aggressive"] = toml_edit::value(settings.aggressive);
+
+    std::fs::create_dir_all(code_home)?;
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod input_compression_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn set_input_compression_persists_both_toggles() -> anyhow::Result<()> {
+        let code_home = tempfile::tempdir()?;
+        let settings = crate::config_types::OperatorInputCompressionConfig {
+            enabled: false,
+            aggressive: true,
+        };
+
+        set_input_compression(code_home.path(), &settings)?;
+
+        let written = std::fs::read_to_string(code_home.path().join(CONFIG_TOML_FILE))?;
+        let parsed: crate::config::ConfigToml = toml::from_str(&written)?;
+        assert_eq!(parsed.input_compression, Some(settings));
+        Ok(())
+    }
+}
+
 /// Persist TUI hotkey preferences into `CODEX_HOME/config.toml` at
 /// `[tui.hotkeys]`.
 pub fn set_tui_hotkeys(

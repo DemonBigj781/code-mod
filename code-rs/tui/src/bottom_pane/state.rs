@@ -240,6 +240,13 @@ impl<'a> BottomPane<'a> {
         self.request_redraw();
     }
 
+    pub(crate) fn active_model_selection_role(
+        &mut self,
+    ) -> Option<code_core::config_types::ModelRole> {
+        self.active_view_as::<settings_pages::model::ModelSelectionView>()
+            .map(|view| view.target().model_role())
+    }
+
     pub(crate) fn update_direct_provider_catalogs(
         &mut self,
         catalogs: Vec<settings_pages::model::DirectProviderModelCatalog>,

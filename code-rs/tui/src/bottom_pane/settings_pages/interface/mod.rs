@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::path::PathBuf;
 
 use code_core::config_types::{
+    OperatorInputCompressionConfig,
     SettingsMenuConfig,
     TuiHotkeysConfig,
     TuiHotkeysEnv,
@@ -30,6 +31,8 @@ enum RowKind {
     OverlayMinWidth,
     NerdFonts,
     FuseHintKeyLabels,
+    InputCompression,
+    AggressiveCompression,
     HotkeyScope,
     ModelSelectorHotkey,
     ReasoningEffortHotkey,
@@ -187,6 +190,8 @@ pub(crate) struct InterfaceSettingsView {
     hotkey_scope: HotkeyScope,
     icon_mode: code_core::config_types::IconMode,
     icon_mode_baseline: code_core::config_types::IconMode,
+    input_compression: OperatorInputCompressionConfig,
+    input_compression_baseline: OperatorInputCompressionConfig,
     code_home: PathBuf,
     app_event_tx: AppEventSender,
     is_complete: bool,
@@ -229,6 +234,7 @@ impl InterfaceSettingsView {
         settings: SettingsMenuConfig,
         hotkeys: TuiHotkeysConfig,
         icon_mode: code_core::config_types::IconMode,
+        input_compression: OperatorInputCompressionConfig,
         app_event_tx: AppEventSender,
     ) -> Self {
         let state = ScrollState::with_first_selected();
@@ -240,6 +246,8 @@ impl InterfaceSettingsView {
             hotkey_scope: HotkeyScope::Global,
             icon_mode,
             icon_mode_baseline: icon_mode,
+            input_compression: input_compression.clone(),
+            input_compression_baseline: input_compression,
             code_home,
             app_event_tx,
             is_complete: false,

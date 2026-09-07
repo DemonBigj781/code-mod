@@ -1591,6 +1591,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "code-app-server",
+ "code-app-server-daemon",
  "code-app-server-protocol",
  "code-arg0",
  "code-chatgpt",

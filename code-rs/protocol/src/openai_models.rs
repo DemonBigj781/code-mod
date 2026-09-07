@@ -49,6 +49,7 @@ pub enum ReasoningEffort {
     High,
     XHigh,
     Max,
+    Ultra,
 }
 
 impl FromStr for ReasoningEffort {
@@ -261,6 +262,7 @@ pub struct ModelInfo {
     pub additional_speed_tiers: Vec<String>,
     pub availability_nux: Option<ModelAvailabilityNux>,
     pub upgrade: Option<ModelInfoUpgrade>,
+    #[serde(default)]
     pub base_instructions: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_messages: Option<ModelMessages>,
@@ -521,6 +523,7 @@ fn effort_rank(effort: ReasoningEffort) -> i32 {
         ReasoningEffort::High => 4,
         ReasoningEffort::XHigh => 5,
         ReasoningEffort::Max => 6,
+        ReasoningEffort::Ultra => 7,
     }
 }
 
@@ -811,6 +814,15 @@ mod tests {
         assert_eq!("high".parse(), Ok(ReasoningEffort::High));
         assert_eq!("minimal".parse(), Ok(ReasoningEffort::Minimal));
         assert_eq!("max".parse(), Ok(ReasoningEffort::Max));
+        assert_eq!("ultra".parse(), Ok(ReasoningEffort::Ultra));
+    }
+
+    #[test]
+    fn reasoning_effort_serializes_ultra() {
+        assert_eq!(
+            serde_json::to_string(&ReasoningEffort::Ultra).expect("serialize Ultra effort"),
+            "\"ultra\""
+        );
     }
 
     #[test]

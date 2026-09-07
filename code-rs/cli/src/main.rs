@@ -25,6 +25,7 @@ use code_cli::login::run_login_with_api_key;
 use code_cli::login::run_login_with_chatgpt;
 use code_cli::login::run_login_with_device_code;
 use code_cli::login::run_logout;
+use code_cli::remote_control_cmd::RemoteControlCommand;
 use code_cli::secrets_cmd;
 use std::io::IsTerminal;
 mod bridge;
@@ -139,6 +140,9 @@ enum Subcommand {
     /// \[experimental\] Run the app server.
     AppServer,
 
+    /// Run and manage ChatGPT remote control.
+    RemoteControl(RemoteControlCommand),
+
     /// Generate shell completion scripts.
     Completion(CompletionCommand),
 
@@ -190,6 +194,22 @@ enum Subcommand {
 
     /// Manage Code Bridge subscription for this workspace.
     Bridge(BridgeCommand),
+}
+
+fn reject_local_provider_for_remote_control(
+    oss: bool,
+    subcommand: &Option<Subcommand>,
+) -> anyhow::Result<()> {
+    if !oss {
+        return Ok(());
+    }
+    let Some(Subcommand::RemoteControl(command)) = subcommand else {
+        return Ok(());
+    };
+    anyhow::bail!(
+        "`--oss` is not supported for `code {}`; remote control requires ChatGPT authentication",
+        command.subcommand_name()
+    )
 }
 
 #[derive(Debug, clap::ValueEnum, Clone, Copy)]
@@ -695,6 +715,7 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
 
     interactive.finalize_defaults();
     interactive.demo_developer_message = demo_developer_message.clone();
+    reject_local_provider_for_remote_control(interactive.oss, &subcommand)?;
 
     // The TUI already runs housekeeping. For headless `exec` sessions, kick off
     // housekeeping early so stale worktrees/branches don't accumulate.
@@ -781,6 +802,14 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         }
         Some(Subcommand::AppServer) => {
             code_app_server::run_main(code_linux_sandbox_exe, root_config_overrides).await?;
+        }
+        Some(Subcommand::RemoteControl(command)) => {
+            code_cli::remote_control_cmd::run(
+                command,
+                code_linux_sandbox_exe,
+                root_config_overrides,
+            )
+            .await?;
         }
         Some(Subcommand::Resume(ResumeCommand {
             session_id,
@@ -2162,6 +2191,29 @@ mod tests {
 
         let DebugAppServerSubcommand::SendMessageV2(cmd) = cmd.subcommand;
         assert_eq!(cmd.user_message, "hello");
+    }
+
+    #[test]
+    fn remote_control_is_wired_into_the_root_parser() {
+        let cli = MultitoolCli::try_parse_from(["code", "remote-control", "start", "--json"])
+            .expect("parse remote-control command");
+        let Some(Subcommand::RemoteControl(command)) = cli.subcommand else {
+            panic!("expected remote-control command");
+        };
+        assert_eq!(command.subcommand_name(), "remote-control start");
+        assert!(command.json());
+    }
+
+    #[test]
+    fn remote_control_rejects_explicit_local_provider_mode() {
+        let cli = MultitoolCli::try_parse_from(["code", "--oss", "remote-control"])
+            .expect("parse root provider mode");
+        let error = reject_local_provider_for_remote_control(cli.interactive.oss, &cli.subcommand)
+            .expect_err("remote-control should reject --oss");
+        assert_eq!(
+            error.to_string(),
+            "`--oss` is not supported for `code remote-control`; remote control requires ChatGPT authentication"
+        );
     }
 
     #[test]

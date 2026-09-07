@@ -38,6 +38,7 @@ impl Runner<'_> {
             repl_default_runtime,
             repl_runtimes,
             memories,
+            input_compression,
             collaboration_mode,
         } = req;
 
@@ -99,6 +100,7 @@ impl Runner<'_> {
         updated_config.tools_repl = tools_repl;
         updated_config.repl_default_runtime = repl_default_runtime;
         updated_config.repl_runtimes = repl_runtimes.clone();
+        updated_config.input_compression = input_compression;
         // Keep flat fields in sync from the registry for backward compatibility.
         if let Some(spec) = repl_runtimes.get(&crate::config::ReplRuntimeKindToml::Node) {
             updated_config.repl_node_path = spec.path.clone();

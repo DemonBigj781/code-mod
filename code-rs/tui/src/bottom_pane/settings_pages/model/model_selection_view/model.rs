@@ -173,6 +173,7 @@ impl ModelSelectionView {
         self.mode = ViewMode::AddDirectProvider(super::endpoint_form::EndpointFormState::new());
     }
 
+    #[cfg(test)]
     pub(super) fn submit_direct_provider_form(&mut self) -> bool {
         let app_event_tx = self.app_event_tx.clone();
         let ViewMode::AddDirectProvider(form) = &mut self.mode else {

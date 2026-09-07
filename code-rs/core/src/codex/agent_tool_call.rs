@@ -2,8 +2,6 @@ use std::fmt::Write as _;
 
 use super::*;
 use super::fs_utils::{ensure_agent_dir, write_agent_file};
-use super::streaming::AgentTask;
-use crate::protocol::TaskOriginKind;
 use super::truncation::truncate_middle_bytes;
 use crate::tools::events::execute_custom_tool;
 use code_protocol::models::FunctionCallOutputBody;
@@ -159,6 +157,9 @@ mod resolve_read_only_tests {
             args: Vec::new(),
             read_only,
             enabled: true,
+            session_enabled: true,
+            review_enabled: true,
+            auto_drive_enabled: true,
             description: None,
             env: None,
             args_read_only: None,
@@ -1988,30 +1989,11 @@ pub(super) fn agent_completion_wake_messages(
     messages
 }
 
-pub(super) async fn enqueue_agent_completion_wake(
-    sess: &Arc<Session>,
-    messages: Vec<ResponseInputItem>,
-) {
-    if messages.is_empty() {
-        return;
-    }
-
-    let mut should_start_turn = false;
+pub(super) fn enqueue_agent_completion_wake(sess: &Session, messages: Vec<ResponseInputItem>) {
     for message in messages {
-        if sess.enqueue_out_of_turn_item(message) {
-            should_start_turn = true;
+        if !sess.enqueue_out_of_turn_item_while_running(message) {
+            tracing::debug!("discarding agent completion wake after final response");
         }
-    }
-
-    if should_start_turn {
-        sess.cleanup_old_status_items();
-        let turn_context = sess.make_turn_context();
-        let sub_id = sess.next_internal_sub_id();
-        let sentinel_input = vec![InputItem::Text {
-            text: PENDING_ONLY_SENTINEL.to_owned(),
-        }];
-        let agent = AgentTask::spawn(Arc::clone(sess), turn_context, sub_id, sentinel_input, TaskOriginKind::PendingInput, false);
-        sess.set_task(agent);
     }
 }
 

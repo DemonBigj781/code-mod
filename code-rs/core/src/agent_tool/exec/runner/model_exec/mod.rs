@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent_defaults::AgentModelSpec;
 
 mod arg_plan;
 mod command_detection;
@@ -25,6 +26,20 @@ pub(crate) struct ExecuteModelRequest<'a> {
     pub(crate) log_tag: Option<&'a str>,
 }
 
+fn model_execution_enabled(
+    config: Option<&AgentConfig>,
+    spec: Option<&AgentModelSpec>,
+    source_kind: Option<&AgentSourceKind>,
+) -> bool {
+    config.map_or_else(
+        || spec.is_none_or(AgentModelSpec::is_enabled),
+        |config| match source_kind {
+            Some(AgentSourceKind::AutoReview) => config.review_enabled,
+            Some(AgentSourceKind::Default) | None => config.enabled,
+        },
+    )
+}
+
 pub(crate) async fn execute_model_with_permissions(
     request: ExecuteModelRequest<'_>,
 ) -> Result<String, String> {
@@ -45,16 +60,19 @@ pub(crate) async fn execute_model_with_permissions(
         .or_else(|| config.as_ref().and_then(|cfg| agent_model_spec(&cfg.name)))
         .or_else(|| config.as_ref().and_then(|cfg| agent_model_spec(&cfg.command)));
 
-    if let Some(spec) = spec_opt
-        && !spec.is_enabled()
-    {
-        if let Some(flag) = spec.gating_env {
+    let enabled = model_execution_enabled(config.as_ref(), spec_opt, source_kind.as_ref());
+    if !enabled {
+        if let Some(flag) = spec_opt.and_then(|spec| spec.gating_env) {
             return Err(format!(
                 "agent model '{}' is disabled; set {}=1 to enable it",
-                spec.slug, flag
+                spec_opt.map_or(model, |spec| spec.slug),
+                flag
             ));
         }
-        return Err(format!("agent model '{}' is disabled", spec.slug));
+        return Err(format!(
+            "agent model '{}' is disabled",
+            spec_opt.map_or(model, |spec| spec.slug)
+        ));
     }
 
     let prepared = prepare_model_execution(PrepareModelExecutionRequest {
@@ -119,5 +137,37 @@ pub(crate) async fn execute_model_with_permissions(
             format!("{stderr}\n{stdout}")
         };
         Err(format!("Command failed: {combined}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent_defaults::{agent_config_from_spec, agent_model_spec};
+
+    #[test]
+    fn auto_review_uses_review_role_instead_of_subagent_default() {
+        let spec = agent_model_spec("code-gpt-5.5").expect("discovered model");
+        let mut config = agent_config_from_spec(spec);
+        assert!(!config.enabled, "model should be disabled for subagents by default");
+        config.review_enabled = true;
+
+        assert!(model_execution_enabled(
+            Some(&config),
+            Some(spec),
+            Some(&AgentSourceKind::AutoReview),
+        ));
+        assert!(!model_execution_enabled(
+            Some(&config),
+            Some(spec),
+            Some(&AgentSourceKind::Default),
+        ));
+
+        config.review_enabled = false;
+        assert!(!model_execution_enabled(
+            Some(&config),
+            Some(spec),
+            Some(&AgentSourceKind::AutoReview),
+        ));
     }
 }

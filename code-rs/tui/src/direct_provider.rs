@@ -9,6 +9,7 @@ use code_core::{
 };
 use code_protocol::openai_models::ModelInfo;
 
+#[cfg(test)]
 pub(crate) fn store_provider_api_key(
     code_home: &std::path::Path,
     secret_name: &str,

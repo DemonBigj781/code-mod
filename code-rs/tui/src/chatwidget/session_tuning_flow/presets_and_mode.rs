@@ -39,6 +39,40 @@ impl ChatWidget<'_> {
         presets
     }
 
+    pub(super) fn available_model_presets_for_role(&self, role: ModelRole) -> Vec<ModelPreset> {
+        self.available_session_model_presets()
+            .into_iter()
+            .filter(|preset| {
+                code_core::agent_defaults::model_role_enabled(
+                    &self.config.agents,
+                    &preset.model,
+                    role,
+                )
+            })
+            .collect()
+    }
+
+    pub(super) fn available_direct_provider_catalogs_for_role(
+        &self,
+        role: ModelRole,
+    ) -> Vec<DirectProviderModelCatalog> {
+        self.available_direct_provider_catalogs()
+            .into_iter()
+            .map(|mut catalog| {
+                let provider_id = catalog.provider_id.clone();
+                catalog.presets.retain(|preset| {
+                    let identifier = format!("{provider_id}/{}", preset.model);
+                    code_core::agent_defaults::model_role_enabled(
+                        &self.config.agents,
+                        &identifier,
+                        role,
+                    )
+                });
+                catalog
+            })
+            .collect()
+    }
+
     fn configured_model_catalog_providers(&self) -> Vec<(String, ModelProviderInfo)> {
         let mut providers: Vec<(String, ModelProviderInfo)> = self
             .config
@@ -146,7 +180,8 @@ impl ChatWidget<'_> {
     ) {
         self.direct_model_catalogs
             .insert(catalog.provider_id.clone(), catalog);
-        let catalogs = self.available_direct_provider_catalogs();
+        let catalogs =
+            self.available_direct_provider_catalogs_for_role(ModelRole::Session);
         self.bottom_pane
             .update_direct_provider_catalogs(catalogs.clone());
         if let Some(overlay) = self.settings.overlay.as_mut() {
@@ -165,11 +200,16 @@ impl ChatWidget<'_> {
         }
 
         self.remote_model_presets = Some(presets);
-        let available_presets = self.available_model_presets();
-        self.bottom_pane
-            .update_model_selection_presets(available_presets.clone());
+        let bottom_pane_presets = self
+            .bottom_pane
+            .active_model_selection_role()
+            .map(|role| self.available_model_presets_for_role(role));
+        let session_presets = self.available_model_presets_for_role(ModelRole::Session);
+        if let Some(presets) = bottom_pane_presets {
+            self.bottom_pane.update_model_selection_presets(presets);
+        }
         if let Some(overlay) = self.settings.overlay.as_mut() {
-            overlay.update_model_presets(available_presets);
+            overlay.update_model_presets(session_presets);
         }
 
         if let Some(default_model) = default_model {
@@ -203,7 +243,8 @@ impl ChatWidget<'_> {
                 status: code_core::remote_models::RemoteModelsStatus::Fresh,
             },
         );
-        let catalogs = self.available_direct_provider_catalogs();
+        let catalogs =
+            self.available_direct_provider_catalogs_for_role(ModelRole::Session);
         self.bottom_pane
             .update_direct_provider_catalogs(catalogs.clone());
         if let Some(overlay) = self.settings.overlay.as_mut() {
@@ -227,6 +268,13 @@ impl ChatWidget<'_> {
             return;
         }
         if self.config.model.eq_ignore_ascii_case(&default_model) {
+            return;
+        }
+        if !code_core::agent_defaults::model_role_enabled(
+            &self.config.agents,
+            &default_model,
+            ModelRole::Session,
+        ) {
             return;
         }
 
@@ -363,6 +411,25 @@ impl ChatWidget<'_> {
                     .flash_footer_notice(format!("Collaboration mode already set to {label}."));
             }
             return;
+        }
+
+        if matches!(mode, CollaborationModeKind::Plan) {
+            let planning_model = if self.config.planning_use_chat_model {
+                self.config.model.clone()
+            } else {
+                self.config.planning_model.clone()
+            };
+            if !code_core::agent_defaults::model_role_enabled(
+                &self.config.agents,
+                &planning_model,
+                ModelRole::Review,
+            ) {
+                self.history_push_plain_state(history_cell::new_error_event(format!(
+                    "Planning model '{planning_model}' is disabled for review and planning. Choose an enabled model in Settings > Agents.",
+                )));
+                self.request_redraw();
+                return;
+            }
         }
 
         self.collaboration_mode = mode;

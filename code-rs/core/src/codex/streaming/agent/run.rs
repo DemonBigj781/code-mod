@@ -58,19 +58,10 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
         // Convert input to ResponseInputItem
         let mut response_input = response_input_from_core_items(input.clone());
         sess.enforce_user_message_limits(&sub_id, &mut response_input);
-        let response_item: ResponseItem = response_input.into();
+        let mut response_item: ResponseItem = response_input.into();
+        assign_user_submission_id(&mut response_item, &sub_id);
 
-        let prompt = match &response_item {
-            ResponseItem::Message { role, content, .. } if role == "user" => content
-                .iter()
-                .filter_map(|item| match item {
-                    ContentItem::InputText { text } => Some(text.clone()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-            _ => String::new(),
-        };
+        let prompt = compressed_operator_prompt(&response_item, &sess.input_compression_config);
 
         let hook_request = code_hooks::UserPromptSubmitRequest {
             session_id: crate::codex::hook_runtime::thread_id_from_session_uuid(sess.as_ref()),
@@ -154,18 +145,12 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                 let mut queued_items = Vec::new();
                 for queued in queued_user_inputs {
                     let submission_id = queued.submission_id;
-                    let response_item: ResponseItem = queued.response_item.into();
-                    let prompt = match &response_item {
-                        ResponseItem::Message { role, content, .. } if role == "user" => content
-                            .iter()
-                            .filter_map(|item| match item {
-                                ContentItem::InputText { text } => Some(text.clone()),
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                        _ => String::new(),
-                    };
+                    let mut response_item: ResponseItem = queued.response_item.into();
+                    assign_user_submission_id(&mut response_item, &submission_id);
+                    let prompt = compressed_operator_prompt(
+                        &response_item,
+                        &sess.input_compression_config,
+                    );
                     let hook_request = code_hooks::UserPromptSubmitRequest {
                         session_id: crate::codex::hook_runtime::thread_id_from_session_uuid(
                             sess.as_ref(),
@@ -285,6 +270,10 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
         } else {
             sess.turn_input_with_history(pending_input_tail.clone())
         };
+        let turn_input = crate::operator_input_compression::compress_operator_items(
+            turn_input,
+            &sess.input_compression_config,
+        );
 
         let turn_input_messages: Vec<String> = turn_input
             .iter()
@@ -634,5 +623,60 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
             let agent = AgentTask::spawn(Arc::clone(&sess_clone), turn_context, submission_id, items, TaskOriginKind::QueuedUser, true);
             sess_clone.set_task(agent);
         });
+    }
+}
+
+fn assign_user_submission_id(item: &mut ResponseItem, submission_id: &str) {
+    if let ResponseItem::Message { id, role, .. } = item
+        && role == "user"
+    {
+        *id = Some(submission_id.to_owned());
+    }
+}
+
+fn compressed_operator_prompt(
+    item: &ResponseItem,
+    config: &crate::config_types::OperatorInputCompressionConfig,
+) -> String {
+    let compressed = crate::operator_input_compression::compress_operator_items(
+        vec![item.clone()],
+        config,
+    );
+    match compressed.first() {
+        Some(ResponseItem::Message { role, content, .. }) if role == "user" => content
+            .iter()
+            .filter_map(|item| match item {
+                ContentItem::InputText { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_hook_prompt_uses_the_compressed_model_bound_copy() {
+        let item = ResponseItem::Message {
+            id: Some("submission-1".to_owned()),
+            role: "user".to_owned(),
+            content: vec![ContentItem::InputText {
+                text: "Please update the documentation.\n\nPlease update the documentation."
+                    .to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+        assert_eq!(
+            compressed_operator_prompt(
+                &item,
+                &crate::config_types::OperatorInputCompressionConfig::default(),
+            ),
+            "Update the documentation.",
+        );
     }
 }

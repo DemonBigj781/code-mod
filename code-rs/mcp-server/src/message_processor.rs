@@ -1643,6 +1643,7 @@ fn configure_session_op_from_config(config: &Config) -> Op {
         repl_default_runtime: config.repl_default_runtime,
         repl_runtimes: config.repl_runtimes.clone(),
         memories: config.memories.clone(),
+        input_compression: config.input_compression.clone(),
         collaboration_mode: code_core::protocol::CollaborationModeKind::from_sandbox_policy(
             &config.sandbox_policy,
         ),

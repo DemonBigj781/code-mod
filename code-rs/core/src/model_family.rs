@@ -50,6 +50,7 @@ const CONTEXT_WINDOW_128K: u64 = 128_000;
 const CONTEXT_WINDOW_96K: u64 = 96_000;
 const CONTEXT_WINDOW_16K: u64 = 16_385;
 const CONTEXT_WINDOW_1M: u64 = 1_047_576;
+const GPT_6_EXTENDED_CONTEXT_WINDOW: u64 = 872_000;
 const MAX_OUTPUT_DEFAULT: u64 = 128_000;
 
 static UPSTREAM_MODELS: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
@@ -265,7 +266,9 @@ fn apply_upstream_model_overrides(mut family: ModelFamily) -> ModelFamily {
         return family;
     };
 
-    family.base_instructions = model_info.base_instructions.clone();
+    if !model_info.base_instructions.is_empty() {
+        family.base_instructions = model_info.base_instructions.clone();
+    }
     family.context_window = model_info.context_window.and_then(|limit| u64::try_from(limit).ok());
     family.default_reasoning_effort = model_info.default_reasoning_level.map(|effort| match effort {
         code_protocol::openai_models::ReasoningEffort::None
@@ -275,6 +278,7 @@ fn apply_upstream_model_overrides(mut family: ModelFamily) -> ModelFamily {
         code_protocol::openai_models::ReasoningEffort::High => ReasoningEffort::High,
         code_protocol::openai_models::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
         code_protocol::openai_models::ReasoningEffort::Max => ReasoningEffort::Max,
+        code_protocol::openai_models::ReasoningEffort::Ultra => ReasoningEffort::Ultra,
     });
     family.default_reasoning_summary = model_info.default_reasoning_summary.into();
     family.supports_reasoning_summaries = model_info.supports_reasoning_summaries;
@@ -372,6 +376,18 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             base_instructions: BASE_INSTRUCTIONS_WITH_APPLY_PATCH.to_owned(),
             context_window: Some(CONTEXT_WINDOW_16K),
             max_output_tokens: Some(4_096))
+    } else if slug.starts_with("gpt-6") {
+        model_family!(
+            slug, "gpt-6-astra",
+            supports_reasoning_summaries: true,
+            base_instructions: BASE_INSTRUCTIONS.to_owned(),
+            apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+            supports_parallel_tool_calls: true,
+            default_reasoning_effort: Some(ReasoningEffort::Low),
+            context_window: Some(CONTEXT_WINDOW_272K),
+            max_output_tokens: Some(MAX_OUTPUT_DEFAULT),
+            truncation_policy: TruncationPolicy::Tokens(10_000),
+        )
     } else if slug.starts_with("test-gpt-5") {
         model_family!(
             slug, slug,
@@ -613,25 +629,43 @@ pub const fn default_auto_compact_limit_for_context_window(context_window: u64) 
     ((context_window as i64) * 9) / 10
 }
 
-pub fn supports_service_tier(model: &str) -> bool {
-    let normalized = model
+fn model_capability_slug(model: &str) -> &str {
+    model
         .strip_prefix("code-")
         .or_else(|| model.strip_prefix("test-"))
         .or_else(|| model.strip_prefix("cloud-"))
-        .unwrap_or(model);
-    normalized.eq_ignore_ascii_case("gpt-5.5") || normalized.eq_ignore_ascii_case("gpt-5.4")
+        .or_else(|| model.strip_prefix("openai/"))
+        .unwrap_or(model)
+}
+
+pub fn supports_service_tier(model: &str) -> bool {
+    let normalized = model_capability_slug(model);
+    normalized.eq_ignore_ascii_case("gpt-6-astra")
+        || normalized.eq_ignore_ascii_case("gpt-5.5")
+        || normalized.eq_ignore_ascii_case("gpt-5.4")
+}
+
+fn extended_context_window(model: &str) -> Option<u64> {
+    match model_capability_slug(model) {
+        model if model.eq_ignore_ascii_case("gpt-6-astra") => {
+            Some(GPT_6_EXTENDED_CONTEXT_WINDOW)
+        }
+        model
+            if model.eq_ignore_ascii_case("gpt-5.5")
+                || model.eq_ignore_ascii_case("gpt-5.4") =>
+        {
+            Some(EXTENDED_CONTEXT_WINDOW_1M)
+        }
+        _ => None,
+    }
 }
 
 pub fn supports_extended_context(model: &str) -> bool {
-    supports_service_tier(model)
+    extended_context_window(model).is_some()
 }
 
 pub fn max_supported_context_window(model: &str, family: &ModelFamily) -> Option<u64> {
-    if supports_extended_context(model) {
-        Some(EXTENDED_CONTEXT_WINDOW_1M)
-    } else {
-        family.context_window
-    }
+    extended_context_window(model).or(family.context_window)
 }
 
 pub fn resolve_context_settings(
@@ -641,13 +675,17 @@ pub fn resolve_context_settings(
     requested_auto_compact_token_limit: Option<i64>,
     family: &ModelFamily,
 ) -> (Option<u64>, Option<i64>) {
+    let extended_context_window = extended_context_window(model);
     let (mut context_window, mut auto_compact_token_limit) = match mode {
-        Some(ContextMode::OneM | ContextMode::Auto) if supports_extended_context(model) => (
-            Some(EXTENDED_CONTEXT_WINDOW_1M),
-            Some(default_auto_compact_limit_for_context_window(
-                EXTENDED_CONTEXT_WINDOW_1M,
-            )),
-        ),
+        Some(ContextMode::OneM | ContextMode::Auto) if extended_context_window.is_some() => {
+            let extended_context_window = extended_context_window.expect("checked above");
+            (
+                Some(extended_context_window),
+                Some(default_auto_compact_limit_for_context_window(
+                    extended_context_window,
+                )),
+            )
+        }
         Some(ContextMode::Disabled) => {
             (family.context_window, family.auto_compact_token_limit())
         }
@@ -700,12 +738,14 @@ mod tests {
         default_auto_compact_limit_for_context_window,
         derive_default_model_family,
         find_family_for_model,
+        max_supported_context_window,
         resolve_context_settings,
         supports_extended_context,
         supports_service_tier,
         STANDARD_CONTEXT_WINDOW_272K,
     };
     use crate::config_types::ContextMode;
+    use crate::config_types::ReasoningEffort;
 
     #[test]
     fn image_generation_support_tracks_image_input_modality() {
@@ -716,6 +756,8 @@ mod tests {
 
     #[test]
     fn service_tier_is_supported_for_gpt_5_4_and_gpt_5_5_variants() {
+        assert!(supports_service_tier("gpt-6-astra"));
+        assert!(supports_service_tier("openai/gpt-6-astra"));
         assert!(supports_service_tier("gpt-5.5"));
         assert!(supports_service_tier("code-gpt-5.5"));
         assert!(supports_service_tier("test-gpt-5.5"));
@@ -728,9 +770,31 @@ mod tests {
 
     #[test]
     fn extended_context_matches_service_tier_support() {
+        assert!(supports_extended_context("gpt-6-astra"));
         assert!(supports_extended_context("gpt-5.5"));
         assert!(supports_extended_context("gpt-5.4"));
         assert!(!supports_extended_context("gpt-5.4-mini"));
+    }
+
+    #[test]
+    fn gpt_6_extended_context_uses_official_limit() {
+        let family = find_family_for_model("gpt-6-astra").expect("known upstream model");
+
+        assert_eq!(
+            max_supported_context_window("gpt-6-astra", &family),
+            Some(872_000)
+        );
+        assert_eq!(
+            resolve_context_settings(
+                "gpt-6-astra",
+                Some(ContextMode::Auto),
+                None,
+                None,
+                &family,
+            )
+            .0,
+            Some(872_000)
+        );
     }
 
     #[test]
@@ -741,6 +805,27 @@ mod tests {
         assert!(family.prefer_websockets);
         assert!(family.supports_search_tool);
         assert_eq!(family.context_window, Some(STANDARD_CONTEXT_WINDOW_272K));
+    }
+
+    #[test]
+    fn gpt_6_uses_catalog_family_defaults() {
+        let family = find_family_for_model("gpt-6-astra").expect("known upstream model");
+
+        assert_eq!(family.family, "gpt-6-astra");
+        assert_eq!(family.default_reasoning_effort, Some(ReasoningEffort::Low));
+        assert!(family.prefer_websockets);
+        assert!(family.supports_parallel_tool_calls);
+        assert_eq!(family.context_window, Some(STANDARD_CONTEXT_WINDOW_272K));
+    }
+
+    #[test]
+    fn namespaced_gpt_6_uses_catalog_family_defaults() {
+        let family = find_family_for_model("openai/gpt-6-astra")
+            .expect("known namespaced upstream model");
+
+        assert_eq!(family.slug, "openai/gpt-6-astra");
+        assert_eq!(family.family, "gpt-6-astra");
+        assert_eq!(family.default_reasoning_effort, Some(ReasoningEffort::Low));
     }
 
     #[test]

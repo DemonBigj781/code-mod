@@ -22,6 +22,8 @@ impl InterfaceSettingsView {
             RowKind::OverlayMinWidth => self.open_width_editor(),
             RowKind::NerdFonts => self.cycle_icon_mode_next(),
             RowKind::FuseHintKeyLabels => self.toggle_fuse_hint_key_labels(),
+            RowKind::InputCompression => self.toggle_input_compression(),
+            RowKind::AggressiveCompression => self.toggle_aggressive_compression(),
             RowKind::HotkeyScope => self.cycle_hotkey_scope_next(),
             RowKind::ShowConfigToml => self.show_config_toml(),
             RowKind::ShowCodeHome => self.show_code_home(),
@@ -94,6 +96,10 @@ impl InterfaceSettingsView {
                     Some(RowKind::OverlayMinWidth) => self.adjust_min_width(-5),
                     Some(RowKind::NerdFonts) => self.cycle_icon_mode_prev(),
                     Some(RowKind::FuseHintKeyLabels) => self.toggle_fuse_hint_key_labels(),
+                    Some(RowKind::InputCompression) => self.set_input_compression(false),
+                    Some(RowKind::AggressiveCompression) => {
+                        self.set_aggressive_compression(false)
+                    }
                     Some(RowKind::HotkeyScope) => self.cycle_hotkey_scope_prev(),
                     Some(row) if row.is_hotkey_row() => {
                         self.adjust_hotkey_for_row(row, false);
@@ -109,6 +115,10 @@ impl InterfaceSettingsView {
                     Some(RowKind::OverlayMinWidth) => self.adjust_min_width(5),
                     Some(RowKind::NerdFonts) => self.cycle_icon_mode_next(),
                     Some(RowKind::FuseHintKeyLabels) => self.toggle_fuse_hint_key_labels(),
+                    Some(RowKind::InputCompression) => self.set_input_compression(true),
+                    Some(RowKind::AggressiveCompression) => {
+                        self.set_aggressive_compression(true)
+                    }
                     Some(RowKind::HotkeyScope) => self.cycle_hotkey_scope_next(),
                     Some(row) if row.is_hotkey_row() => {
                         self.adjust_hotkey_for_row(row, true);

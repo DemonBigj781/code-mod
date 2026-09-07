@@ -25,7 +25,7 @@ fn sse_response(body: String) -> ResponseTemplate {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial]
-async fn wake_on_agent_batch_completion_starts_new_turn() {
+async fn agent_batch_completion_after_final_does_not_start_new_turn() {
     let code_home = TempDir::new().unwrap();
     let project_dir = TempDir::new().unwrap();
 
@@ -113,6 +113,9 @@ event: response.completed\ndata: {completed}\n\n",
         args: Vec::new(),
         read_only: true,
         enabled: true,
+        session_enabled: true,
+        review_enabled: true,
+        auto_drive_enabled: true,
         description: None,
         env: None,
         args_read_only: None,
@@ -150,10 +153,16 @@ event: response.completed\ndata: {completed}\n\n",
 
     while Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        let event = timeout(remaining, codex.next_event())
-            .await
-            .expect("timeout waiting for event")
-            .expect("event stream ended unexpectedly");
+        let wait = if saw_completed {
+            remaining.min(Duration::from_millis(300))
+        } else {
+            remaining
+        };
+        let event = match timeout(wait, codex.next_event()).await {
+            Ok(event) => event.expect("event stream ended unexpectedly"),
+            Err(_) if saw_completed => break,
+            Err(_) => panic!("timeout waiting for agent completion"),
+        };
 
         match event.msg {
             EventMsg::AgentStatusUpdate(status) => {
@@ -169,16 +178,101 @@ event: response.completed\ndata: {completed}\n\n",
             _ => {}
         }
 
-        if saw_completed && saw_task_started {
+    }
+
+    codex.submit(Op::Shutdown).await.unwrap();
+    let requests = server.received_requests().await.unwrap();
+
+    assert!(saw_completed, "agent did not reach completed status");
+    assert!(
+        !saw_task_started,
+        "agent completion after the final response must not start another turn"
+    );
+    assert_eq!(
+        requests.len(),
+        0,
+        "agent completion after the final response must not issue another model request"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn background_shell_completion_after_final_does_not_start_new_turn() {
+    let code_home = TempDir::new().unwrap();
+    let project_dir = TempDir::new().unwrap();
+    let server = MockServer::start().await;
+
+    let mut config = load_default_config_for_test(&code_home);
+    config.cwd = project_dir.path().to_path_buf();
+    config.approval_policy = AskForApproval::Never;
+    config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+    config.model = "gpt-5.1-codex".to_string();
+
+    let mut provider = built_in_model_providers(None)["openai"].clone();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    config.model_provider = provider;
+
+    let conversation_manager =
+        ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
+    let codex = conversation_manager
+        .new_conversation(config)
+        .await
+        .expect("create conversation")
+        .conversation;
+
+    codex
+        .submit(Op::CancelAgents {
+            batch_ids: Vec::new(),
+            agent_ids: Vec::new(),
+        })
+        .await
+        .unwrap();
+
+    let ready_deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let remaining = ready_deadline.saturating_duration_since(Instant::now());
+        let event = timeout(remaining, codex.next_event())
+            .await
+            .expect("timeout waiting for session readiness")
+            .expect("event stream ended unexpectedly");
+
+        if matches!(event.msg, EventMsg::AgentMessage(_)) {
             break;
         }
     }
 
-    codex.submit(Op::Shutdown).await.unwrap();
+    codex
+        .submit(Op::AddPendingInputDeveloper {
+            text: "Background shell completed after the final response.".to_string(),
+        })
+        .await
+        .unwrap();
 
-    assert!(saw_completed, "agent did not reach completed status");
+    let mut saw_task_started = false;
+    let observation_deadline = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < observation_deadline {
+        let remaining = observation_deadline.saturating_duration_since(Instant::now());
+        match timeout(remaining, codex.next_event()).await {
+            Ok(Ok(event)) if matches!(event.msg, EventMsg::TaskStarted) => {
+                saw_task_started = true;
+                break;
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => panic!("event stream ended unexpectedly: {error}"),
+            Err(_) => break,
+        }
+    }
+
+    codex.submit(Op::Shutdown).await.unwrap();
+    let requests = server.received_requests().await.unwrap();
+
     assert!(
-        saw_task_started,
-        "expected a new TaskStarted after agent completion"
+        !saw_task_started,
+        "late background shell completion must not start another turn"
+    );
+    assert_eq!(
+        requests.len(),
+        0,
+        "late background shell completion must not issue another model request"
     );
 }

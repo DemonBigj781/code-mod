@@ -526,6 +526,8 @@ pub(crate) struct Session {
     pub(super) disable_response_storage: bool,
     pub(super) tools_config: ToolsConfig,
     pub(super) memories_config: crate::config_types::MemoriesConfig,
+    pub(super) input_compression_config:
+        crate::config_types::OperatorInputCompressionConfig,
     pub(super) memory_mode: Mutex<crate::rollout::catalog::SessionMemoryMode>,
     pub(super) dynamic_tools: Vec<DynamicToolSpec>,
     pub(super) exec_command_manager: Arc<crate::exec_command::SessionManager>,
@@ -1597,14 +1599,15 @@ impl Session {
         }
     }
 
-    /// Enqueue a response item that should be surfaced to the model at the start of the
-    /// next turn. Returns `true` if no agent is currently running and a new turn should be
-    /// scheduled immediately.
-    pub fn enqueue_out_of_turn_item(&self, item: ResponseInputItem) -> bool {
+    /// Queue internal context only while a model turn is still active. Once a final
+    /// response has ended the turn, late background completions must stay silent.
+    pub fn enqueue_out_of_turn_item_while_running(&self, item: ResponseInputItem) -> bool {
         let mut state = crate::codex::lock_or_panic!(self.state);
-        let should_start_turn = state.current_task.is_none();
+        if state.current_task.is_none() {
+            return false;
+        }
         state.pending_input.push(item);
-        should_start_turn
+        true
     }
 
     pub(crate) fn next_internal_sub_id(&self) -> String {

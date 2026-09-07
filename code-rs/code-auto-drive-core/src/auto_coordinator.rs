@@ -8,13 +8,16 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::{anyhow, Context, Result};
 use code_core::config::Config;
 use code_core::agent_defaults::{
+    agent_model_available_for_auth,
+    agent_model_specs,
     build_model_guide_description,
-    enabled_agent_model_specs_for_auth,
-    filter_agent_model_names_for_auth,
+    model_role_enabled,
+    subagent_model_names_for_auth,
 };
 use code_core::config_types::{
     AutoDriveModelRoutingEntry,
     AutoDriveSettings,
+    ModelRole,
     ReasoningEffort,
     TextVerbosity,
 };
@@ -23,7 +26,6 @@ use code_core::codex::compact::resolve_compact_prompt_text;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
-use code_core::slash_commands::get_enabled_agents;
 use code_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
 use code_core::{
     RateLimitSwitchState, SwitchActiveAccountOnRateLimitParams, switch_active_account_on_rate_limit,
@@ -116,7 +118,8 @@ fn cli_routing_reasoning_priority(level: ReasoningEffort) -> u8 {
         ReasoningEffort::High => 3,
         ReasoningEffort::XHigh => 4,
         ReasoningEffort::Max => 5,
-        ReasoningEffort::None => 6,
+        ReasoningEffort::Ultra => 6,
+        ReasoningEffort::None => 7,
     }
 }
 
@@ -129,6 +132,7 @@ fn normalize_cli_routing_reasoning_levels(levels: &[ReasoningEffort]) -> Vec<Rea
         ReasoningEffort::High,
         ReasoningEffort::XHigh,
         ReasoningEffort::Max,
+        ReasoningEffort::Ultra,
     ] {
         if levels.contains(&level) {
             normalized.push(level);
@@ -145,6 +149,7 @@ fn cli_reasoning_effort_to_str(level: ReasoningEffort) -> &'static str {
         ReasoningEffort::High => "high",
         ReasoningEffort::XHigh => "xhigh",
         ReasoningEffort::Max => "max",
+        ReasoningEffort::Ultra => "ultra",
     }
 }
 
@@ -295,6 +300,27 @@ fn resolve_auto_drive_cli_routing_entries(
     }
 
     entries
+}
+
+fn available_auto_drive_cli_models(
+    configured_agents: &[code_core::config_types::AgentConfig],
+    auth_mode: Option<code_app_server_protocol::AuthMode>,
+    supports_pro_only_models: bool,
+) -> Vec<String> {
+    agent_model_specs()
+        .iter()
+        .filter(|spec| {
+            agent_model_available_for_auth(spec, auth_mode, supports_pro_only_models)
+                && model_role_enabled(configured_agents, spec.slug, ModelRole::AutoDrive)
+        })
+        .filter_map(|spec| {
+            spec.model_args
+                .windows(2)
+                .find(|args| args[0] == "--model")
+                .map(|args| args[1].to_ascii_lowercase())
+        })
+        .filter(|model| model.starts_with("gpt-"))
+        .collect()
 }
 
 fn spark_fallback_model(model: &str) -> Option<&'static str> {
@@ -676,10 +702,37 @@ mod tests {
     use super::*;
     use anyhow::anyhow;
     use code_app_server_protocol::AuthMode;
-    use code_core::agent_defaults::DEFAULT_AGENT_NAMES;
+    use code_core::agent_defaults::{
+        DEFAULT_AGENT_NAMES, agent_config_from_spec, agent_model_spec,
+    };
     use code_core::error::{RetryLimitReachedError, UsageLimitReachedError};
     use serde_json::json;
     use std::time::Duration;
+
+    #[test]
+    fn auto_drive_cli_models_respect_the_auto_drive_role_only() {
+        let mut config = agent_config_from_spec(
+            agent_model_spec("code-gpt-5.3-codex").expect("built-in model"),
+        );
+        config.enabled = false;
+        config.auto_drive_enabled = true;
+
+        let available = available_auto_drive_cli_models(
+            &[config.clone()],
+            Some(AuthMode::Chatgpt),
+            true,
+        );
+        assert!(available.iter().any(|model| model == "gpt-5.3-codex"));
+
+        config.auto_drive_enabled = false;
+        let unavailable =
+            available_auto_drive_cli_models(&[config], Some(AuthMode::Chatgpt), true);
+        assert!(
+            unavailable
+                .iter()
+                .all(|model| model != "gpt-5.3-codex")
+        );
+    }
 
     #[test]
     fn turn_descriptor_defaults_to_normal_mode() {
@@ -1950,14 +2003,11 @@ fn run_auto_loop(inputs: AutoLoopInputs) -> Result<()> {
         .map(|auth| auth.mode)
         .or(Some(preferred_auth));
     let supports_pro_only_models = auth_mgr.supports_pro_only_models();
-    let available_cli_routing_models = enabled_agent_model_specs_for_auth(
+    let available_cli_routing_models = available_auto_drive_cli_models(
+        &config.agents,
         auth_mode_for_model_access,
         supports_pro_only_models,
-    )
-    .into_iter()
-    .map(|spec| spec.slug.to_ascii_lowercase())
-    .filter(|model| model.starts_with("gpt-"))
-    .collect::<Vec<_>>();
+    );
     let allowed_cli_routing_entries = resolve_auto_drive_cli_routing_entries(
         &config.auto_drive,
         auth_mode_for_model_access,
@@ -1977,20 +2027,11 @@ fn run_auto_loop(inputs: AutoLoopInputs) -> Result<()> {
     });
     let coordinator_turn_cap = config.auto_drive.coordinator_turn_cap;
     let config = Arc::new(config);
-    let mut active_agent_names = filter_agent_model_names_for_auth(
-        get_enabled_agents(&config.agents),
+    let active_agent_names = subagent_model_names_for_auth(
+        &config.agents,
         auth_mode_for_model_access,
         supports_pro_only_models,
     );
-    if active_agent_names.is_empty() {
-        active_agent_names = enabled_agent_model_specs_for_auth(
-            auth_mode_for_model_access,
-            supports_pro_only_models,
-        )
-        .into_iter()
-        .map(|spec| spec.slug.to_owned())
-        .collect();
-    }
     let client = Arc::new(ModelClient::new(
         Arc::clone(&config),
         Some(auth_mgr),
@@ -2893,6 +2934,7 @@ fn build_schema(
             ReasoningEffort::High,
             ReasoningEffort::XHigh,
             ReasoningEffort::Max,
+            ReasoningEffort::Ultra,
         ] {
             if cli_routing_entries
                 .iter()
@@ -4309,8 +4351,9 @@ fn parse_cli_reasoning_effort(value: &str) -> Result<ReasoningEffort> {
         "high" => Ok(ReasoningEffort::High),
         "xhigh" => Ok(ReasoningEffort::XHigh),
         "max" => Ok(ReasoningEffort::Max),
+        "ultra" => Ok(ReasoningEffort::Ultra),
         _ => Err(anyhow!(
-            "unsupported cli_reasoning_effort '{normalized}'; expected one of: minimal, low, medium, high, xhigh, max"
+            "unsupported cli_reasoning_effort '{normalized}'; expected one of: minimal, low, medium, high, xhigh, max, ultra"
         )),
     }
 }

@@ -103,6 +103,28 @@
                     }
                     self.schedule_redraw();
                 }
+                AppEvent::SetInputCompressionConfig(settings) => {
+                    match code_core::config::set_input_compression(
+                        &self.config.code_home,
+                        &settings,
+                    ) {
+                        Ok(()) => {
+                            self.config.input_compression = settings.clone();
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.apply_input_compression_settings(settings);
+                                widget.flash_footer_notice("Input compression updated");
+                            }
+                        }
+                        Err(err) => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.flash_footer_notice(format!(
+                                    "Failed to persist input compression settings: {err}",
+                                ));
+                            }
+                        }
+                    }
+                    self.schedule_redraw();
+                }
                 AppEvent::SetTuiHotkeysConfig(hotkeys) => {
                     match code_core::config::set_tui_hotkeys(&self.config.code_home, &hotkeys) {
                         Ok(()) => {

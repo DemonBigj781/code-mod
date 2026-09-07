@@ -1,4 +1,12 @@
 impl ChatWidget<'_> {
+    pub(crate) fn apply_input_compression_settings(
+        &mut self,
+        settings: code_core::config_types::OperatorInputCompressionConfig,
+    ) {
+        self.config.input_compression = settings;
+        self.submit_op(self.current_configure_session_op());
+    }
+
     pub(super) fn build_settings_overview_rows(&self) -> Vec<SettingsOverviewRow> {
         let features = &self.config.features_effective;
         SettingsSection::ALL
@@ -636,6 +644,7 @@ impl ChatWidget<'_> {
             ReasoningEffort::High => "High",
             ReasoningEffort::XHigh => "XHigh",
             ReasoningEffort::Max => "Max",
+            ReasoningEffort::Ultra => "Ultra",
         }
     }
 

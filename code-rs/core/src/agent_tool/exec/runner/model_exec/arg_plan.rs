@@ -81,6 +81,7 @@ pub(super) fn prepare_model_execution(
     } else {
         model_lower.as_str()
     };
+    let family = if family == "coder" { "code" } else { family };
 
     let command_missing = !command_exists(&command_for_spawn);
     let use_current_exe = should_use_current_exe_for_agent(family, command_missing, config);
@@ -101,12 +102,13 @@ pub(super) fn prepare_model_execution(
         }
     }
 
+    let configured_model_args = extract_model_args(&final_args);
     command::strip_model_flags(&mut final_args);
 
     let spec_model_args: Vec<String> = if let Some(spec) = spec_opt {
         spec.model_args.iter().map(|arg| (*arg).to_owned()).collect()
     } else {
-        Vec::new()
+        configured_model_args
     };
 
     let built_in_cloud = family == "cloud" && config.is_none();
@@ -236,5 +238,79 @@ pub(super) fn prepare_model_execution(
         final_args,
         debug_subagent,
         child_log_tag,
+    }
+}
+
+fn extract_model_args(args: &[String]) -> Vec<String> {
+    let mut extracted = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        let lower = arg.to_ascii_lowercase();
+        if lower == "--model" || lower == "-m" {
+            if let Some(value) = args.get(index + 1) {
+                extracted.push("--model".to_owned());
+                extracted.push(value.clone());
+            }
+            index += 2;
+            continue;
+        }
+        if let Some(value) = arg
+            .strip_prefix("--model=")
+            .or_else(|| arg.strip_prefix("-m="))
+        {
+            extracted.push("--model".to_owned());
+            extracted.push(value.to_owned());
+        }
+        index += 1;
+    }
+    extracted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_provider_model_command_keeps_model_and_provider_arguments() {
+        let config = AgentConfig {
+            name: "openrouter/vendor-model".to_owned(),
+            command: "coder --model vendor/model -c model_provider=openrouter".to_owned(),
+            args: Vec::new(),
+            read_only: false,
+            enabled: true,
+            session_enabled: true,
+            review_enabled: true,
+            auto_drive_enabled: true,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        };
+
+        let prepared = prepare_model_execution(PrepareModelExecutionRequest {
+            agent_id: "agent-1",
+            model: "openrouter/vendor-model",
+            prompt: "Review this change.",
+            read_only: true,
+            config: Some(&config),
+            spec_opt: None,
+            reasoning_effort: code_protocol::config_types::ReasoningEffort::Medium,
+            review_output_json_path: None,
+            source_kind: None,
+            log_tag: None,
+        });
+
+        assert_eq!(prepared.family, "code");
+        assert!(
+            prepared.final_args.windows(2).any(|args| args == ["--model", "vendor/model"]),
+        );
+        assert!(
+            prepared
+                .final_args
+                .windows(2)
+                .any(|args| args == ["-c", "model_provider=openrouter"]),
+        );
     }
 }

@@ -251,6 +251,7 @@ impl EndpointFormState {
         self.submitting
     }
 
+    #[cfg(test)]
     pub(super) fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }

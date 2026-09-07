@@ -431,6 +431,23 @@ impl ChatWidget<'_> {
         preparation_label: Option<String>,
         auto_resolve: bool,
     ) {
+        let review_model = if self.config.review_use_chat_model {
+            self.config.model.clone()
+        } else {
+            self.config.review_model.clone()
+        };
+        if !code_core::agent_defaults::model_role_enabled(
+            &self.config.agents,
+            &review_model,
+            ModelRole::Review,
+        ) {
+            self.auto_resolve_state = None;
+            self.history_push_plain_state(crate::history_cell::new_error_event(format!(
+                "Review model '{review_model}' is disabled for review. Choose an enabled model in Settings > Agents.",
+            )));
+            self.request_redraw();
+            return;
+        }
         if auto_resolve {
             let max_re_reviews = self.configured_auto_resolve_re_reviews();
             self.auto_resolve_state = Some(AutoResolveState::new_with_limit(

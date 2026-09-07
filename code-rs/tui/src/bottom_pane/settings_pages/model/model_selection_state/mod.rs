@@ -7,6 +7,6 @@ pub(crate) use data::{
     SelectionAction,
 };
 
-pub(crate) use presets::reasoning_effort_label;
+pub(crate) use presets::{OpenRouterSection, openrouter_section, reasoning_effort_label};
 
 pub(crate) use target::ModelSelectionTarget;

@@ -80,6 +80,7 @@ pub(super) async fn handle_configure_session(
         repl_default_runtime,
         repl_runtimes,
         memories,
+        input_compression,
         collaboration_mode,
     } = *params;
 
@@ -114,6 +115,7 @@ pub(super) async fn handle_configure_session(
         repl_default_runtime,
         repl_runtimes,
         memories,
+        input_compression,
         collaboration_mode,
     };
 
@@ -163,6 +165,7 @@ struct ConfigureSessionRequest {
     repl_default_runtime: crate::config::ReplRuntimeKindToml,
     repl_runtimes: std::collections::BTreeMap<crate::config::ReplRuntimeKindToml, crate::config::ReplRuntimeSpec>,
     memories: crate::config_types::MemoriesConfig,
+    input_compression: crate::config_types::OperatorInputCompressionConfig,
     collaboration_mode: CollaborationModeKind,
 }
 

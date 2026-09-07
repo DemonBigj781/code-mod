@@ -1285,6 +1285,9 @@ pub async fn delete_subagent_command(code_home: &Path, name: &str) -> Result<boo
 pub struct AgentConfigPatch<'a> {
     pub name: &'a str,
     pub enabled: Option<bool>,
+    pub session_enabled: Option<bool>,
+    pub review_enabled: Option<bool>,
+    pub auto_drive_enabled: Option<bool>,
     pub args: Option<&'a [String]>,
     pub args_read_only: Option<&'a [String]>,
     pub args_write: Option<&'a [String]>,
@@ -1300,6 +1303,9 @@ pub async fn upsert_agent_config(
     let AgentConfigPatch {
         name,
         enabled,
+        session_enabled,
+        review_enabled,
+        auto_drive_enabled,
         args,
         args_read_only,
         args_write,
@@ -1331,6 +1337,9 @@ pub async fn upsert_agent_config(
                 AgentConfigPatch {
                     name,
                     enabled,
+                    session_enabled,
+                    review_enabled,
+                    auto_drive_enabled,
                     args,
                     args_read_only,
                     args_write,
@@ -1350,6 +1359,9 @@ pub async fn upsert_agent_config(
                 .is_some_and(|s| s.eq_ignore_ascii_case(name));
             if same {
                 if let Some(val) = enabled { tbl["enabled"] = toml_edit::value(val); }
+                if let Some(val) = session_enabled { tbl["session-enabled"] = toml_edit::value(val); }
+                if let Some(val) = review_enabled { tbl["review-enabled"] = toml_edit::value(val); }
+                if let Some(val) = auto_drive_enabled { tbl["auto-drive-enabled"] = toml_edit::value(val); }
                 if let Some(a) = args { tbl["args"] = toml_edit::value(a.iter().cloned().collect::<toml_edit::Array>()); }
                 if let Some(ro) = args_read_only {
                     tbl["args-read-only"] = toml_edit::value(ro.iter().cloned().collect::<toml_edit::Array>());
@@ -1389,6 +1401,9 @@ pub async fn upsert_agent_config(
             AgentConfigPatch {
                 name,
                 enabled,
+                session_enabled,
+                review_enabled,
+                auto_drive_enabled,
                 args,
                 args_read_only,
                 args_write,
@@ -1414,6 +1429,9 @@ fn append_agent_entry(
     let AgentConfigPatch {
         name,
         enabled,
+        session_enabled,
+        review_enabled,
+        auto_drive_enabled,
         args,
         args_read_only,
         args_write,
@@ -1425,6 +1443,9 @@ fn append_agent_entry(
     t.set_implicit(true);
     t["name"] = toml_edit::value(name.to_owned());
     if let Some(val) = enabled { t["enabled"] = toml_edit::value(val); }
+    if let Some(val) = session_enabled { t["session-enabled"] = toml_edit::value(val); }
+    if let Some(val) = review_enabled { t["review-enabled"] = toml_edit::value(val); }
+    if let Some(val) = auto_drive_enabled { t["auto-drive-enabled"] = toml_edit::value(val); }
     if let Some(a) = args { t["args"] = toml_edit::value(a.iter().cloned().collect::<toml_edit::Array>()); }
     if let Some(ro) = args_read_only { t["args-read-only"] = toml_edit::value(ro.iter().cloned().collect::<toml_edit::Array>()); }
     if let Some(w) = args_write { t["args-write"] = toml_edit::value(w.iter().cloned().collect::<toml_edit::Array>()); }
@@ -1615,6 +1636,60 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn upsert_agent_config_persists_all_model_roles() {
+        let tmpdir = tempdir().expect("tmp");
+        let code_home = tmpdir.path();
+
+        upsert_agent_config(
+            code_home,
+            AgentConfigPatch {
+                name: "provider/model",
+                enabled: Some(false),
+                session_enabled: Some(true),
+                review_enabled: Some(false),
+                auto_drive_enabled: Some(true),
+                args: None,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
+                description: None,
+                command: Some("coder --model model -c model_provider=provider"),
+            },
+        )
+        .await
+        .expect("persist agent roles");
+
+        let contents = read_config(code_home).await;
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let agent = parsed
+            .get("agents")
+            .and_then(toml::Value::as_array)
+            .and_then(|agents| agents.first())
+            .and_then(toml::Value::as_table)
+            .expect("agent table");
+
+        assert_eq!(agent.get("enabled").and_then(toml::Value::as_bool), Some(false));
+        assert_eq!(
+            agent
+                .get("session-enabled")
+                .and_then(toml::Value::as_bool),
+            Some(true),
+        );
+        assert_eq!(
+            agent
+                .get("review-enabled")
+                .and_then(toml::Value::as_bool),
+            Some(false),
+        );
+        assert_eq!(
+            agent
+                .get("auto-drive-enabled")
+                .and_then(toml::Value::as_bool),
+            Some(true),
+        );
+    }
 
     /// Verifies model and effort are written at top-level when no profile is set.
     #[tokio::test]

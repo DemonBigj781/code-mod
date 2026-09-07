@@ -172,6 +172,8 @@ pub struct ConfigureSessionOp {
     #[serde(default, skip_serializing_if = "MemoriesConfig::is_default")]
     pub memories: MemoriesConfig,
     #[serde(default)]
+    pub input_compression: crate::config_types::OperatorInputCompressionConfig,
+    #[serde(default)]
     pub collaboration_mode: CollaborationModeKind,
 }
 
@@ -324,7 +326,7 @@ pub enum Op {
         name: String,
     },
 
-    /// Internally queue a developer-role message to be included in the next turn.
+    /// Queue a developer-role message only while the current turn is active.
     AddPendingInputDeveloper {
         /// The developer message text to add to pending input.
         text: String,
@@ -1905,6 +1907,8 @@ mod tests {
             repl_default_runtime: crate::config::ReplRuntimeKindToml::Node,
             repl_runtimes: std::collections::BTreeMap::new(),
             memories: crate::config_types::MemoriesConfig::default(),
+            input_compression:
+                crate::config_types::OperatorInputCompressionConfig::default(),
             collaboration_mode: CollaborationModeKind::Default,
         });
 

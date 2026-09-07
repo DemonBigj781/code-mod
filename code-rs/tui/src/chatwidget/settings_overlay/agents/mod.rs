@@ -4,5 +4,7 @@ mod model;
 mod mouse;
 mod render;
 
-pub(crate) use model::{AgentOverviewRow, AgentsSettingsContent};
+#[cfg(test)]
+mod tests;
 
+pub(crate) use model::{AgentOverviewRow, AgentsSettingsContent};

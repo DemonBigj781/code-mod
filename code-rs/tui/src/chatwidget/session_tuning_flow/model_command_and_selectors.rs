@@ -6,7 +6,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let presets = self.available_session_model_presets();
+        let presets = self.available_model_presets_for_role(ModelRole::Session);
         if presets.is_empty() {
             let message =
                 "No model presets are available. Update your configuration to define models.".to_owned();
@@ -34,7 +34,8 @@ impl ChatWidget<'_> {
         }
 
         self.refresh_direct_provider_catalogs();
-        let direct_provider_catalogs = self.available_direct_provider_catalogs();
+        let direct_provider_catalogs =
+            self.available_direct_provider_catalogs_for_role(ModelRole::Session);
         self.bottom_pane
             .show_model_selection(ModelSelectionViewParams {
                 presets,
@@ -52,7 +53,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_review_model_selector(&mut self) {
-        let presets = self.available_model_presets();
+        let presets = self.available_model_presets_for_role(ModelRole::Review);
         if presets.is_empty() {
             self.bottom_pane.flash_footer_notice(
                 "No model presets are available for review. Update configuration to define models.".to_owned(),
@@ -80,7 +81,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_review_resolve_model_selector(&mut self) {
-        let presets = self.available_model_presets();
+        let presets = self.available_model_presets_for_role(ModelRole::Review);
         if presets.is_empty() {
             self.bottom_pane.flash_footer_notice(
                 "No model presets are available for review resolution.".to_owned(),
@@ -118,7 +119,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_auto_review_model_selector(&mut self) {
-        let presets = self.available_model_presets();
+        let presets = self.available_model_presets_for_role(ModelRole::Review);
         if presets.is_empty() {
             self.bottom_pane.flash_footer_notice(
                 "No model presets are available for Auto Review. Update configuration to define models.".to_owned(),
@@ -156,7 +157,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_auto_review_resolve_model_selector(&mut self) {
-        let presets = self.available_model_presets();
+        let presets = self.available_model_presets_for_role(ModelRole::Review);
         if presets.is_empty() {
             self.bottom_pane.flash_footer_notice(
                 "No model presets are available for Auto Review resolution.".to_owned(),
@@ -194,7 +195,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_planning_model_selector(&mut self) {
-        let presets = self.available_model_presets();
+        let presets = self.available_model_presets_for_role(ModelRole::Review);
         if presets.is_empty() {
             self.bottom_pane.flash_footer_notice(
                 "No model presets are available for planning. Update configuration to define models.".to_owned(),
@@ -228,7 +229,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_auto_drive_model_selector(&mut self) {
-        let presets = self.available_model_presets();
+        let presets = self.available_model_presets_for_role(ModelRole::AutoDrive);
         if presets.is_empty() {
             self.bottom_pane.flash_footer_notice(
                 "No model presets are available for Auto Drive. Update configuration to define models.".to_owned(),

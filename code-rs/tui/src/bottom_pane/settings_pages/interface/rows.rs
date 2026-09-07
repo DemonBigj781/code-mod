@@ -8,11 +8,13 @@ use code_core::config_types::SettingsMenuOpenMode;
 use crate::bottom_pane::settings_ui::menu_rows::SettingsMenuRow;
 use crate::bottom_pane::settings_ui::rows::StyledText;
 
-const MAIN_ROWS: [RowKind; 17] = [
+const MAIN_ROWS: [RowKind; 19] = [
     RowKind::OpenMode,
     RowKind::OverlayMinWidth,
     RowKind::NerdFonts,
     RowKind::FuseHintKeyLabels,
+    RowKind::InputCompression,
+    RowKind::AggressiveCompression,
     RowKind::HotkeyScope,
     RowKind::ModelSelectorHotkey,
     RowKind::ReasoningEffortHotkey,
@@ -45,11 +47,13 @@ impl InterfaceSettingsView {
         }
     }
 
-    const MAIN_ROWS_NO_FILE_MANAGER: [RowKind; 15] = [
+    const MAIN_ROWS_NO_FILE_MANAGER: [RowKind; 17] = [
         RowKind::OpenMode,
         RowKind::OverlayMinWidth,
         RowKind::NerdFonts,
         RowKind::FuseHintKeyLabels,
+        RowKind::InputCompression,
+        RowKind::AggressiveCompression,
         RowKind::HotkeyScope,
         RowKind::ModelSelectorHotkey,
         RowKind::ReasoningEffortHotkey,
@@ -87,6 +91,8 @@ impl InterfaceSettingsView {
                 RowKind::OverlayMinWidth => "Overlay min width",
                 RowKind::NerdFonts => "Icon mode",
                 RowKind::FuseHintKeyLabels => "Compact hints",
+                RowKind::InputCompression => "Input compression",
+                RowKind::AggressiveCompression => "Aggressive compression",
                 RowKind::HotkeyScope => "Hotkey scope",
                 RowKind::ShowConfigToml => "Show config.toml",
                 RowKind::ShowCodeHome => "Show CODE_HOME",
@@ -152,6 +158,14 @@ impl InterfaceSettingsView {
                             },
                             Style::new().fg(crate::colors::function()),
                         )),
+                        RowKind::InputCompression => Some(StyledText::new(
+                            if self.input_compression.enabled { "on" } else { "off" },
+                            Style::new().fg(crate::colors::function()),
+                        )),
+                        RowKind::AggressiveCompression => Some(StyledText::new(
+                            if self.input_compression.aggressive { "on" } else { "off" },
+                            Style::new().fg(crate::colors::function()),
+                        )),
                         RowKind::HotkeyScope => Some(StyledText::new(
                             self.hotkey_scope.label(),
                             Style::new().fg(crate::colors::function()),
@@ -160,7 +174,8 @@ impl InterfaceSettingsView {
                         RowKind::Apply => {
                             let is_dirty = self.dirty_settings
                                 || self.dirty_hotkeys
-                                || self.icon_mode != self.icon_mode_baseline;
+                                || self.icon_mode != self.icon_mode_baseline
+                                || self.input_compression != self.input_compression_baseline;
                             Some(StyledText::new(
                                 if is_dirty { "Pending" } else { "Applied" },
                                 if is_dirty {

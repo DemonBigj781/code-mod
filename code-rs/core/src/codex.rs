@@ -70,12 +70,7 @@ use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use crate::account_usage;
 use crate::auth_accounts;
-use crate::agent_defaults::{
-    agent_model_spec,
-    default_agent_configs,
-    enabled_agent_model_specs_for_auth,
-    filter_agent_model_names_for_auth,
-};
+use crate::agent_defaults::agent_model_spec;
 use code_protocol::models::WebSearchAction;
 use code_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
@@ -195,6 +190,7 @@ fn to_proto_reasoning_effort(effort: ReasoningEffortConfig) -> ProtoReasoningEff
         ReasoningEffortConfig::High => ProtoReasoningEffort::High,
         ReasoningEffortConfig::XHigh => ProtoReasoningEffort::XHigh,
         ReasoningEffortConfig::Max => ProtoReasoningEffort::Max,
+        ReasoningEffortConfig::Ultra => ProtoReasoningEffort::Ultra,
     }
 }
 
@@ -921,7 +917,6 @@ use code_protocol::models::ShellToolCallParams;
 use code_protocol::models::SandboxPermissions;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
-use crate::slash_commands::get_enabled_agents;
 use crate::dry_run_guard::{analyze_command, DryRunAnalysis, DryRunDisposition, DryRunGuardState};
 use crate::parse_command::parse_command;
 use crate::project_doc::get_user_instructions;
@@ -990,9 +985,8 @@ pub struct Codex {
     rx_event: Receiver<Event>,
 }
 
-// Allow internal components (like background exec completions) to trigger a new
-// turn without fabricating a visible user message. We enqueue an empty
-// UserInput; the model will only see queued developer/system items.
+// Allow internal components to queue context for an active turn without
+// fabricating a visible user message.
 static TX_SUB_GLOBAL: OnceLock<Sender<Submission>> = OnceLock::new();
 static ANY_BG_NOTIFY: OnceLock<std::sync::Arc<Notify>> = OnceLock::new();
 
@@ -1075,6 +1069,7 @@ impl Codex {
                 repl_default_runtime: config.repl_default_runtime,
                 repl_runtimes: config.repl_runtimes.clone(),
                 memories: config.memories.clone(),
+                input_compression: config.input_compression.clone(),
                 collaboration_mode: crate::protocol::CollaborationModeKind::from_sandbox_policy(
                     &config.sandbox_policy,
                 ),

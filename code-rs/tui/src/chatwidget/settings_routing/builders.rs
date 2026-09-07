@@ -1,6 +1,6 @@
 impl ChatWidget<'_> {
     pub(super) fn build_model_settings_view(&self) -> ModelSelectionView {
-        let presets = self.available_session_model_presets();
+        let presets = self.available_model_presets_for_role(ModelRole::Session);
         let current_model = self.config.model.clone();
         let current_effort = self.config.model_reasoning_effort;
         ModelSelectionView::new(
@@ -14,7 +14,8 @@ impl ChatWidget<'_> {
                 current_context_window: self.config.model_context_window,
                 current_auto_compact_token_limit: self.config.model_auto_compact_token_limit,
                 use_chat_model: false,
-                direct_provider_catalogs: self.available_direct_provider_catalogs(),
+                direct_provider_catalogs: self
+                    .available_direct_provider_catalogs_for_role(ModelRole::Session),
                 target: ModelSelectionTarget::Session,
             },
             self.app_event_tx.clone(),
@@ -43,6 +44,7 @@ impl ChatWidget<'_> {
             self.config.tui.settings_menu.clone(),
             self.config.tui.hotkeys.clone(),
             self.config.tui.effective_icon_mode(),
+            self.config.input_compression.clone(),
             self.app_event_tx.clone(),
         )
     }
@@ -376,6 +378,7 @@ impl ChatWidget<'_> {
             return matches!(spec.family, "code" | "codex" | "cloud");
         }
 
+        let (command_base, _) = split_command_and_args(command);
         name.eq_ignore_ascii_case("code")
             || name.eq_ignore_ascii_case("codex")
             || name.eq_ignore_ascii_case("cloud")
@@ -384,6 +387,9 @@ impl ChatWidget<'_> {
             || command.eq_ignore_ascii_case("codex")
             || command.eq_ignore_ascii_case("cloud")
             || command.eq_ignore_ascii_case("coder")
+            || command_base.eq_ignore_ascii_case("code")
+            || command_base.eq_ignore_ascii_case("codex")
+            || command_base.eq_ignore_ascii_case("coder")
     }
 
     pub(super) fn collect_agents_overview_rows(&self) -> (Vec<AgentOverviewRow>, Vec<String>) {
@@ -424,23 +430,34 @@ impl ChatWidget<'_> {
             }
         }
 
+        fn canonical_agent_name(name: &str) -> String {
+            agent_model_spec(name).map_or_else(
+                || name.to_ascii_lowercase(),
+                |spec| spec.slug.to_owned(),
+            )
+        }
+
         let mut agent_rows: Vec<AgentOverviewRow> = Vec::new();
-        let mut ordered: Vec<String> = enabled_agent_model_specs()
-            .into_iter()
+        let mut ordered: Vec<String> = agent_model_specs()
+            .iter()
             .map(|spec| spec.slug.to_owned())
             .collect();
         let mut extras: Vec<String> = Vec::new();
         for agent in &self.config.agents {
-            if !ordered.iter().any(|name| agent.name.eq_ignore_ascii_case(name)) {
-                extras.push(agent.name.to_ascii_lowercase());
+            let canonical = canonical_agent_name(&agent.name);
+            if !ordered.iter().any(|name| canonical.eq_ignore_ascii_case(name)) {
+                extras.push(canonical);
             }
         }
         let mut pending_agents: HashMap<String, AgentConfig> = HashMap::new();
         for pending in self.pending_agent_updates.values() {
-            let lower = pending.cfg.name.to_ascii_lowercase();
-            pending_agents.insert(lower.clone(), pending.cfg.clone());
-            if !ordered.iter().any(|name| name.eq_ignore_ascii_case(&lower)) {
-                extras.push(lower);
+            let canonical = canonical_agent_name(&pending.cfg.name);
+            pending_agents.insert(canonical.clone(), pending.cfg.clone());
+            if !ordered
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&canonical))
+            {
+                extras.push(canonical);
             }
         }
         extras.sort();
@@ -452,11 +469,10 @@ impl ChatWidget<'_> {
 
         for name in &ordered {
             let name_lower = name.to_ascii_lowercase();
-            if let Some(cfg) = self
-                .config
-                .agents
-                .iter()
-                .find(|a| a.name.eq_ignore_ascii_case(name))
+            if let Some(cfg) = code_core::agent_defaults::agent_config_for_model(
+                &self.config.agents,
+                name,
+            )
             {
                 let builtin = Self::is_builtin_agent(&cfg.name, &cfg.command);
                 let spec_cli = agent_model_spec(&cfg.name)
@@ -467,14 +483,18 @@ impl ChatWidget<'_> {
                     || command_exists(&command_to_check)
                     || spec_cli.is_some_and(command_exists);
                 agent_rows.push(AgentOverviewRow {
-                    name: cfg.name.clone(),
-                    enabled: cfg.enabled && installed,
+                    name: name.clone(),
+                    session_enabled: cfg.session_enabled,
+                    subagent_enabled: cfg.enabled,
+                    review_enabled: cfg.review_enabled,
+                    auto_drive_enabled: cfg.auto_drive_enabled,
                     installed,
                     description: Self::agent_description_for(
                         &cfg.name,
                         Some(&cfg.command),
                         cfg.description.as_deref(),
                     ),
+                    command: cfg.command.clone(),
                 });
             } else if let Some(cfg) = pending_agents.get(&name_lower) {
                 let builtin = Self::is_builtin_agent(&cfg.name, &cfg.command);
@@ -486,25 +506,67 @@ impl ChatWidget<'_> {
                     || command_exists(&command_to_check)
                     || spec_cli.is_some_and(command_exists);
                 agent_rows.push(AgentOverviewRow {
-                    name: cfg.name.clone(),
-                    enabled: cfg.enabled && installed,
+                    name: name.clone(),
+                    session_enabled: cfg.session_enabled,
+                    subagent_enabled: cfg.enabled,
+                    review_enabled: cfg.review_enabled,
+                    auto_drive_enabled: cfg.auto_drive_enabled,
                     installed,
                     description: Self::agent_description_for(
                         &cfg.name,
                         Some(&cfg.command),
                         cfg.description.as_deref(),
                     ),
+                    command: cfg.command.clone(),
                 });
             } else {
-                let cmd = name.clone();
+                let cmd = agent_model_spec(name)
+                    .map_or_else(|| name.clone(), |spec| spec.cli.to_owned());
                 let builtin = Self::is_builtin_agent(name, &cmd);
                 let spec_cli = agent_model_spec(name).map(|spec| spec.cli);
                 let installed = builtin || spec_cli.is_some_and(command_exists) || command_exists(&cmd);
                 agent_rows.push(AgentOverviewRow {
                     name: name.clone(),
-                    enabled: installed,
+                    session_enabled: true,
+                    subagent_enabled: agent_model_spec(name).is_some_and(|spec| spec.is_enabled()),
+                    review_enabled: true,
+                    auto_drive_enabled: true,
                     installed,
                     description: Self::agent_description_for(name, Some(&cmd), None),
+                    command: cmd,
+                });
+            }
+        }
+
+        for catalog in self.available_direct_provider_catalogs() {
+            for preset in catalog.presets {
+                let name = format!("{}/{}", catalog.provider_id, preset.model);
+                if agent_rows.iter().any(|row| row.name.eq_ignore_ascii_case(&name)) {
+                    continue;
+                }
+                let configured = self
+                    .config
+                    .agents
+                    .iter()
+                    .find(|agent| agent.name.eq_ignore_ascii_case(&name));
+                let command = configured.map_or_else(
+                    || {
+                        format!(
+                            "coder --model {} -c model_provider={}",
+                            preset.model, catalog.provider_id
+                        )
+                    },
+                    |agent| agent.command.clone(),
+                );
+                agent_rows.push(AgentOverviewRow {
+                    name,
+                    session_enabled: configured.is_none_or(|agent| agent.session_enabled),
+                    subagent_enabled: configured.is_some_and(|agent| agent.enabled),
+                    review_enabled: configured.is_none_or(|agent| agent.review_enabled),
+                    auto_drive_enabled: configured.is_none_or(|agent| agent.auto_drive_enabled),
+                    installed: command_exists(&command_for_check(&command)),
+                    description: Some(preset.description),
+                    command,
                 });
             }
         }

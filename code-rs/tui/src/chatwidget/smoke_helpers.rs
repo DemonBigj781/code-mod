@@ -155,6 +155,7 @@ impl ChatWidgetHarness {
                         .insert_background_event_with_placement(message, placement, order);
                 }
                 AppEvent::UpdateAgentConfig {
+                    intent,
                     name,
                     enabled,
                     args_read_only,
@@ -166,6 +167,7 @@ impl ChatWidgetHarness {
                     let runtime = &*TEST_RUNTIME;
                     let _guard = runtime.enter();
                     self.chat.apply_agent_update(AgentUpdateRequest {
+                        intent,
                         name,
                         enabled,
                         args_ro: args_read_only,
@@ -174,6 +176,16 @@ impl ChatWidgetHarness {
                         description,
                         command,
                     });
+                }
+                AppEvent::UpdateModelRole {
+                    name,
+                    role,
+                    enabled,
+                    description,
+                    command,
+                } => {
+                    self.chat
+                        .apply_model_role_update(name, role, enabled, description, command);
                 }
                 AppEvent::AgentValidationFinished { name, result, attempt_id } => {
                     self.chat.handle_agent_validation_finished(&name, attempt_id, result);

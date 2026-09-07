@@ -162,6 +162,23 @@ impl Default for MemoriesConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OperatorInputCompressionConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub aggressive: bool,
+}
+
+impl Default for OperatorInputCompressionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            aggressive: false,
+        }
+    }
+}
+
 impl From<MemoriesToml> for MemoriesConfig {
     fn from(toml: MemoriesToml) -> Self {
         let mut cfg = Self::default();
@@ -1262,6 +1279,15 @@ pub struct McpToolId {
 }
 
 /// Configuration for external agent models
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ModelRole {
+    #[default]
+    Session,
+    Subagent,
+    Review,
+    AutoDrive,
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct AgentConfig {
@@ -1281,9 +1307,21 @@ pub struct AgentConfig {
     #[serde(default)]
     pub read_only: bool,
 
-    /// Whether this agent is enabled
+    /// Whether this model can be used as a subagent.
     #[serde(default = "default_true")]
     pub enabled: bool,
+
+    /// Whether this model appears in the main session model picker.
+    #[serde(default = "default_true")]
+    pub session_enabled: bool,
+
+    /// Whether this model appears in review and planning model pickers.
+    #[serde(default = "default_true")]
+    pub review_enabled: bool,
+
+    /// Whether this model appears in Auto Drive model selection and routing.
+    #[serde(default = "default_true")]
+    pub auto_drive_enabled: bool,
 
     /// Optional description of the agent
     #[serde(default)]
@@ -1309,6 +1347,17 @@ pub struct AgentConfig {
     /// prompt provided to the agent whenever it runs.
     #[serde(default)]
     pub instructions: Option<String>,
+}
+
+impl AgentConfig {
+    pub fn role_enabled(&self, role: ModelRole) -> bool {
+        match role {
+            ModelRole::Session => self.session_enabled,
+            ModelRole::Subagent => self.enabled,
+            ModelRole::Review => self.review_enabled,
+            ModelRole::AutoDrive => self.auto_drive_enabled,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -3341,6 +3390,7 @@ pub enum ReasoningEffort {
     High,
     XHigh,
     Max,
+    Ultra,
     /// Deprecated: previously disabled reasoning. Kept for internal use only.
     #[serde(skip)]
     #[schemars(skip)]
@@ -3555,6 +3605,7 @@ impl From<code_protocol::config_types::ReasoningEffort> for ReasoningEffort {
             code_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
             code_protocol::config_types::ReasoningEffort::XHigh => ReasoningEffort::XHigh,
             code_protocol::config_types::ReasoningEffort::Max => ReasoningEffort::Max,
+            code_protocol::config_types::ReasoningEffort::Ultra => ReasoningEffort::Ultra,
         }
     }
 }
@@ -3570,6 +3621,7 @@ impl From<ReasoningEffort> for code_protocol::config_types::ReasoningEffort {
             ReasoningEffort::High => code_protocol::config_types::ReasoningEffort::High,
             ReasoningEffort::XHigh => code_protocol::config_types::ReasoningEffort::XHigh,
             ReasoningEffort::Max => code_protocol::config_types::ReasoningEffort::Max,
+            ReasoningEffort::Ultra => code_protocol::config_types::ReasoningEffort::Ultra,
         }
     }
 }
@@ -3589,6 +3641,43 @@ impl From<code_protocol::config_types::ReasoningSummary> for ReasoningSummary {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn legacy_agent_config_enables_new_roles_by_default() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+name = "provider/model"
+command = "coder"
+enabled = false
+"#,
+        )
+        .expect("legacy agent config");
+
+        assert!(!config.enabled);
+        assert!(config.session_enabled);
+        assert!(config.review_enabled);
+        assert!(config.auto_drive_enabled);
+    }
+
+    #[test]
+    fn agent_config_deserializes_explicit_model_roles() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+name = "provider/model"
+command = "coder"
+enabled = true
+session-enabled = false
+review-enabled = false
+auto-drive-enabled = false
+"#,
+        )
+        .expect("agent role config");
+
+        assert!(config.enabled);
+        assert!(!config.session_enabled);
+        assert!(!config.review_enabled);
+        assert!(!config.auto_drive_enabled);
+    }
 
     #[test]
     fn deserialize_stdio_command_server_config() {

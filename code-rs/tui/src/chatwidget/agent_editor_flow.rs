@@ -77,12 +77,11 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_agent_editor_ui(&mut self, name: String) {
-        if let Some(cfg) = self
-            .config
-            .agents
-            .iter()
-            .find(|a| a.name.eq_ignore_ascii_case(&name))
-            .cloned()
+        if let Some(cfg) = code_core::agent_defaults::agent_config_for_model(
+            &self.config.agents,
+            &name,
+        )
+        .cloned()
         {
             let ro = if let Some(ref v) = cfg.args_read_only {
                 Some(v.clone())
@@ -243,6 +242,7 @@ impl ChatWidget<'_> {
 
     pub(crate) fn apply_agent_update(&mut self, update: AgentUpdateRequest) {
         let AgentUpdateRequest {
+            intent,
             name,
             enabled,
             args_ro,
@@ -257,6 +257,12 @@ impl ChatWidget<'_> {
             .agents
             .iter()
             .position(|a| a.name.eq_ignore_ascii_case(&name));
+
+        if matches!(intent, crate::app_event::AgentUpdateIntent::CreateModel)
+            && existing_index.is_some()
+        {
+            return;
+        }
 
         let existing_command = existing_index
             .and_then(|idx| self.config.agents.get(idx))
@@ -274,6 +280,9 @@ impl ChatWidget<'_> {
                 args: Vec::new(),
                 read_only: false,
                 enabled,
+                session_enabled: true,
+                review_enabled: true,
+                auto_drive_enabled: true,
                 description: description.clone(),
                 env: None,
                 args_read_only: args_ro.clone(),
@@ -287,6 +296,9 @@ impl ChatWidget<'_> {
                 args: Vec::new(),
                 read_only: false,
                 enabled,
+                session_enabled: true,
+                review_enabled: true,
+                auto_drive_enabled: true,
                 description: description.clone(),
                 env: None,
                 args_read_only: args_ro.clone(),
@@ -310,6 +322,79 @@ impl ChatWidget<'_> {
         }
 
         self.commit_agent_update(pending);
+    }
+
+    pub(crate) fn apply_model_role_update(
+        &mut self,
+        name: String,
+        role: code_core::config_types::ModelRole,
+        enabled: bool,
+        description: Option<String>,
+        command: String,
+    ) {
+        let canonical = agent_model_spec(&name).map(|spec| spec.slug);
+        let existing_index = self.config.agents.iter().position(|agent| {
+            if let Some(canonical) = canonical {
+                agent_model_spec(&agent.name)
+                    .is_some_and(|spec| spec.slug.eq_ignore_ascii_case(canonical))
+            } else {
+                agent.name.eq_ignore_ascii_case(&name)
+            }
+        });
+
+        let mut config = existing_index
+            .and_then(|index| self.config.agents.get(index).cloned())
+            .or_else(|| agent_model_spec(&name).map(code_core::agent_defaults::agent_config_from_spec))
+            .unwrap_or_else(|| AgentConfig {
+                name: name.clone(),
+                command: Self::resolve_agent_command(&name, Some(&command), None),
+                args: Vec::new(),
+                read_only: false,
+                enabled: false,
+                session_enabled: true,
+                review_enabled: true,
+                auto_drive_enabled: true,
+                description: description.clone(),
+                env: None,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
+            });
+
+        if config.command.trim().is_empty() {
+            config.command = Self::resolve_agent_command(&name, Some(&command), None);
+        }
+        if config.description.is_none() {
+            config.description = description;
+        }
+        match role {
+            code_core::config_types::ModelRole::Session => config.session_enabled = enabled,
+            code_core::config_types::ModelRole::Subagent => config.enabled = enabled,
+            code_core::config_types::ModelRole::Review => config.review_enabled = enabled,
+            code_core::config_types::ModelRole::AutoDrive => config.auto_drive_enabled = enabled,
+        }
+
+        let active_planning_model = if self.config.planning_use_chat_model {
+            self.config.model.as_str()
+        } else {
+            self.config.planning_model.as_str()
+        };
+        let disables_active_planning_model = role == code_core::config_types::ModelRole::Review
+            && !enabled
+            && matches!(self.collaboration_mode, CollaborationModeKind::Plan)
+            && code_core::agent_defaults::agent_config_for_model(
+                std::slice::from_ref(&config),
+                active_planning_model,
+            )
+            .is_some();
+
+        self.commit_agent_update(PendingAgentUpdate {
+            id: Uuid::new_v4(),
+            cfg: config,
+        });
+        if disables_active_planning_model {
+            self.set_collaboration_mode(CollaborationModeKind::Default, true);
+        }
     }
 
     fn start_agent_validation(&mut self, pending: PendingAgentUpdate) {
@@ -374,6 +459,7 @@ impl ChatWidget<'_> {
         }
 
         self.persist_agent_config(&pending.cfg);
+        self.submit_op(self.current_configure_session_op());
         self.refresh_settings_overview_rows();
         self.show_agents_overview_ui();
     }
@@ -382,6 +468,9 @@ impl ChatWidget<'_> {
         if let Ok(home) = code_core::config::find_code_home() {
             let name = cfg.name.clone();
             let enabled = cfg.enabled;
+            let session_enabled = cfg.session_enabled;
+            let review_enabled = cfg.review_enabled;
+            let auto_drive_enabled = cfg.auto_drive_enabled;
             let ro = cfg.args_read_only.clone();
             let wr = cfg.args_write.clone();
             let instr = cfg.instructions.clone();
@@ -393,6 +482,9 @@ impl ChatWidget<'_> {
                     code_core::config_edit::AgentConfigPatch {
                         name: &name,
                         enabled: Some(enabled),
+                        session_enabled: Some(session_enabled),
+                        review_enabled: Some(review_enabled),
+                        auto_drive_enabled: Some(auto_drive_enabled),
                         args: None,
                         args_read_only: ro.as_deref(),
                         args_write: wr.as_deref(),
@@ -457,6 +549,16 @@ impl ChatWidget<'_> {
         if let Some(spec) = spec {
             return spec.cli.to_owned();
         }
+        if let Some((provider, model)) = name.split_once('/')
+            && !provider.trim().is_empty()
+            && !model.trim().is_empty()
+            && !provider.chars().any(char::is_whitespace)
+            && !model.chars().any(char::is_whitespace)
+        {
+            return format!(
+                "coder --model {model} -c model_provider={provider}"
+            );
+        }
         name.to_owned()
     }
 
@@ -479,4 +581,17 @@ impl ChatWidget<'_> {
         Some(candidate.to_owned())
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_model_name_builds_a_custom_code_agent_command() {
+        assert_eq!(
+            ChatWidget::resolve_agent_command("openrouter/vendor/model:free", None, None),
+            "coder --model vendor/model:free -c model_provider=openrouter",
+        );
+    }
 }

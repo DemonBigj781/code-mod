@@ -75,6 +75,15 @@ fn gpt_5_6_reasoning_efforts() -> Vec<ReasoningEffortPreset> {
     ]
 }
 
+fn gpt_6_reasoning_efforts() -> Vec<ReasoningEffortPreset> {
+    let mut efforts = gpt_5_6_reasoning_efforts();
+    efforts.push(ReasoningEffortPreset {
+        effort: ReasoningEffort::Ultra,
+        description: "Maximum reasoning with automatic task delegation".to_owned(),
+    });
+    efforts
+}
+
 pub fn openrouter_free_profile_preset() -> ModelPreset {
     ModelPreset {
         id: OPENROUTER_FREE_PROFILE_MODEL.to_owned(),
@@ -104,6 +113,19 @@ pub fn provider_id_for_profile_model(model: &str) -> Option<&'static str> {
 static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     vec![
         openrouter_free_profile_preset(),
+        ModelPreset {
+            id: "gpt-6-astra".to_owned(),
+            model: "gpt-6-astra".to_owned(),
+            display_name: "GPT-6-Astra".to_owned(),
+            description: "Our most capable model for complex, demanding work.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Low,
+            supported_reasoning_efforts: gpt_6_reasoning_efforts(),
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
         ModelPreset {
             id: "gpt-5.6-sol".to_owned(),
             model: "gpt-5.6-sol".to_owned(),
@@ -700,6 +722,7 @@ fn reasoning_effort_rank(effort: ReasoningEffort) -> u8 {
         ReasoningEffort::High => 3,
         ReasoningEffort::XHigh => 4,
         ReasoningEffort::Max => 5,
+        ReasoningEffort::Ultra => 6,
     }
 }
 
@@ -794,14 +817,42 @@ mod tests {
         let ids: Vec<&str> = presets.iter().map(|preset| preset.id.as_str()).collect();
 
         assert_eq!(
-            &ids[..5],
+            &ids[..6],
             &[
                 "openrouter/free-max",
+                "gpt-6-astra",
                 "gpt-5.6-sol",
                 "gpt-5.6-terra",
                 "gpt-5.6-luna",
                 "gpt-5.5",
             ],
+        );
+    }
+
+    #[test]
+    fn gpt_6_astra_includes_all_reasoning_modes() {
+        let presets = builtin_model_presets(Some(AuthMode::Chatgpt), true);
+        let preset = presets
+            .iter()
+            .find(|preset| preset.id == "gpt-6-astra")
+            .expect("missing GPT-6-Astra preset");
+        let efforts: Vec<_> = preset
+            .supported_reasoning_efforts
+            .iter()
+            .map(|preset| preset.effort)
+            .collect();
+
+        assert_eq!(preset.default_reasoning_effort, ReasoningEffort::Low);
+        assert_eq!(
+            efforts,
+            [
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::XHigh,
+                ReasoningEffort::Max,
+                ReasoningEffort::Ultra,
+            ]
         );
     }
 

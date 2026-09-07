@@ -186,8 +186,9 @@ impl AgentEditorView {
         };
 
         // Name box
+        let name_title = if self.simple_model_mode { "Provider" } else { "ID" };
         if let Some(field_inner) = render_field_box(
-            buf, name_offset, name_height, "ID", self.field == FIELD_NAME,
+            buf, name_offset, name_height, name_title, self.field == FIELD_NAME,
         ) {
             let mut border_style = if self.field == FIELD_NAME {
                 crate::colors::style_primary_bold()
@@ -200,7 +201,7 @@ impl AgentEditorView {
                 if let Some(rect) = Self::scrolled_rect(content, name_offset, name_height, scroll) {
                     let blk = Block::default()
                         .borders(Borders::ALL)
-                        .title(Line::from(" ID "))
+                        .title(Line::from(format!(" {name_title} ")))
                         .border_style(border_style);
                     blk.render(rect, buf);
                 }
@@ -213,11 +214,16 @@ impl AgentEditorView {
         }
 
         // Command box
+        let command_title = if self.simple_model_mode { "Model slug" } else { "Command" };
         if let Some(field_inner) = render_field_box(
-            buf, command_offset, command_height, "Command", self.field == FIELD_COMMAND,
+            buf, command_offset, command_height, command_title, self.field == FIELD_COMMAND,
         ) {
             self.command_field
                 .render(field_inner, buf, self.field == FIELD_COMMAND);
+        }
+
+        if self.simple_model_mode {
+            return;
         }
 
         // Read-only params
@@ -269,4 +275,3 @@ impl AgentEditorView {
         }
     }
 }
-

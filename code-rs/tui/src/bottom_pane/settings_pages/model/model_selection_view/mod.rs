@@ -16,7 +16,7 @@ use crate::app_event_sender::AppEventSender;
 use crate::components::form_text_field::FormTextField;
 
 use super::model_selection_state::{
-    DirectProviderModelCatalog, ModelSelectionData, ModelSelectionViewParams,
+    DirectProviderModelCatalog, ModelSelectionData, ModelSelectionTarget, ModelSelectionViewParams,
 };
 use endpoint_form::EndpointFormState;
 
@@ -30,7 +30,7 @@ pub(super) enum EditTarget {
 }
 
 #[derive(Debug)]
-pub(super) enum ViewMode {
+enum ViewMode {
     Main,
     Edit {
         target: EditTarget,
@@ -70,6 +70,10 @@ impl ModelSelectionView {
 
     pub(crate) fn is_complete(&self) -> bool {
         self.is_complete
+    }
+
+    pub(crate) fn target(&self) -> ModelSelectionTarget {
+        self.data.target
     }
 
     pub(crate) fn update_presets(&mut self, presets: Vec<ModelPreset>) {

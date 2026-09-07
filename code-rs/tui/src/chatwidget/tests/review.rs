@@ -612,6 +612,9 @@
         args: Vec::new(),
         read_only: false,
         enabled: true,
+        session_enabled: true,
+        review_enabled: true,
+        auto_drive_enabled: true,
         description: None,
         env: None,
         args_read_only: None,
@@ -625,7 +628,7 @@
         .find(|row| row.name == "missing-agent-cli")
         .expect("missing agent row present");
     assert!(!missing.installed);
-    assert!(!missing.enabled);
+    assert!(!missing.subagent_enabled);
     
     let code_slug = enabled_agent_model_specs()
         .into_iter()
@@ -637,7 +640,245 @@
         .find(|row| row.name == code_slug)
         .expect("code row present");
     assert!(code.installed);
-    assert!(code.enabled);
+    assert!(code.subagent_enabled);
+    }
+
+    #[test]
+    fn direct_provider_catalog_models_receive_agent_rows() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let provider_id = "openrouter".to_owned();
+    chat.config.model_providers.insert(
+        provider_id.clone(),
+        code_core::ModelProviderInfo::direct_openai_compatible(
+            "OpenRouter",
+            "https://openrouter.ai/api/v1",
+            None,
+            code_core::WireApi::Responses,
+        ),
+    );
+    let model: code_protocol::openai_models::ModelInfo =
+        serde_json::from_value(serde_json::json!({
+            "slug": "vendor/model:free",
+            "display_name": "vendor/model:free",
+            "description": "free model",
+            "default_reasoning_level": null,
+            "supported_reasoning_levels": [],
+            "shell_type": "default",
+            "visibility": "list",
+            "supported_in_api": true,
+            "priority": 0,
+            "additional_speed_tiers": [],
+            "availability_nux": null,
+            "upgrade": null,
+            "base_instructions": "",
+            "model_messages": null,
+            "supports_reasoning_summaries": false,
+            "default_reasoning_summary": "auto",
+            "support_verbosity": false,
+            "default_verbosity": null,
+            "apply_patch_tool_type": null,
+            "web_search_tool_type": "text",
+            "truncation_policy": {"mode": "bytes", "limit": 10000},
+            "supports_parallel_tool_calls": false,
+            "supports_image_detail_original": false,
+            "context_window": null,
+            "auto_compact_token_limit": null,
+            "effective_context_window_percent": 95,
+            "experimental_supported_tools": [],
+            "input_modalities": ["text"],
+            "supports_search_tool": false,
+            "prefer_websockets": false,
+            "used_fallback_model_metadata": true
+        }))
+        .expect("direct model metadata");
+    chat.direct_model_catalogs.insert(
+        provider_id,
+        code_core::remote_models::RemoteModelsCatalog {
+            provider_id: "openrouter".to_owned(),
+            models: vec![model],
+            status: code_core::remote_models::RemoteModelsStatus::Fresh,
+        },
+    );
+
+    let (rows, _) = chat.collect_agents_overview_rows();
+    let row = rows
+        .iter()
+        .find(|row| row.name == "openrouter/vendor/model:free")
+        .expect("direct-provider agent row");
+    assert!(!row.subagent_enabled);
+    assert!(row.installed, "catalog model agents run through the Code CLI");
+    assert_eq!(
+        row.command,
+        "coder --model vendor/model:free -c model_provider=openrouter",
+    );
+    }
+
+    #[test]
+    fn direct_provider_role_update_commits_without_validation() {
+    let _guard = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    chat.test_mode = false;
+
+    chat.apply_model_role_update(
+        "provider/model".to_owned(),
+        code_core::config_types::ModelRole::Subagent,
+        true,
+        Some("Catalog model".to_owned()),
+        "code --version".to_owned(),
+    );
+
+    let configured = chat
+        .config
+        .agents
+        .iter()
+        .find(|agent| agent.name == "provider/model")
+        .expect("catalog role update should persist immediately");
+    assert!(configured.enabled);
+    assert!(chat.pending_agent_updates.is_empty());
+    }
+
+    #[test]
+    fn model_role_update_changes_only_the_selected_capability() {
+    let _guard = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+
+    chat.apply_model_role_update(
+        "code-gpt-5.3-codex".to_owned(),
+        code_core::config_types::ModelRole::Review,
+        false,
+        None,
+        "coder".to_owned(),
+    );
+
+    let configured = code_core::agent_defaults::agent_config_for_model(
+        &chat.config.agents,
+        "gpt-5.3-codex",
+    )
+    .expect("configured model");
+    assert!(!configured.review_enabled);
+    assert!(configured.session_enabled);
+    assert_eq!(
+        configured.enabled,
+        code_core::agent_defaults::agent_model_spec("code-gpt-5.3-codex")
+            .expect("built-in model")
+            .is_enabled(),
+    );
+    assert!(configured.auto_drive_enabled);
+    }
+
+    #[test]
+    fn model_role_filters_are_independent_across_selectors() {
+    let _guard = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let configured = chat
+        .config
+        .agents
+        .iter_mut()
+        .find(|agent| agent.name == "code-gpt-5.3-codex")
+        .expect("built-in model config");
+    configured.session_enabled = false;
+    configured.review_enabled = true;
+    configured.auto_drive_enabled = false;
+
+    let session = chat.available_model_presets_for_role(
+        code_core::config_types::ModelRole::Session,
+    );
+    let review = chat.available_model_presets_for_role(
+        code_core::config_types::ModelRole::Review,
+    );
+    let auto_drive = chat.available_model_presets_for_role(
+        code_core::config_types::ModelRole::AutoDrive,
+    );
+
+    assert!(session.iter().all(|preset| preset.model != "gpt-5.3-codex"));
+    assert!(review.iter().any(|preset| preset.model == "gpt-5.3-codex"));
+    assert!(
+        auto_drive
+            .iter()
+            .all(|preset| preset.model != "gpt-5.3-codex")
+    );
+    }
+
+    #[test]
+    fn agents_overview_canonicalizes_configured_model_aliases() {
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let configured = chat
+        .config
+        .agents
+        .iter_mut()
+        .find(|agent| agent.name == "code-gpt-5.3-codex")
+        .expect("built-in model config");
+    configured.name = "gpt-5.2-codex".to_owned();
+    configured.review_enabled = false;
+
+    let (rows, _) = chat.collect_agents_overview_rows();
+    let canonical_rows = rows
+        .iter()
+        .filter(|row| {
+            code_core::agent_defaults::agent_model_spec(&row.name)
+                .is_some_and(|spec| spec.slug == "code-gpt-5.3-codex")
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(canonical_rows.len(), 1);
+    assert_eq!(canonical_rows[0].name, "code-gpt-5.3-codex");
+    assert!(!canonical_rows[0].review_enabled);
+    }
+
+    #[test]
+    fn create_model_agent_rejects_duplicate_identity_without_overwriting() {
+    let _guard = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    chat.config.agents.push(code_core::config_types::AgentConfig {
+        name: "provider/model".to_owned(),
+        command: "code --model model -c model_provider=provider".to_owned(),
+        args: Vec::new(),
+        read_only: false,
+        enabled: false,
+        session_enabled: true,
+        review_enabled: true,
+        auto_drive_enabled: true,
+        description: Some("Existing description".to_owned()),
+        env: None,
+        args_read_only: Some(vec!["--existing-read".to_owned()]),
+        args_write: Some(vec!["--existing-write".to_owned()]),
+        instructions: Some("Existing instructions".to_owned()),
+    });
+
+    chat.apply_agent_update(AgentUpdateRequest {
+        intent: crate::app_event::AgentUpdateIntent::CreateModel,
+        name: "provider/model".to_owned(),
+        enabled: true,
+        args_ro: None,
+        args_wr: None,
+        instructions: None,
+        description: None,
+        command: "coder --model model -c model_provider=provider".to_owned(),
+    });
+
+    let configured = chat
+        .config
+        .agents
+        .iter()
+        .find(|agent| agent.name == "provider/model")
+        .expect("existing agent remains configured");
+    assert!(!configured.enabled);
+    assert_eq!(configured.description.as_deref(), Some("Existing description"));
+    assert_eq!(
+        configured.args_read_only.as_deref(),
+        Some(["--existing-read".to_owned()].as_slice()),
+    );
+    assert_eq!(
+        configured.args_write.as_deref(),
+        Some(["--existing-write".to_owned()].as_slice()),
+    );
+    assert_eq!(configured.instructions.as_deref(), Some("Existing instructions"));
     }
     
     #[test]

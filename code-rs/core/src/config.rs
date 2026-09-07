@@ -111,6 +111,7 @@ pub use sources::{
     set_custom_spinner,
     set_custom_theme,
     set_github_actionlint_on_patch,
+    set_input_compression,
     set_mcp_server_enabled,
     set_mcp_server_scheduling,
     set_mcp_server_tool_enabled,
@@ -175,6 +176,7 @@ fn normalize_auto_drive_routing_reasoning_levels(
         ReasoningEffort::High,
         ReasoningEffort::XHigh,
         ReasoningEffort::Max,
+        ReasoningEffort::Ultra,
     ] {
         if levels.contains(&level) {
             normalized.push(level);
@@ -624,6 +626,8 @@ pub struct Config {
     pub prevent_idle_sleep: bool,
     /// Filesystem-backed memories runtime settings.
     pub memories: MemoriesConfig,
+    /// Deterministic compression applied only to model-bound operator input.
+    pub input_compression: crate::config_types::OperatorInputCompressionConfig,
     /// Raw global `[memories]` table, preserved for scope-aware editing in the TUI.
     pub global_memories: Option<MemoriesToml>,
     /// Raw memories override from the active profile, if any.
@@ -1135,6 +1139,9 @@ pub struct ConfigToml {
 
     /// Memory subsystem configuration.
     pub memories: Option<MemoriesToml>,
+
+    /// Deterministic model-bound operator input compression.
+    pub input_compression: Option<crate::config_types::OperatorInputCompressionConfig>,
 
     /// When true, disables burst-paste detection for typed input entirely.
     /// All characters are inserted as they are received, and no buffering
@@ -2848,6 +2855,7 @@ impl Config {
             skills_enabled,
             prevent_idle_sleep,
             memories,
+            input_compression: cfg.input_compression.unwrap_or_default(),
             global_memories,
             active_profile_memories,
             project_memories,
@@ -4551,6 +4559,9 @@ module_dirs = ["/nested/node_modules"]
             args: Vec::new(),
             read_only: false,
             enabled: true,
+            session_enabled: true,
+            review_enabled: true,
+            auto_drive_enabled: true,
             description: None,
             env: None,
             args_read_only: None,
@@ -5042,6 +5053,9 @@ mod agent_merge_tests {
             args: Vec::new(),
             read_only: false,
             enabled,
+            session_enabled: true,
+            review_enabled: true,
+            auto_drive_enabled: true,
             description: None,
             env: None,
             args_read_only: None,

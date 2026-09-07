@@ -1,5 +1,6 @@
 use crate::app_event::{AppEvent, ModelSelectionKind};
 use crate::app_event_sender::AppEventSender;
+use code_core::config_types::ModelRole;
 
 use super::data::SelectionAction;
 
@@ -29,6 +30,18 @@ impl From<ModelSelectionTarget> for ModelSelectionKind {
 }
 
 impl ModelSelectionTarget {
+    pub(crate) fn model_role(self) -> ModelRole {
+        match self {
+            ModelSelectionTarget::Session => ModelRole::Session,
+            ModelSelectionTarget::AutoDrive => ModelRole::AutoDrive,
+            ModelSelectionTarget::Review
+            | ModelSelectionTarget::Planning
+            | ModelSelectionTarget::ReviewResolve
+            | ModelSelectionTarget::AutoReview
+            | ModelSelectionTarget::AutoReviewResolve => ModelRole::Review,
+        }
+    }
+
     pub(crate) fn panel_title(self) -> &'static str {
         match self {
             ModelSelectionTarget::Session => "Select Model & Reasoning",
