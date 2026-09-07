@@ -157,8 +157,8 @@ fn overview_renders_universal_capability_headers() {
         .join("\n");
 
     assert!(rendered.contains("Model"));
-    assert!(rendered.contains("Agent"));
-    assert!(rendered.contains("Subagent"));
+    assert!(rendered.contains("Session"));
+    assert!(rendered.contains("Sub-agent"));
     assert!(rendered.contains("Review"));
     assert!(rendered.contains("Auto Drive"));
 }
