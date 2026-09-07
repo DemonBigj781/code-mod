@@ -10,6 +10,13 @@ on:
       - "docs/settings.md"
       - "docs/slash-commands.md"
       - ".github/workflows/settings-agent-tests.yml"
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or commit to test
+        required: true
+        default: main
+        type: string
 
 concurrency:
   group: settings-agent-tests-${{ github.ref }}
@@ -24,16 +31,19 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      CARGO_BUILD_JOBS: "1"
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       CARGO_INCREMENTAL: "0"
       CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
       RUST_WORKSPACE_DIR: code-rs
+      SOURCE_REF: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_REF }}
 
       - name: Read Rust toolchain
         id: rust_toolchain
@@ -110,63 +120,76 @@ jobs:
 
       - name: Test built-in GPT-5.6 agents
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
-        run: cargo test --frozen --locked -j1 -p code-core agent_defaults::tests::gpt_5_6_variants_are_builtin_agents -- --exact
+        run: cargo test --frozen --locked -p code-core agent_defaults::tests::gpt_5_6_variants_are_builtin_agents -- --exact
 
       - name: Test settings catalog
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
-        run: cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::settings_overlay_overview_includes_all_sections -- --exact
+        run: cargo test --frozen --locked -p code-tui chatwidget::tests::settings_overlay_overview_includes_all_sections -- --exact
 
       - name: Test settings accessibility
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         shell: sh
         run: |
           set -eu
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::every_registered_settings_section_opens_in_overlay -- --exact
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::every_registered_settings_section_opens_from_bottom_mode -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::tests::every_registered_settings_section_opens_in_overlay -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::tests::every_registered_settings_section_opens_from_bottom_mode -- --exact
 
       - name: Test GPT-5.6 agents in settings
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
-        run: cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::agents_settings_lists_gpt_5_6_variants -- --exact
+        run: cargo test --frozen --locked -p code-tui chatwidget::tests::agents_settings_lists_gpt_5_6_variants -- --exact
+
+      - name: Test model capability policy
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
+          cargo test --frozen --locked -p code-core model_roles_
+          cargo test --frozen --locked -p code-core legacy_agent_config_enables_new_roles_by_default
+          cargo test --frozen --locked -p code-core agent_config_deserializes_explicit_model_roles
+          cargo test --frozen --locked -p code-core upsert_agent_config_persists_all_model_roles
+          cargo test --frozen --locked -p code-tui model_role_
+          cargo test --frozen --locked -p code-tui overview_renders_universal_capability_headers
+          cargo test --frozen --locked -p code-tui space_toggles_selected_model_role
 
       - name: Test core configuration regressions
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         shell: sh
         run: |
           set -eu
-          cargo test --frozen --locked -j1 -p code-core context_mode_one_m_expands_gpt_5_5_context
-          cargo test --frozen --locked -j1 -p code-core shell_basename_handles_versioned_paths
-          cargo test --frozen --locked -j1 -p code-core requested_model_headers_replace_version_and_user_agent
-          cargo test --frozen --locked -j1 -p code-core checked_in_codex_schema_matches_generated
-          cargo test --frozen --locked -j1 -p code-core --test review_coord_integration
+          cargo test --frozen --locked -p code-core context_mode_one_m_expands_gpt_5_5_context
+          cargo test --frozen --locked -p code-core shell_basename_handles_versioned_paths
+          cargo test --frozen --locked -p code-core requested_model_headers_replace_version_and_user_agent
+          cargo test --frozen --locked -p code-core checked_in_codex_schema_matches_generated
+          cargo test --frozen --locked -p code-core --test review_coord_integration
 
       - name: Test settings edit persistence
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         shell: sh
         run: |
           set -eu
-          cargo test --frozen --locked -j1 -p code-tui edit_mode_tab_switches_focus_and_enter_activates_back_action
-          cargo test --frozen --locked -j1 -p code-tui edit_mode_apply_action_submits_and_closes
-          cargo test --frozen --locked -j1 -p code-tui interface_icon_mode_change_stays_pending_when_returning_to_overview
+          cargo test --frozen --locked -p code-tui edit_mode_tab_switches_focus_and_enter_activates_back_action
+          cargo test --frozen --locked -p code-tui edit_mode_apply_action_submits_and_closes
+          cargo test --frozen --locked -p code-tui interface_icon_mode_change_stays_pending_when_returning_to_overview
 
       - name: Test MCP settings action labels
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
-        run: cargo test --frozen --locked -j1 -p code-tui bottom_pane::settings_pages::mcp::tests::mcp_reload_labels_describe_live_reload_and_status_queue -- --exact
+        run: cargo test --frozen --locked -p code-tui bottom_pane::settings_pages::mcp::tests::mcp_reload_labels_describe_live_reload_and_status_queue -- --exact
 
       - name: Test terminal event ordering
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         shell: sh
         run: |
           set -eu
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::task_complete_
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::completed_submission_history_is_bounded_and_reused_ids_reopen -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::tests::task_complete_
+          cargo test --frozen --locked -p code-tui chatwidget::tests::completed_submission_history_is_bounded_and_reused_ids_reopen -- --exact
 
       - name: Test transcript geometry and navigation
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         shell: sh
         run: |
           set -eu
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::history_render::render_state::tests::history_row_offsets_preserve_more_than_u16_rows -- --exact
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::empty_composer_up_scrolls_transcript_instead_of_recalling_history -- --exact
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::empty_composer_down_scrolls_transcript_toward_latest -- --exact
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::up_at_start_of_non_empty_composer_still_recalls_input_history -- --exact
-          cargo test --frozen --locked -j1 -p code-tui chatwidget::tests::agents_terminal_restores_scroll_offsets_beyond_u16 -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::history_render::render_state::tests::history_row_offsets_preserve_more_than_u16_rows -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::tests::empty_composer_up_scrolls_transcript_instead_of_recalling_history -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::tests::empty_composer_down_scrolls_transcript_toward_latest -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::tests::up_at_start_of_non_empty_composer_still_recalls_input_history -- --exact
+          cargo test --frozen --locked -p code-tui chatwidget::tests::agents_terminal_restores_scroll_offsets_beyond_u16 -- --exact
