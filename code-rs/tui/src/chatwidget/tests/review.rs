@@ -778,7 +778,7 @@
         .config
         .agents
         .iter_mut()
-        .find(|agent| agent.name == "code-gpt-5.3-codex")
+        .find(|agent| agent.name == "code-gpt-5.4")
         .expect("built-in model config");
     configured.session_enabled = false;
     configured.review_enabled = true;
@@ -794,12 +794,12 @@
         code_core::config_types::ModelRole::AutoDrive,
     );
 
-    assert!(session.iter().all(|preset| preset.model != "gpt-5.3-codex"));
-    assert!(review.iter().any(|preset| preset.model == "gpt-5.3-codex"));
+    assert!(session.iter().all(|preset| preset.model != "gpt-5.4"));
+    assert!(review.iter().any(|preset| preset.model == "gpt-5.4"));
     assert!(
         auto_drive
             .iter()
-            .all(|preset| preset.model != "gpt-5.3-codex")
+            .all(|preset| preset.model != "gpt-5.4")
     );
     }
 
