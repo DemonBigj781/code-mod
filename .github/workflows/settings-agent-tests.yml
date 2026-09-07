@@ -17,6 +17,11 @@ on:
         required: true
         default: main
         type: string
+      update_schema:
+        description: Regenerate and upload the config schema before testing
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: settings-agent-tests-${{ github.ref }}
@@ -117,6 +122,24 @@ jobs:
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
+
+      - name: Regenerate config schema
+        if: github.event_name == 'workflow_dispatch' && inputs.update_schema
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        env:
+          UPDATE_SCHEMA: "1"
+        run: >-
+          cargo test --frozen --locked -p code-core --lib --
+          config::schema::tests::checked_in_codex_schema_matches_generated
+
+      - name: Upload regenerated config schema
+        if: github.event_name == 'workflow_dispatch' && inputs.update_schema
+        uses: actions/upload-artifact@v7
+        with:
+          name: config-schema-${{ github.run_number }}
+          path: code-rs/core/config.schema.codex.json
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Test built-in GPT-5.6 agents
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}
