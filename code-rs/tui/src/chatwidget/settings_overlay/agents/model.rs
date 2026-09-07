@@ -4,8 +4,8 @@ use code_core::config_types::ModelRole;
 use unicode_width::UnicodeWidthStr;
 
 const ROLE_COLUMNS: [(ModelRole, &str, u16); 4] = [
-    (ModelRole::Session, "Agent", 7),
-    (ModelRole::Subagent, "Subagent", 10),
+    (ModelRole::Session, "Session", 7),
+    (ModelRole::Subagent, "Sub-agent", 10),
     (ModelRole::Review, "Review", 8),
     (ModelRole::AutoDrive, "Auto Drive", 11),
 ];

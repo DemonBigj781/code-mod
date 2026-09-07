@@ -401,7 +401,7 @@ env = { API_KEY = "value" }  # Environment variables
 
 The four capability fields are independent, so a model can be available for one role and disabled
 for another. Omitting any capability field preserves backward compatibility by enabling that role.
-The Agents settings page exposes the same policy as the `Agent`, `Subagent`, `Review`, and
+The Agents settings page exposes the same policy as the `Session`, `Sub-agent`, `Review`, and
 `Auto Drive` columns in the model capabilities grid.
 
 ### Configuring agent commands
