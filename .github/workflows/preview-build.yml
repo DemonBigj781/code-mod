@@ -10,6 +10,13 @@ on:
       - "docs/settings.md"
       - "docs/slash-commands.md"
       - ".github/workflows/preview-build.yml"
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or commit to compile
+        required: true
+        default: main
+        type: string
 
 concurrency:
   group: build-code-${{ github.ref }}
@@ -31,11 +38,15 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
       RUST_WORKSPACE_DIR: code-rs
+      SOURCE_REF: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
       TARGET: x86_64-unknown-linux-gnu
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_REF }}
 
       - name: Read Rust toolchain
         id: rust_toolchain
@@ -148,6 +159,7 @@ jobs:
           {
             echo '### Code Linux build'
             echo ''
+            printf '%s\n' "- Source: \`$SOURCE_REF\`"
             printf '%s\n' "- Target: \`$TARGET\`"
             printf '%s\n' "- Artifact: \`$ARTIFACT_NAME\`"
             printf '%s\n' '- Contents: code, code.sha256'
