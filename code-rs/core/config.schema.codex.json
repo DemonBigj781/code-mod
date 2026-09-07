@@ -3,7 +3,6 @@
   "additionalProperties": false,
   "definitions": {
     "AgentConfig": {
-      "description": "Configuration for external agent models",
       "properties": {
         "args": {
           "default": [],
@@ -29,6 +28,11 @@
           },
           "type": "array"
         },
+        "auto-drive-enabled": {
+          "default": true,
+          "description": "Whether this model appears in Auto Drive model selection and routing.",
+          "type": "boolean"
+        },
         "command": {
           "default": "",
           "description": "Command to execute the agent (e.g., \"claude\", \"gemini\"). If omitted, defaults to the agent `name` during config load.",
@@ -41,7 +45,7 @@
         },
         "enabled": {
           "default": true,
-          "description": "Whether this agent is enabled",
+          "description": "Whether this model can be used as a subagent.",
           "type": "boolean"
         },
         "env": {
@@ -64,6 +68,16 @@
         "read-only": {
           "default": false,
           "description": "Whether this agent can only run in read-only mode",
+          "type": "boolean"
+        },
+        "review-enabled": {
+          "default": true,
+          "description": "Whether this model appears in review and planning model pickers.",
+          "type": "boolean"
+        },
+        "session-enabled": {
+          "default": true,
+          "description": "Whether this model appears in the main session model picker.",
           "type": "boolean"
         }
       },
@@ -1497,6 +1511,19 @@
         }
       ]
     },
+    "OperatorInputCompressionConfig": {
+      "properties": {
+        "aggressive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "OtelConfigToml": {
       "properties": {
         "environment": {
@@ -1914,7 +1941,8 @@
             "medium",
             "high",
             "xhigh",
-            "max"
+            "max",
+            "ultra"
           ],
           "type": "string"
         },
@@ -3699,6 +3727,14 @@
         }
       ],
       "description": "Settings that govern if and what will be written to `~/.code/history.jsonl` (Code still reads legacy `~/.codex/history.jsonl`)."
+    },
+    "input_compression": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/OperatorInputCompressionConfig"
+        }
+      ],
+      "description": "Deterministic model-bound operator input compression."
     },
     "instructions": {
       "description": "System instructions.",
