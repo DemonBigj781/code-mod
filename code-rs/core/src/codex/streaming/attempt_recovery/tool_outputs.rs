@@ -6,35 +6,54 @@ pub(in crate::codex::streaming) fn reconcile_pending_tool_outputs(
     pending_outputs: &[ResponseItem],
     rebuilt_history: &[ResponseItem],
     previous_input_snapshot: &[ResponseItem],
-) -> (Vec<ResponseItem>, Vec<ResponseItem>) {
+) -> Vec<ResponseItem> {
     let mut call_ids = collect_tool_call_ids(rebuilt_history);
-    let mut missing_calls = Vec::new();
-    let mut filtered_outputs = Vec::new();
+    let mut output_ids = collect_tool_output_ids(rebuilt_history);
+    let mut reconciled = Vec::new();
 
     for item in pending_outputs {
         match item {
             ResponseItem::FunctionCallOutput { call_id, .. }
             | ResponseItem::CustomToolCallOutput { call_id, .. } => {
-                if call_ids.contains(call_id) {
-                    filtered_outputs.push(item.clone());
+                if !output_ids.insert(call_id.clone()) {
                     continue;
                 }
 
-                if let Some(call_item) = find_call_item_by_id(previous_input_snapshot, call_id) {
+                if !call_ids.contains(call_id)
+                    && let Some(call_item) =
+                        find_call_item_by_id(previous_input_snapshot, call_id)
+                {
                     call_ids.insert(call_id.clone());
-                    missing_calls.push(call_item);
-                    filtered_outputs.push(item.clone());
+                    reconciled.push(call_item);
+                }
+                if call_ids.contains(call_id) {
+                    reconciled.push(item.clone());
                 } else {
+                    output_ids.remove(call_id);
                     warn!("Skipping tool output for missing call_id={call_id} after auto-compact");
                 }
             }
+            ResponseItem::FunctionCall { call_id, .. }
+            | ResponseItem::CustomToolCall { call_id, .. } => {
+                if call_ids.insert(call_id.clone()) {
+                    reconciled.push(item.clone());
+                }
+            }
+            ResponseItem::LocalShellCall { call_id, id, .. } => {
+                let effective_call_id = call_id.as_ref().or(id.as_ref());
+                if effective_call_id.is_none_or(|call_id| call_ids.insert(call_id.clone())) {
+                    reconciled.push(item.clone());
+                }
+            }
             _ => {
-                filtered_outputs.push(item.clone());
+                if !rebuilt_history.contains(item) && !reconciled.contains(item) {
+                    reconciled.push(item.clone());
+                }
             }
         }
     }
 
-    (missing_calls, filtered_outputs)
+    reconciled
 }
 
 fn collect_tool_call_ids(items: &[ResponseItem]) -> HashSet<String> {
@@ -54,6 +73,17 @@ fn collect_tool_call_ids(items: &[ResponseItem]) -> HashSet<String> {
         }
     }
     ids
+}
+
+fn collect_tool_output_ids(items: &[ResponseItem]) -> HashSet<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            ResponseItem::FunctionCallOutput { call_id, .. }
+            | ResponseItem::CustomToolCallOutput { call_id, .. } => Some(call_id.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn find_call_item_by_id(items: &[ResponseItem], call_id: &str) -> Option<ResponseItem> {
@@ -300,5 +330,82 @@ mod tool_call_id_tests {
 
         let missing = missing_tool_outputs_to_insert(&items);
         assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn reconcile_preserves_call_output_and_queued_input_order() {
+        let first_call = ResponseItem::FunctionCall {
+            id: None,
+            name: "shell".to_string(),
+            namespace: None,
+            arguments: "{}".to_string(),
+            call_id: "first".to_string(),
+        };
+        let second_call = ResponseItem::FunctionCall {
+            id: None,
+            name: "shell".to_string(),
+            namespace: None,
+            arguments: "{}".to_string(),
+            call_id: "second".to_string(),
+        };
+        let first_output = ResponseItem::FunctionCallOutput {
+            call_id: "first".to_string(),
+            output: FunctionCallOutputPayload::from_text("first result".to_string()),
+        };
+        let queued_input = ResponseItem::Message {
+            id: Some("queued-submission".to_string()),
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "queued correction".to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+        let second_output = ResponseItem::FunctionCallOutput {
+            call_id: "second".to_string(),
+            output: FunctionCallOutputPayload::from_text("second result".to_string()),
+        };
+        let pending = vec![
+            first_output.clone(),
+            queued_input.clone(),
+            second_output.clone(),
+        ];
+        let previous = vec![first_call.clone(), second_call.clone()];
+
+        let reconciled = reconcile_pending_tool_outputs(&pending, &[], &previous);
+
+        assert_eq!(
+            reconciled,
+            vec![
+                first_call,
+                first_output,
+                queued_input,
+                second_call,
+                second_output,
+            ]
+        );
+    }
+
+    #[test]
+    fn reconcile_drops_output_already_present_in_rebuilt_history() {
+        let call = ResponseItem::FunctionCall {
+            id: None,
+            name: "shell".to_string(),
+            namespace: None,
+            arguments: "{}".to_string(),
+            call_id: "existing".to_string(),
+        };
+        let output = ResponseItem::FunctionCallOutput {
+            call_id: "existing".to_string(),
+            output: FunctionCallOutputPayload::from_text("existing result".to_string()),
+        };
+
+        let reconciled = reconcile_pending_tool_outputs(
+            std::slice::from_ref(&output),
+            &[call, output.clone()],
+            &[],
+        );
+
+        assert!(reconciled.is_empty());
     }
 }

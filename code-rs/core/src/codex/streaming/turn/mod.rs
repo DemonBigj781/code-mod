@@ -447,14 +447,12 @@ async fn run_turn_attempts(
                                     rebuilt.push(initial_item);
                                 }
                                 if !pending_input_tail.is_empty() {
-                                    let (missing_calls, filtered_outputs) =
-                                        reconcile_pending_tool_outputs(&pending_input_tail, &rebuilt, &previous_input_snapshot);
-                                    if !missing_calls.is_empty() {
-                                        rebuilt.extend(missing_calls);
-                                    }
-                                    if !filtered_outputs.is_empty() {
-                                        rebuilt.extend(filtered_outputs);
-                                    }
+                                    let reconciled_tail = reconcile_pending_tool_outputs(
+                                        &pending_input_tail,
+                                        &rebuilt,
+                                        &previous_input_snapshot,
+                                    );
+                                    rebuilt.extend(reconciled_tail);
                                 }
                                 input = rebuilt.clone();
                                 attempt_input = rebuilt;

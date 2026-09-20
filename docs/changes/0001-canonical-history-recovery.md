@@ -146,8 +146,17 @@ were both included in the archive.
     the independently repaired stale height-cache flood beginning at 15:52.
     Live ChatGPT transport confirmation after process restart remains a runtime
     acceptance check, not an unverified source-code claim.
-- [ ] Verify resume after fallback does not duplicate, omit, or reorder operator
-      input, tool output, or assistant content.
+- [x] Verify resume after fallback does not duplicate, omit, or reorder operator
+      input or tool output.
+  - Test-first regressions reproduced two source defects: all recovered calls
+    were grouped ahead of their outputs, reordering queued operator input, and
+    a pending output was retained even when rebuilt history already owned it.
+    Reconciliation now returns one chronological tail, inserts each missing
+    call immediately before its output, preserves intervening queued input, and
+    tracks rebuilt output ownership. All nine attempt-recovery tool-output
+    tests and all ten operator-input integration tests pass with one test
+    thread; assistant partial/final ownership is covered by the two provider
+    retry regressions above.
 
 ### Agent, model, provider, and navigation settings
 

@@ -231,17 +231,12 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                 let mut rebuilt = compacted_history;
                 if !pending_input_tail.is_empty() {
                     let previous_input_snapshot = compact_snapshot.unwrap_or_default();
-                    let (missing_calls, filtered_outputs) = reconcile_pending_tool_outputs(
+                    let reconciled_tail = reconcile_pending_tool_outputs(
                         &pending_input_tail,
                         &rebuilt,
                         &previous_input_snapshot,
                     );
-                    if !missing_calls.is_empty() {
-                        rebuilt.extend(missing_calls);
-                    }
-                    if !filtered_outputs.is_empty() {
-                        rebuilt.extend(filtered_outputs);
-                    }
+                    rebuilt.extend(reconciled_tail);
                 }
                 sess.replace_history(rebuilt);
                 pending_input_tail.clear();
