@@ -110,13 +110,29 @@ were both included in the archive.
 
 - [x] Make operator settings the sole owner of read-agent enablement, model
       selection, and count; the assistant may submit only a task.
+  - The public create schema and both deserializers now accept only `task`;
+    model-supplied names, context, attachments, output goals, model lists, and
+    permission overrides are rejected. Three focused contract tests pass.
 - [x] Add and verify a master read-agent disable switch; disabled models must
       never be selected.
   - The agent tool schema rejects model and permission overrides, the launcher
     never substitutes an unconfigured fallback agent, and `subagents.enabled`
     is persisted from the Settings > Agents “Read agents” row.
-- [ ] Preserve role instructions, conversation, and task context for alternative
-      agents.
+- [x] Preserve role instructions, conversation, and task context for alternative
+      agents at the launcher boundary.
+  - Each launch now receives configured per-agent instructions, the task as a
+    separate prompt, and an automatic parent-session handoff containing bounded
+    base instructions, operator/project instructions, working directory, and
+    recent user/assistant conversation. The handoff is capped at 64 KiB and
+    prioritizes the newest conversation; both focused regressions pass.
+  - This verifies the common launch contract. Runtime interoperability for each
+    external Claude, Copilot, and Gemini CLI remains an explicit integration
+    check rather than an inferred result.
+- [x] Serialize `config.toml` read-modify-write settings transactions and surface
+      agent-save failures in the TUI instead of discarding them.
+  - The deterministic concurrent-agent-update regression previously lost one
+    entry and now passes; all 38 `config_edit` tests and both affected TUI agent
+    editor tests pass with one test thread.
 - [x] Repair scrolling, alignment, and independent role toggles in the agent
       model settings UI.
 - [x] Verify unified selectors for general, agent, subagent, review, and

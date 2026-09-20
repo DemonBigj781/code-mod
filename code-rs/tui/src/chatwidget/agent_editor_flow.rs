@@ -482,6 +482,7 @@ impl ChatWidget<'_> {
 
     fn persist_agent_config(&self, cfg: &AgentConfig) {
         if let Ok(home) = code_core::config::find_code_home() {
+            let tx = self.app_event_tx.clone();
             let name = cfg.name.clone();
             let enabled = cfg.enabled;
             let session_enabled = cfg.session_enabled;
@@ -493,7 +494,7 @@ impl ChatWidget<'_> {
             let desc = cfg.description.clone();
             let command = cfg.command.clone();
             tokio::spawn(async move {
-                let _ = code_core::config_edit::upsert_agent_config(
+                if let Err(error) = code_core::config_edit::upsert_agent_config(
                     &home,
                     code_core::config_edit::AgentConfigPatch {
                         name: &name,
@@ -509,7 +510,12 @@ impl ChatWidget<'_> {
                         command: Some(command.as_str()),
                     },
                 )
-                .await;
+                .await
+                {
+                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(
+                        format!("Failed to persist agent `{name}`: {error}"),
+                    )]));
+                }
             });
         }
     }

@@ -26,42 +26,9 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
 
     let mut create_properties = BTreeMap::new();
     create_properties.insert(
-        "name".to_owned(),
-        JsonSchema::String {
-            description: Some(
-                "Display name shown in the UI (e.g., \"Plan TUI Refactor\")".to_owned(),
-            ),
-            allowed_values: None,
-        },
-    );
-    create_properties.insert(
         "task".to_owned(),
         JsonSchema::String {
             description: Some("Task prompt to execute".to_owned()),
-            allowed_values: None,
-        },
-    );
-    create_properties.insert(
-        "context".to_owned(),
-        JsonSchema::String {
-            description: Some("Optional background context".to_owned()),
-            allowed_values: None,
-        },
-    );
-    create_properties.insert(
-        "files".to_owned(),
-        JsonSchema::Array {
-            items: Box::new(JsonSchema::String {
-                description: None,
-                allowed_values: None,
-            }),
-            description: Some("Optional array of file paths to include in context".to_owned()),
-        },
-    );
-    create_properties.insert(
-        "output".to_owned(),
-        JsonSchema::String {
-            description: Some("Optional desired output description".to_owned()),
             allowed_values: None,
         },
     );
@@ -221,20 +188,12 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
 #[serde(deny_unknown_fields)]
 pub struct RunAgentParams {
     pub task: String,
-    pub context: Option<String>,
-    pub output: Option<String>,
-    pub files: Option<Vec<String>>,
-    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentCreateOptions {
     pub task: Option<String>,
-    pub context: Option<String>,
-    pub output: Option<String>,
-    pub files: Option<Vec<String>>,
-    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,7 +273,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn create_schema_leaves_agent_selection_and_permissions_to_settings() {
+    fn create_schema_exposes_only_the_operator_task() {
         let schema = serde_json::to_value(create_agent_tool(&["configured-model".to_owned()]))
             .expect("agent tool should serialize");
         let create_properties = schema
@@ -322,21 +281,40 @@ mod tests {
             .and_then(serde_json::Value::as_object)
             .expect("create properties should be an object");
 
-        assert!(!create_properties.contains_key("models"));
-        assert!(!create_properties.contains_key("write"));
-        assert!(!create_properties.contains_key("read_only"));
+        assert_eq!(
+            create_properties
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["task"],
+        );
     }
 
     #[test]
-    fn create_options_reject_agent_selection_and_permission_overrides() {
+    fn run_params_serialize_only_the_task() {
+        let params = RunAgentParams {
+            task: "Inspect the configured project state".to_owned(),
+        };
+        assert_eq!(
+            serde_json::to_value(params).expect("run params should serialize"),
+            json!({"task": "Inspect the configured project state"}),
+        );
+    }
+
+    #[test]
+    fn create_options_reject_all_non_task_overrides() {
         for forbidden in [
+            json!({"task": "Inspect the configured project state", "name": "override"}),
+            json!({"task": "Inspect the configured project state", "context": "override"}),
+            json!({"task": "Inspect the configured project state", "files": ["override"]}),
+            json!({"task": "Inspect the configured project state", "output": "override"}),
             json!({"task": "Inspect the configured project state", "models": ["other"]}),
             json!({"task": "Inspect the configured project state", "write": true}),
             json!({"task": "Inspect the configured project state", "read_only": false}),
         ] {
             assert!(
                 serde_json::from_value::<AgentCreateOptions>(forbidden).is_err(),
-                "agent creation must reject Settings-owned fields"
+                "agent creation must reject every non-task field"
             );
         }
     }

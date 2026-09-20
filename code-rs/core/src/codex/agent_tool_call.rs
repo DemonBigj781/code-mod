@@ -7,6 +7,184 @@ use crate::tools::events::execute_custom_tool;
 use code_protocol::models::FunctionCallOutputBody;
 
 const AGENT_PREVIEW_MAX_BYTES: usize = 32 * 1024; // 32 KiB
+const AGENT_HANDOFF_MAX_BYTES: usize = 64 * 1024; // 64 KiB
+const AGENT_HANDOFF_BASE_INSTRUCTIONS_MAX_BYTES: usize = 16 * 1024;
+const AGENT_HANDOFF_USER_INSTRUCTIONS_MAX_BYTES: usize = 24 * 1024;
+const AGENT_HANDOFF_CWD_MAX_BYTES: usize = 4 * 1024;
+const AGENT_HANDOFF_END: &str = "[End parent session handoff]\n";
+
+fn push_bounded_handoff_section(
+    output: &mut String,
+    heading: &str,
+    value: Option<&str>,
+    max_bytes: usize,
+) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let (bounded, _, _, _) = truncate_middle_bytes(value, max_bytes);
+    let _ = write!(output, "{heading}:\n{bounded}\n\n");
+}
+
+fn build_agent_handoff_context_parts(
+    base_instructions: Option<&str>,
+    user_instructions: Option<&str>,
+    cwd: &std::path::Path,
+    history: &[ResponseItem],
+) -> String {
+    let mut output = String::from(
+        "[Parent session handoff]\nThe parent session, not the calling model, supplied this bounded context. Follow the current task separately while preserving these constraints.\n\n",
+    );
+    let cwd_text = cwd.display().to_string();
+    push_bounded_handoff_section(
+        &mut output,
+        "Working directory",
+        Some(cwd_text.as_str()),
+        AGENT_HANDOFF_CWD_MAX_BYTES,
+    );
+    push_bounded_handoff_section(
+        &mut output,
+        "Base operating instructions",
+        base_instructions,
+        AGENT_HANDOFF_BASE_INSTRUCTIONS_MAX_BYTES,
+    );
+    push_bounded_handoff_section(
+        &mut output,
+        "Operator and project instructions",
+        user_instructions,
+        AGENT_HANDOFF_USER_INSTRUCTIONS_MAX_BYTES,
+    );
+
+    output.push_str("Recent parent conversation (oldest to newest):\n");
+    let conversation_budget = AGENT_HANDOFF_MAX_BYTES
+        .saturating_sub(output.len())
+        .saturating_sub(AGENT_HANDOFF_END.len());
+    let snippets = crate::codex::compact::collect_compaction_snippets(history);
+    let mut blocks = Vec::new();
+    let mut used = 0usize;
+    for snippet in snippets.iter().rev() {
+        let block = format!("- {}:\n{}\n", snippet.role, snippet.text.trim());
+        let remaining = conversation_budget.saturating_sub(used);
+        if remaining == 0 {
+            break;
+        }
+        if block.len() <= remaining {
+            used += block.len();
+            blocks.push(block);
+            continue;
+        }
+        if blocks.is_empty() {
+            let (bounded, _, _, _) = truncate_middle_bytes(&block, remaining);
+            blocks.push(bounded);
+        }
+        break;
+    }
+    blocks.reverse();
+    for block in blocks {
+        output.push_str(&block);
+    }
+    if snippets.is_empty() {
+        output.push_str("- No prior user or assistant messages were available.\n");
+    }
+    output.push_str(AGENT_HANDOFF_END);
+
+    if output.len() > AGENT_HANDOFF_MAX_BYTES {
+        let (bounded, _, _, _) =
+            truncate_middle_bytes(&output, AGENT_HANDOFF_MAX_BYTES);
+        bounded
+    } else {
+        output
+    }
+}
+
+fn build_agent_handoff_context(sess: &Session) -> String {
+    let history = crate::codex::lock_or_panic!(sess.state).history.contents();
+    build_agent_handoff_context_parts(
+        sess.base_instructions.as_deref(),
+        sess.user_instructions.as_deref(),
+        &sess.cwd,
+        &history,
+    )
+}
+
+#[cfg(test)]
+mod agent_handoff_tests {
+    use super::*;
+    use code_protocol::models::ContentItem;
+
+    fn message(role: &str, text: String) -> ResponseItem {
+        let content = if role == "assistant" {
+            vec![ContentItem::OutputText { text }]
+        } else {
+            vec![ContentItem::InputText { text }]
+        };
+        ResponseItem::Message {
+            id: None,
+            role: role.to_owned(),
+            content,
+            end_turn: None,
+            phase: None,
+        }
+    }
+
+    #[test]
+    fn handoff_contains_parent_instructions_cwd_and_recent_conversation() {
+        let history = vec![
+            message("user", "Investigate the broken settings flow".to_owned()),
+            message("assistant", "I found the persistence race".to_owned()),
+        ];
+
+        let handoff = build_agent_handoff_context_parts(
+            Some("BASE RULES"),
+            Some("OPERATOR AND PROJECT RULES"),
+            std::path::Path::new("/workspace/project"),
+            &history,
+        );
+
+        assert!(handoff.contains("Base operating instructions:\nBASE RULES"));
+        assert!(handoff.contains(
+            "Operator and project instructions:\nOPERATOR AND PROJECT RULES"
+        ));
+        assert!(handoff.contains("Working directory:\n/workspace/project"));
+        assert!(handoff.contains("- user:\nInvestigate the broken settings flow"));
+        assert!(handoff.contains("- assistant:\nI found the persistence race"));
+        assert!(handoff.ends_with(AGENT_HANDOFF_END));
+    }
+
+    #[test]
+    fn handoff_is_bounded_and_prioritizes_the_latest_conversation() {
+        let base = format!("BASE_START\n{}\nBASE_END", "b".repeat(40 * 1024));
+        let user = format!("USER_START\n{}\nUSER_END", "u".repeat(48 * 1024));
+        let mut history = (0..20)
+            .map(|index| {
+                message(
+                    if index % 2 == 0 { "user" } else { "assistant" },
+                    format!("OLDER_{index}\n{}", "h".repeat(8 * 1024)),
+                )
+            })
+            .collect::<Vec<_>>();
+        history.push(message(
+            "user",
+            format!("LATEST_MESSAGE\n{}", "z".repeat(8 * 1024)),
+        ));
+
+        let handoff = build_agent_handoff_context_parts(
+            Some(&base),
+            Some(&user),
+            std::path::Path::new("/workspace/project"),
+            &history,
+        );
+
+        assert!(handoff.len() <= AGENT_HANDOFF_MAX_BYTES);
+        assert!(handoff.contains("BASE_START"));
+        assert!(handoff.contains("BASE_END"));
+        assert!(handoff.contains("USER_START"));
+        assert!(handoff.contains("USER_END"));
+        assert!(handoff.contains("LATEST_MESSAGE"));
+        assert!(!handoff.contains("OLDER_0"));
+        assert!(handoff.ends_with(AGENT_HANDOFF_END));
+    }
+}
 
 fn preview_first_n_lines(s: &str, n: usize) -> (String, usize) {
     let total_lines = s.lines().count();
@@ -142,38 +320,6 @@ fn configured_agent_for_requested_model<'a>(
     })
 }
 
-fn validate_agent_file_paths(
-    cwd: &std::path::Path,
-    files: &[String],
-) -> Result<(), String> {
-    for value in files {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Err("Agent attachments must name explicit files only; empty paths are not allowed.".to_owned());
-        }
-
-        let path = std::path::PathBuf::from(trimmed);
-        let resolved = if path.is_absolute() { path } else { cwd.join(path) };
-        match std::fs::metadata(&resolved) {
-            Ok(metadata) if metadata.is_dir() => {
-                return Err(format!(
-                    "Agent attachments accept explicit files only; directory paths are not allowed: {}",
-                    resolved.display(),
-                ));
-            }
-            Ok(_) => {}
-            Err(error) => {
-                return Err(format!(
-                    "Agent attachment is not an accessible file: {} ({error})",
-                    resolved.display(),
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod resolve_read_only_tests {
     use super::*;
@@ -211,28 +357,6 @@ mod resolve_read_only_tests {
         .expect("alias should resolve to configured canonical model");
 
         assert_eq!(selected.command, "/opt/custom-code-agent");
-    }
-
-    #[test]
-    fn agent_file_paths_reject_directories() {
-        let root = tempdir().expect("temporary directory");
-        let attached = vec![root.path().display().to_string()];
-
-        let error = validate_agent_file_paths(root.path(), &attached)
-            .expect_err("directory attachment must be rejected");
-
-        assert!(error.contains("explicit files only"));
-        assert!(error.contains(root.path().to_string_lossy().as_ref()));
-    }
-
-    #[test]
-    fn agent_file_paths_accept_regular_files() {
-        let root = tempdir().expect("temporary directory");
-        let file_path = root.path().join("context.txt");
-        std::fs::write(&file_path, "bounded context").expect("write attachment");
-
-        validate_agent_file_paths(root.path(), &["context.txt".to_owned()])
-            .expect("regular file attachment should be accepted");
     }
 
     #[tokio::test]
@@ -338,49 +462,12 @@ pub(crate) async fn handle_agent_tool(
                 }
             };
 
-            let context = create_opts.context.take();
-            let output = create_opts.output.take();
-            let files = create_opts.files.take();
-            let mut normalized_name = normalize_agent_name(create_opts.name.take());
-            if normalized_name.is_none() {
-                normalized_name = derive_agent_name_from_task(&task);
-            }
-
             let run_params = RunAgentParams {
                 task: task.clone(),
-                context: context.clone(),
-                output: output.clone(),
-                files: files.clone(),
-                name: normalized_name.clone(),
             };
 
             let mut create_event = serde_json::Map::new();
             create_event.insert("task".to_owned(), serde_json::Value::String(task));
-            if let Some(ref ctx_str) = context
-                && !ctx_str.is_empty() {
-                    create_event.insert("context".to_owned(), serde_json::Value::String(ctx_str.clone()));
-                }
-            if let Some(ref output_str) = output
-                && !output_str.is_empty() {
-                    create_event.insert("output".to_owned(), serde_json::Value::String(output_str.clone()));
-                }
-            if let Some(ref files_vec) = files
-                && !files_vec.is_empty() {
-                    create_event.insert(
-                        "files".to_owned(),
-                        serde_json::Value::Array(
-                            files_vec
-                                .iter()
-                                .cloned()
-                                .map(serde_json::Value::String)
-                                .collect(),
-                        ),
-                    );
-                }
-            if let Some(ref name_str) = normalized_name
-                && !name_str.is_empty() {
-                    create_event.insert("name".to_owned(), serde_json::Value::String(name_str.clone()));
-                }
 
             let mut event_root = serde_json::Map::new();
             event_root.insert("action".to_owned(), serde_json::Value::String("create".to_owned()));
@@ -671,7 +758,7 @@ pub(crate) async fn handle_run_agent(
         move || async move {
             let batch_id = closure_batch_id.clone();
     match serde_json::from_str::<RunAgentParams>(&arguments_clone) {
-        Ok(mut params) => {
+        Ok(params) => {
             let trimmed_task = params.task.trim().to_owned();
             let word_count = trimmed_task
                 .split_whitespace()
@@ -692,23 +779,6 @@ pub(crate) async fn handle_run_agent(
                     "status": "blocked",
                     "reason": "prompt_too_short",
                     "message": guidance,
-                });
-                return ResponseInputItem::FunctionCallOutput {
-                    call_id: call_id_clone,
-                    output: FunctionCallOutputPayload {
-                        body: FunctionCallOutputBody::Text(response.to_string()),
-                        success: Some(false),
-                    },
-                };
-            }
-
-            if let Some(files) = params.files.as_deref()
-                && let Err(message) = validate_agent_file_paths(&sess.cwd, files)
-            {
-                let response = serde_json::json!({
-                    "status": "blocked",
-                    "reason": "invalid_file_attachment",
-                    "message": message,
                 });
                 return ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
@@ -747,12 +817,7 @@ pub(crate) async fn handle_run_agent(
                 };
             }
 
-            let mut agent_name = params.name.clone();
-            if agent_name.is_none()
-                && let Some(fallback) = derive_agent_name_from_task(trimmed_task.as_str()) {
-                    agent_name = Some(fallback.clone());
-                    params.name = Some(fallback);
-                }
+            let agent_name = derive_agent_name_from_task(trimmed_task.as_str());
 
             // Agent selection is owned exclusively by Settings > Agents. The model
             // cannot select a different set, change the count, or revive disabled agents.
@@ -782,6 +847,7 @@ pub(crate) async fn handle_run_agent(
                 .is_empty()
                 .then(crate::agent_defaults::default_agent_configs);
             let configured_agents = default_agents.as_deref().unwrap_or(&sess.agents);
+            let parent_handoff = build_agent_handoff_context(sess);
             let mut manager = AGENT_MANAGER.write().await;
 
             let multi_model = models.len() > 1;
@@ -825,9 +891,9 @@ pub(crate) async fn handle_run_agent(
                                 model: model.clone(),
                                 name: agent_name.clone(),
                                 prompt: params.task.clone(),
-                                context: params.context.clone(),
-                                output_goal: params.output.clone(),
-                                files: params.files.clone().unwrap_or_default(),
+                                context: Some(parent_handoff.clone()),
+                                output_goal: None,
+                                files: Vec::new(),
                                 read_only: config.read_only,
                                 batch_id: Some(batch_id.clone()),
                                 config: None,

@@ -20,6 +20,7 @@ use toml_edit::value;
 pub const CONFIG_KEY_MODEL: &str = "model";
 pub const CONFIG_KEY_EFFORT: &str = "model_reasoning_effort";
 const CONFIG_TOML_FILE: &str = "config.toml";
+static CONFIG_EDIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Copy, Clone)]
 enum NoneBehavior {
@@ -102,6 +103,7 @@ pub async fn set_feature_flags(
     profile: Option<&str>,
     updates: &BTreeMap<String, bool>,
 ) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
     let mut doc = match tokio::fs::read_to_string(&read_path).await {
@@ -213,6 +215,7 @@ pub async fn set_shell_escalation_paths(
     zsh_path: Option<&str>,
     main_execve_wrapper_exe: Option<&str>,
 ) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     fn normalize(value: Option<&str>) -> Option<&str> {
         value.map(str::trim).filter(|v| !v.is_empty())
     }
@@ -288,6 +291,7 @@ pub async fn set_shell_escalation_settings(
     zsh_path: Option<&str>,
     main_execve_wrapper_exe: Option<&str>,
 ) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     fn normalize(value: Option<&str>) -> Option<&str> {
         value.map(str::trim).filter(|v| !v.is_empty())
     }
@@ -477,6 +481,7 @@ fn normalize_skill_config_path(path: &Path) -> String {
 /// - `enabled=true` removes any matching override entry.
 /// - `enabled=false` creates/updates an override entry with `enabled=false`.
 pub async fn set_skill_config(code_home: &Path, skill_path: &Path, enabled: bool) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
     let mut doc = match tokio::fs::read_to_string(&read_path).await {
@@ -596,6 +601,7 @@ pub async fn set_skill_config(code_home: &Path, skill_path: &Path, enabled: bool
 /// - install writes `enabled=true`
 /// - uninstall clears the entire `plugins."<plugin_key>"` entry
 pub async fn set_plugin_enabled(code_home: &Path, plugin_key: &str, enabled: bool) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     if plugin_key.trim().is_empty() {
         anyhow::bail!("plugin key must not be empty");
     }
@@ -673,6 +679,7 @@ pub async fn apply_plugin_config_updates(
     set_enabled_keys: &[String],
     clear_keys: &[String],
 ) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     if set_enabled_keys.is_empty() && clear_keys.is_empty() {
         return Ok(false);
     }
@@ -768,6 +775,7 @@ pub async fn apply_plugin_config_updates(
 
 /// Remove `plugins."<plugin_key>"` from `config.toml`.
 pub async fn clear_plugin_config(code_home: &Path, plugin_key: &str) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     if plugin_key.trim().is_empty() {
         anyhow::bail!("plugin key must not be empty");
     }
@@ -872,6 +880,7 @@ fn build_marketplace_repos_item(repos: &[PluginMarketplaceRepoToml]) -> Option<T
 /// - Writes `[[plugins.marketplace_repos]]` entries from `sources.marketplace_repos`.
 /// - Preserves any existing `[plugins."<plugin_key>"]` subtables.
 pub async fn set_plugin_marketplace_sources(code_home: &Path, sources: &PluginsToml) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
     let mut doc = match tokio::fs::read_to_string(&read_path).await {
@@ -1021,6 +1030,7 @@ pub async fn set_apps_sources(
     profile: Option<&str>,
     sources: &AppsSourcesToml,
 ) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
     let mut doc = match tokio::fs::read_to_string(&read_path).await {
@@ -1184,6 +1194,7 @@ pub async fn set_apps_sources(
 /// Upsert a `[[subagents.commands]]` entry by `name`.
 /// If an entry with the same (case-insensitive) name exists, it is updated; otherwise a new entry is appended.
 pub async fn upsert_subagent_command(code_home: &Path, cmd: &SubagentCommandConfig) -> Result<()> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     const CONFIG_TOML_FILE: &str = "config.toml";
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -1252,6 +1263,7 @@ pub async fn upsert_subagent_command(code_home: &Path, cmd: &SubagentCommandConf
 /// Persist the master switch for model-invoked read agents while preserving
 /// command definitions and other `[subagents]` settings.
 pub async fn set_subagents_enabled(code_home: &Path, enabled: bool) -> Result<()> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
     let mut doc = match tokio::fs::read_to_string(&read_path).await {
@@ -1279,6 +1291,7 @@ pub async fn set_subagents_enabled(code_home: &Path, enabled: bool) -> Result<()
 
 /// Delete a `[[subagents.commands]]` entry by name. Returns true if removed.
 pub async fn delete_subagent_command(code_home: &Path, name: &str) -> Result<bool> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     const CONFIG_TOML_FILE: &str = "config.toml";
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -1340,6 +1353,7 @@ pub async fn upsert_agent_config(
     code_home: &Path,
     patch: AgentConfigPatch<'_>,
 ) -> Result<()> {
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
     let AgentConfigPatch {
         name,
         enabled,
@@ -1541,6 +1555,7 @@ async fn persist_overrides_with_behavior(
     if should_skip {
         return Ok(());
     }
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
 
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -1617,6 +1632,7 @@ async fn persist_root_overrides_with_behavior(
     if should_skip {
         return Ok(());
     }
+    let _config_edit_guard = CONFIG_EDIT_LOCK.lock().await;
 
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -1769,6 +1785,67 @@ mod tests {
                 .get("auto-drive-enabled")
                 .and_then(toml::Value::as_bool),
             Some(true),
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_agent_updates_do_not_erase_each_other() {
+        let tmpdir = tempdir().expect("tmp");
+        let code_home = tmpdir.path();
+
+        let first = upsert_agent_config(
+            code_home,
+            AgentConfigPatch {
+                name: "provider/first",
+                enabled: Some(true),
+                session_enabled: Some(true),
+                review_enabled: Some(false),
+                auto_drive_enabled: Some(false),
+                args: None,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
+                description: None,
+                command: Some("first-agent"),
+            },
+        );
+        let second = upsert_agent_config(
+            code_home,
+            AgentConfigPatch {
+                name: "provider/second",
+                enabled: Some(true),
+                session_enabled: Some(false),
+                review_enabled: Some(true),
+                auto_drive_enabled: Some(false),
+                args: None,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
+                description: None,
+                command: Some("second-agent"),
+            },
+        );
+        let (first_result, second_result) = tokio::join!(first, second);
+        first_result.expect("persist first agent");
+        second_result.expect("persist second agent");
+
+        let contents = read_config(code_home).await;
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let agents = parsed
+            .get("agents")
+            .and_then(toml::Value::as_array)
+            .expect("agents array");
+        let names = agents
+            .iter()
+            .filter_map(toml::Value::as_table)
+            .filter_map(|agent| agent.get("name"))
+            .filter_map(toml::Value::as_str)
+            .collect::<std::collections::HashSet<_>>();
+
+        assert_eq!(
+            names,
+            std::collections::HashSet::from(["provider/first", "provider/second"]),
+            "concurrent read-modify-write updates must preserve both agents"
         );
     }
 
