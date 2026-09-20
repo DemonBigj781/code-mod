@@ -18,6 +18,7 @@ use std::io::ErrorKind;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinSet;
 use tokio::time::Duration;
 use tokio::time::timeout;
@@ -235,10 +236,28 @@ impl ClientTracker {
             return Ok(());
         };
         client.disconnect_notify.notify_one();
-        self.send_transport_event(TransportEvent::ConnectionClosed {
+        self.send_connection_closed(TransportEvent::ConnectionClosed {
             connection_id: client.connection_id,
         })
         .await
+    }
+
+    async fn send_connection_closed(&self, event: TransportEvent) -> io::Result<()> {
+        if !self.shutdown.is_cancelled() {
+            return self.send_transport_event(event).await;
+        }
+
+        self.transport_event_tx
+            .try_send(event)
+            .map_err(|error| match error {
+                TrySendError::Full(_) => io::Error::new(
+                    ErrorKind::WouldBlock,
+                    "remote transport event queue is full during shutdown",
+                ),
+                TrySendError::Closed(_) => {
+                    io::Error::new(ErrorKind::BrokenPipe, "app-server processor unavailable")
+                }
+            })
     }
 
     fn remove_client(&mut self, client_key: &(ClientId, StreamId)) -> Option<ClientState> {
