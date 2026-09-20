@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::compact::{
     apply_emergency_compaction_fallback,
+    emit_compaction_telemetry,
     is_context_overflow_error,
     perform_compaction,
     prune_orphan_tool_outputs,
@@ -23,8 +24,10 @@ use crate::protocol::InputItem;
 use code_protocol::models::ResponseItem;
 use code_protocol::protocol::CompactedItem;
 use code_protocol::protocol::RolloutItem;
+use code_otel::otel_event_manager::{ContextManagementOutcome, ContextManagementPath};
 use crate::util::backoff;
 use reqwest::StatusCode;
+use std::time::Instant;
 
 const MAX_REMOTE_COMPACT_CONTEXT_OVERFLOW_TRIMS: usize = 32;
 const MAX_REMOTE_COMPACT_USAGE_LIMIT_RETRIES: usize = 2;
@@ -149,6 +152,18 @@ async fn run_remote_compact_task_inner(
     });
 
     turn_items = sanitize_items_for_compact(turn_items);
+    let telemetry_started = Instant::now();
+    let telemetry_input_count = turn_items.len();
+    emit_compaction_telemetry(
+        sess,
+        ContextManagementPath::RemoteCompaction,
+        ContextManagementOutcome::Started,
+        None,
+        Some(telemetry_input_count),
+        None,
+        None,
+        None,
+    );
     let mut truncated_count = 0usize;
     let max_retries = turn_context.client.get_provider().stream_max_retries();
     let mut retries = 0;
@@ -198,6 +213,16 @@ async fn run_remote_compact_task_inner(
                     let reason = format!(
                         "Remote compact trimmed {truncated_count} items but still exceeded the context window."
                     );
+                    emit_compaction_telemetry(
+                        sess,
+                        ContextManagementPath::RemoteCompaction,
+                        ContextManagementOutcome::Failed,
+                        Some(telemetry_started),
+                        Some(telemetry_input_count),
+                        None,
+                        Some(truncated_count),
+                        Some(reason.clone()),
+                    );
                     return Ok(
                         apply_emergency_compaction_fallback(
                             sess,
@@ -210,6 +235,16 @@ async fn run_remote_compact_task_inner(
                 }
 
                 let reason = "Remote compact failed: context overflow even with minimal input.";
+                emit_compaction_telemetry(
+                    sess,
+                    ContextManagementPath::RemoteCompaction,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some(reason.to_owned()),
+                );
                 return Ok(
                     apply_emergency_compaction_fallback(
                         sess,
@@ -223,6 +258,16 @@ async fn run_remote_compact_task_inner(
             Err(CodexErr::UsageLimitReached(limit_err)) => {
                 if usage_limit_retries >= MAX_REMOTE_COMPACT_USAGE_LIMIT_RETRIES {
                     let reason = "Remote compact hit persistent usage limits and cannot continue.";
+                    emit_compaction_telemetry(
+                        sess,
+                        ContextManagementPath::RemoteCompaction,
+                        ContextManagementOutcome::Failed,
+                        Some(telemetry_started),
+                        Some(telemetry_input_count),
+                        None,
+                        Some(truncated_count),
+                        Some(reason.to_owned()),
+                    );
                     return Ok(
                         apply_emergency_compaction_fallback(
                             sess,
@@ -244,7 +289,19 @@ async fn run_remote_compact_task_inner(
                 tokio::time::sleep(retry_after.delay).await;
                 retries = 0;
             }
-            Err(err) if should_fallback_to_local_compaction(&err) => return Err(err),
+            Err(err) if should_fallback_to_local_compaction(&err) => {
+                emit_compaction_telemetry(
+                    sess,
+                    ContextManagementPath::RemoteCompaction,
+                    ContextManagementOutcome::Fallback,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some(err.to_string()),
+                );
+                return Err(err);
+            }
             Err(err) => {
                 if retries < max_retries {
                     retries += 1;
@@ -261,6 +318,16 @@ async fn run_remote_compact_task_inner(
                     continue;
                 }
 
+                emit_compaction_telemetry(
+                    sess,
+                    ContextManagementPath::RemoteCompaction,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some(err.to_string()),
+                );
                 return Err(err);
             }
         }
@@ -287,6 +354,16 @@ async fn run_remote_compact_task_inner(
         }),
     );
     sess.send_event(event).await;
+    emit_compaction_telemetry(
+        sess,
+        ContextManagementPath::RemoteCompaction,
+        ContextManagementOutcome::Completed,
+        Some(telemetry_started),
+        Some(telemetry_input_count),
+        Some(new_history.len()),
+        Some(truncated_count),
+        None,
+    );
 
     Ok(new_history)
 }

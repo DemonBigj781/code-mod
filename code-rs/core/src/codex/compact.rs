@@ -29,10 +29,15 @@ use code_protocol::models::ResponseItem;
 use code_protocol::protocol::CompactedItem;
 use code_protocol::protocol::InputMessageKind;
 use code_protocol::protocol::RolloutItem;
+use code_otel::otel_event_manager::{
+    ContextManagementOutcome,
+    ContextManagementPath,
+    ContextManagementPayload,
+};
 use base64::Engine;
 use chrono::Utc;
 use futures::prelude::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const SUMMARIZATION_PROMPT: &str = include_str!("../../templates/compact/prompt.md");
 pub const COMPACTION_CHECKPOINT_MESSAGE: &str = "History checkpoint: earlier conversation compacted.";
@@ -46,6 +51,33 @@ const COMPACT_STREAM_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_COMPACT_CONTEXT_OVERFLOW_TRIMS: usize = 32;
 const MAX_COMPACT_USAGE_LIMIT_RETRIES: usize = 2;
 const COMPACTION_EMERGENCY_MESSAGE: &str = "Compaction failed: the conversation history is too large to compact within the model's context limits. The history has been reduced to bounded recent context to prevent further errors. Start a new session or manually reduce context if more history is required.";
+
+pub(super) fn emit_compaction_telemetry(
+    sess: &Session,
+    path: ContextManagementPath,
+    outcome: ContextManagementOutcome,
+    started_at: Option<Instant>,
+    input_item_count: Option<usize>,
+    output_item_count: Option<usize>,
+    truncated_item_count: Option<usize>,
+    note: Option<String>,
+) {
+    sess.emit_context_management(ContextManagementPayload {
+        path,
+        outcome,
+        duration_ms: started_at.map(|started| {
+            super::session::duration_to_millis(started.elapsed())
+        }),
+        input_item_count: input_item_count.map(|count| count as u64),
+        output_item_count: output_item_count.map(|count| count as u64),
+        candidate_text_count: None,
+        transformed_item_count: None,
+        cache_hit_count: None,
+        cache_miss_count: None,
+        truncated_item_count: truncated_item_count.map(|count| count as u64),
+        note,
+    });
+}
 
 /// Determine whether to use remote compaction (ChatGPT-based) or local compaction.
 ///
@@ -240,6 +272,16 @@ pub(super) async fn apply_emergency_compaction_fallback(
         let mut state = crate::codex::lock_or_panic!(sess.state);
         state.token_usage_info = None;
     }
+    emit_compaction_telemetry(
+        sess,
+        ContextManagementPath::EmergencyFallback,
+        ContextManagementOutcome::Completed,
+        None,
+        Some(source_history.len()),
+        Some(emergency_history.len()),
+        None,
+        Some(reason.to_owned()),
+    );
 
     emergency_history
 }
@@ -257,6 +299,18 @@ pub(super) async fn perform_compaction(
     let mut turn_input = sess.turn_input_with_history(vec![initial_input_for_turn.into()]);
 
     turn_input = sanitize_items_for_compact(turn_input);
+    let telemetry_started = Instant::now();
+    let telemetry_input_count = turn_input.len();
+    emit_compaction_telemetry(
+        &sess,
+        ContextManagementPath::LocalSummary,
+        ContextManagementOutcome::Started,
+        None,
+        Some(telemetry_input_count),
+        None,
+        None,
+        None,
+    );
 
     let max_retries = turn_context.client.get_provider().stream_max_retries();
     let mut retries = 0;
@@ -293,7 +347,19 @@ pub(super) async fn perform_compaction(
                 }
                 break;
             }
-            Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
+            Err(CodexErr::Interrupted) => {
+                emit_compaction_telemetry(
+                    &sess,
+                    ContextManagementPath::LocalSummary,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some("interrupted".to_owned()),
+                );
+                return Err(CodexErr::Interrupted);
+            }
             Err(CodexErr::UsageLimitReached(limit_err)) => {
                 if usage_limit_retries >= MAX_COMPACT_USAGE_LIMIT_RETRIES {
                     tracing::error!(
@@ -301,6 +367,16 @@ pub(super) async fn perform_compaction(
                         MAX_COMPACT_USAGE_LIMIT_RETRIES
                     );
                     let reason = "Compaction hit persistent usage limits and cannot continue.";
+                    emit_compaction_telemetry(
+                        &sess,
+                        ContextManagementPath::LocalSummary,
+                        ContextManagementOutcome::Failed,
+                        Some(telemetry_started),
+                        Some(telemetry_input_count),
+                        None,
+                        Some(truncated_count),
+                        Some(reason.to_owned()),
+                    );
                     let _ = apply_emergency_compaction_fallback(
                         &sess,
                         turn_context.as_ref(),
@@ -343,6 +419,16 @@ pub(super) async fn perform_compaction(
                     "Compaction failed: context overflow even with minimal input.".to_owned()
                 };
                 tracing::error!("{reason}");
+                emit_compaction_telemetry(
+                    &sess,
+                    ContextManagementPath::LocalSummary,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some(reason.clone()),
+                );
                 let _ = apply_emergency_compaction_fallback(
                     &sess,
                     turn_context.as_ref(),
@@ -374,6 +460,16 @@ pub(super) async fn perform_compaction(
                     }),
                 );
                 sess.send_event(event).await;
+                emit_compaction_telemetry(
+                    &sess,
+                    ContextManagementPath::LocalSummary,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some(e.to_string()),
+                );
                 return Err(e);
             }
         }
@@ -393,6 +489,7 @@ pub(super) async fn perform_compaction(
     let snippets = collect_compaction_snippets(&history_snapshot);
     let initial_context = sess.build_initial_context(turn_context.as_ref());
     let new_history = build_compacted_history(initial_context, &snippets, &summary_text);
+    let telemetry_output_count = new_history.len();
 
     // Replace session history in-place using the canonical helper so any future
     // state bookkeeping stays centralized.
@@ -418,6 +515,16 @@ pub(super) async fn perform_compaction(
         }),
     );
     sess.send_event(event).await;
+    emit_compaction_telemetry(
+        &sess,
+        ContextManagementPath::LocalSummary,
+        ContextManagementOutcome::Completed,
+        Some(telemetry_started),
+        Some(telemetry_input_count),
+        Some(telemetry_output_count),
+        Some(truncated_count),
+        None,
+    );
     Ok(())
 }
 
@@ -433,6 +540,18 @@ async fn run_compact_task_inner_inline(
     let mut turn_input = sess.turn_input_with_history(vec![initial_input_for_turn.into()]);
 
     turn_input = sanitize_items_for_compact(turn_input);
+    let telemetry_started = Instant::now();
+    let telemetry_input_count = turn_input.len();
+    emit_compaction_telemetry(
+        &sess,
+        ContextManagementPath::LocalSummary,
+        ContextManagementOutcome::Started,
+        None,
+        Some(telemetry_input_count),
+        None,
+        None,
+        Some("inline".to_owned()),
+    );
 
     let max_retries = turn_context.client.get_provider().stream_max_retries();
     let mut retries = 0;
@@ -463,7 +582,19 @@ async fn run_compact_task_inner_inline(
                 }
                 break;
             }
-            Err(CodexErr::Interrupted) => return Vec::new(),
+            Err(CodexErr::Interrupted) => {
+                emit_compaction_telemetry(
+                    &sess,
+                    ContextManagementPath::LocalSummary,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some("inline interrupted".to_owned()),
+                );
+                return Vec::new();
+            }
             Err(CodexErr::UsageLimitReached(limit_err)) => {
                 if usage_limit_retries >= MAX_COMPACT_USAGE_LIMIT_RETRIES {
                     tracing::error!(
@@ -471,6 +602,16 @@ async fn run_compact_task_inner_inline(
                         MAX_COMPACT_USAGE_LIMIT_RETRIES
                     );
                     let reason = "Compaction hit persistent usage limits and cannot continue.";
+                    emit_compaction_telemetry(
+                        &sess,
+                        ContextManagementPath::LocalSummary,
+                        ContextManagementOutcome::Failed,
+                        Some(telemetry_started),
+                        Some(telemetry_input_count),
+                        None,
+                        Some(truncated_count),
+                        Some(reason.to_owned()),
+                    );
                     return apply_emergency_compaction_fallback(
                         &sess,
                         turn_context.as_ref(),
@@ -512,6 +653,16 @@ async fn run_compact_task_inner_inline(
                     "Compaction failed: context overflow even with minimal input.".to_owned()
                 };
                 tracing::error!("{reason}");
+                emit_compaction_telemetry(
+                    &sess,
+                    ContextManagementPath::LocalSummary,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some(reason.clone()),
+                );
 
                 return apply_emergency_compaction_fallback(
                     &sess,
@@ -543,6 +694,16 @@ async fn run_compact_task_inner_inline(
                     }),
                 );
                 sess.send_event(event).await;
+                emit_compaction_telemetry(
+                    &sess,
+                    ContextManagementPath::LocalSummary,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some(e.to_string()),
+                );
                 return Vec::new();
             }
         }
@@ -584,6 +745,16 @@ async fn run_compact_task_inner_inline(
         }),
     );
     sess.send_event(event).await;
+    emit_compaction_telemetry(
+        &sess,
+        ContextManagementPath::LocalSummary,
+        ContextManagementOutcome::Completed,
+        Some(telemetry_started),
+        Some(telemetry_input_count),
+        Some(new_history.len()),
+        Some(truncated_count),
+        Some("inline".to_owned()),
+    );
 
     new_history
 }

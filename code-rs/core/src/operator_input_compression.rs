@@ -23,6 +23,19 @@ impl CachedCompression {
             text.clone_from(compressed);
         }
     }
+
+    fn is_compressed(&self) -> bool {
+        matches!(self, Self::Compressed(_))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct OperatorInputCompressionStats {
+    pub(crate) input_item_count: usize,
+    pub(crate) candidate_text_count: usize,
+    pub(crate) transformed_text_count: usize,
+    pub(crate) cache_hit_count: usize,
+    pub(crate) cache_miss_count: usize,
 }
 
 #[derive(Default)]
@@ -50,21 +63,20 @@ impl OperatorInputCompressionCache {
         content_index: usize,
         aggressive: bool,
         text: &mut String,
-    ) -> bool {
-        let found = self.submissions.get(submission_id).is_some_and(|submission| {
+    ) -> Option<bool> {
+        let found = self.submissions.get(submission_id).and_then(|submission| {
             let entries = if aggressive {
                 &submission.aggressive
             } else {
                 &submission.standard
             };
-            let Some(value) = entries.get(content_index).and_then(Option::as_ref) else {
-                return false;
-            };
+            let value = entries.get(content_index).and_then(Option::as_ref)?;
+            let compressed = value.is_compressed();
             value.apply(text);
-            true
+            Some(compressed)
         });
         #[cfg(test)]
-        if found {
+        if found.is_some() {
             self.hits += 1;
         } else {
             self.misses += 1;
@@ -190,11 +202,22 @@ fn compress_operator_text_if_changed(
 }
 
 pub(crate) fn compress_operator_items(
-    mut items: Vec<ResponseItem>,
+    items: Vec<ResponseItem>,
     config: &OperatorInputCompressionConfig,
 ) -> Vec<ResponseItem> {
+    compress_operator_items_with_stats(items, config).0
+}
+
+pub(crate) fn compress_operator_items_with_stats(
+    mut items: Vec<ResponseItem>,
+    config: &OperatorInputCompressionConfig,
+) -> (Vec<ResponseItem>, OperatorInputCompressionStats) {
+    let mut stats = OperatorInputCompressionStats {
+        input_item_count: items.len(),
+        ..OperatorInputCompressionStats::default()
+    };
     if !config.enabled {
-        return items;
+        return (items, stats);
     }
 
     for item in &mut items {
@@ -212,23 +235,39 @@ pub(crate) fn compress_operator_items(
         }
         for content_item in content {
             if let ContentItem::InputText { text } = content_item {
+                stats.candidate_text_count = stats.candidate_text_count.saturating_add(1);
                 if let Some(compressed) = compress_operator_text_if_changed(text, config) {
                     *text = compressed;
+                    stats.transformed_text_count =
+                        stats.transformed_text_count.saturating_add(1);
                 }
             }
         }
     }
 
-    items
+    (items, stats)
 }
 
+#[cfg(test)]
 pub(crate) fn compress_operator_items_cached(
-    mut items: Vec<ResponseItem>,
+    items: Vec<ResponseItem>,
     config: &OperatorInputCompressionConfig,
     cache: &mut OperatorInputCompressionCache,
 ) -> Vec<ResponseItem> {
+    compress_operator_items_cached_with_stats(items, config, cache).0
+}
+
+pub(crate) fn compress_operator_items_cached_with_stats(
+    mut items: Vec<ResponseItem>,
+    config: &OperatorInputCompressionConfig,
+    cache: &mut OperatorInputCompressionCache,
+) -> (Vec<ResponseItem>, OperatorInputCompressionStats) {
+    let mut stats = OperatorInputCompressionStats {
+        input_item_count: items.len(),
+        ..OperatorInputCompressionStats::default()
+    };
     if !config.enabled {
-        return items;
+        return (items, stats);
     }
 
     for item in &mut items {
@@ -248,18 +287,32 @@ pub(crate) fn compress_operator_items_cached(
             let ContentItem::InputText { text } = content_item else {
                 continue;
             };
-            if cache.apply_cached(submission_id, content_index, config.aggressive, text) {
+            stats.candidate_text_count = stats.candidate_text_count.saturating_add(1);
+            if let Some(was_compressed) =
+                cache.apply_cached(submission_id, content_index, config.aggressive, text)
+            {
+                stats.cache_hit_count = stats.cache_hit_count.saturating_add(1);
+                if was_compressed {
+                    stats.transformed_text_count =
+                        stats.transformed_text_count.saturating_add(1);
+                }
                 continue;
             }
+            stats.cache_miss_count = stats.cache_miss_count.saturating_add(1);
 
             let value = compress_operator_text_if_changed(text, config)
                 .map_or(CachedCompression::Unchanged, CachedCompression::Compressed);
+            let was_compressed = value.is_compressed();
             value.apply(text);
             cache.insert(submission_id, content_index, config.aggressive, value);
+            if was_compressed {
+                stats.transformed_text_count =
+                    stats.transformed_text_count.saturating_add(1);
+            }
         }
     }
 
-    items
+    (items, stats)
 }
 
 fn normalize_whitespace(input: &str) -> String {
@@ -494,6 +547,40 @@ mod tests {
         let second = compress_operator_items_cached(vec![item], &standard(), &mut cache);
         assert_eq!(cache.test_counts(), (1, 1));
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn cached_item_compression_reports_transform_and_cache_statistics() {
+        let original = "Please   update the documentation.\n\nPlease update the documentation.";
+        let item = ResponseItem::Message {
+            id: Some("submission-telemetry".to_owned()),
+            role: "user".to_owned(),
+            content: vec![ContentItem::InputText {
+                text: original.to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+        let mut cache = OperatorInputCompressionCache::default();
+
+        let (_, first) = compress_operator_items_cached_with_stats(
+            vec![item.clone()],
+            &standard(),
+            &mut cache,
+        );
+        assert_eq!(first.input_item_count, 1);
+        assert_eq!(first.candidate_text_count, 1);
+        assert_eq!(first.transformed_text_count, 1);
+        assert_eq!(first.cache_hit_count, 0);
+        assert_eq!(first.cache_miss_count, 1);
+
+        let (_, second) =
+            compress_operator_items_cached_with_stats(vec![item], &standard(), &mut cache);
+        assert_eq!(second.input_item_count, 1);
+        assert_eq!(second.candidate_text_count, 1);
+        assert_eq!(second.transformed_text_count, 1);
+        assert_eq!(second.cache_hit_count, 1);
+        assert_eq!(second.cache_miss_count, 0);
     }
 
     #[test]

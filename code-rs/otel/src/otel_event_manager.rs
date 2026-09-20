@@ -68,6 +68,63 @@ pub struct TurnLatencyPayload {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextManagementPath {
+    OperatorInputCompression,
+    RemoteCompaction,
+    LocalSummary,
+    EmergencyFallback,
+}
+
+impl ContextManagementPath {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::OperatorInputCompression => "operator_input_compression",
+            Self::RemoteCompaction => "remote_compaction",
+            Self::LocalSummary => "local_summary",
+            Self::EmergencyFallback => "emergency_fallback",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextManagementOutcome {
+    Started,
+    Completed,
+    Fallback,
+    Failed,
+    Skipped,
+}
+
+impl ContextManagementOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Fallback => "fallback",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextManagementPayload {
+    pub path: ContextManagementPath,
+    pub outcome: ContextManagementOutcome,
+    pub duration_ms: Option<u64>,
+    pub input_item_count: Option<u64>,
+    pub output_item_count: Option<u64>,
+    pub candidate_text_count: Option<u64>,
+    pub transformed_item_count: Option<u64>,
+    pub cache_hit_count: Option<u64>,
+    pub cache_miss_count: Option<u64>,
+    pub truncated_item_count: Option<u64>,
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct OtelEventMetadata {
     conversation_id: ConversationId,
@@ -537,8 +594,95 @@ impl OtelEventManager {
             note = payload.note,
         );
     }
+
+    pub fn context_management_event(&self, payload: ContextManagementPayload) {
+        tracing::event!(
+            tracing::Level::INFO,
+            event.name = "codex.context_management",
+            event.timestamp = %timestamp(),
+            conversation.id = %self.metadata.conversation_id,
+            app.version = %self.metadata.app_version,
+            auth_mode = self.metadata.auth_mode,
+            user.account_id = self.metadata.account_id,
+            terminal.type = %self.metadata.terminal_type,
+            model = %self.metadata.model,
+            slug = %self.metadata.slug,
+            context.path = %payload.path.as_str(),
+            context.outcome = %payload.outcome.as_str(),
+            duration_ms = payload.duration_ms,
+            input_item_count = payload.input_item_count,
+            output_item_count = payload.output_item_count,
+            candidate_text_count = payload.candidate_text_count,
+            transformed_item_count = payload.transformed_item_count,
+            cache_hit_count = payload.cache_hit_count,
+            cache_miss_count = payload.cache_miss_count,
+            truncated_item_count = payload.truncated_item_count,
+            note = payload.note,
+        );
+    }
 }
 
 fn timestamp() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_management_payload_serializes_distinct_paths_and_outcomes() {
+        let cases = [
+            (
+                ContextManagementPath::OperatorInputCompression,
+                "operator_input_compression",
+            ),
+            (ContextManagementPath::RemoteCompaction, "remote_compaction"),
+            (ContextManagementPath::LocalSummary, "local_summary"),
+            (ContextManagementPath::EmergencyFallback, "emergency_fallback"),
+        ];
+
+        for (path, expected) in cases {
+            let payload = ContextManagementPayload {
+                path,
+                outcome: ContextManagementOutcome::Completed,
+                duration_ms: Some(7),
+                input_item_count: Some(3),
+                output_item_count: Some(2),
+                candidate_text_count: Some(1),
+                transformed_item_count: Some(1),
+                cache_hit_count: Some(4),
+                cache_miss_count: Some(1),
+                truncated_item_count: None,
+                note: None,
+            };
+            let value = serde_json::to_value(payload).expect("serialize context telemetry");
+            assert_eq!(value["path"], expected);
+            assert_eq!(value["outcome"], "completed");
+        }
+
+        for (outcome, expected) in [
+            (ContextManagementOutcome::Started, "started"),
+            (ContextManagementOutcome::Completed, "completed"),
+            (ContextManagementOutcome::Fallback, "fallback"),
+            (ContextManagementOutcome::Failed, "failed"),
+            (ContextManagementOutcome::Skipped, "skipped"),
+        ] {
+            let value = serde_json::to_value(ContextManagementPayload {
+                path: ContextManagementPath::RemoteCompaction,
+                outcome,
+                duration_ms: None,
+                input_item_count: None,
+                output_item_count: None,
+                candidate_text_count: None,
+                transformed_item_count: None,
+                cache_hit_count: None,
+                cache_miss_count: None,
+                truncated_item_count: None,
+                note: None,
+            })
+            .expect("serialize context outcome");
+            assert_eq!(value["outcome"], expected);
+        }
+    }
 }

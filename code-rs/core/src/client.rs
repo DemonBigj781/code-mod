@@ -78,7 +78,11 @@ use crate::protocol::SandboxPolicy;
 use crate::protocol::TokenUsage;
 use crate::reasoning::clamp_reasoning_effort_for_model;
 use crate::util::{backoff, header_map_to_json};
-use code_otel::otel_event_manager::{OtelEventManager, TurnLatencyPayload};
+use code_otel::otel_event_manager::{
+    ContextManagementPayload,
+    OtelEventManager,
+    TurnLatencyPayload,
+};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -458,6 +462,12 @@ impl ModelClient {
     pub fn log_turn_latency_debug(&self, payload: &TurnLatencyPayload) {
         if let Ok(logger) = self.debug_logger.lock() {
             let _ = logger.log_turn_latency(payload);
+        }
+    }
+
+    pub fn log_context_management_debug(&self, payload: &ContextManagementPayload) {
+        if let Ok(logger) = self.debug_logger.lock() {
+            let _ = logger.log_context_management(payload);
         }
     }
 

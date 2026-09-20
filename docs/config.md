@@ -801,6 +801,22 @@ metadata above):
   - `duration_ms` (execution time for the tool)
   - `success` (`"true"` or `"false"`)
   - `output`
+- `codex.turn_latency`
+  - `turn.phase` (`request_scheduled`, `request_completed`, or `request_failed`)
+  - `attempt`, `gap_ms`, and `duration_ms`
+  - pending input, execution, compact, and scratchpad counts
+  - prompt, output, and token counts when available
+  - `note` (optional failure detail)
+- `codex.context_management`
+  - `context.path` (`operator_input_compression`, `remote_compaction`,
+    `local_summary`, or `emergency_fallback`)
+  - `context.outcome` (`started`, `completed`, `fallback`, `failed`, or
+    `skipped`)
+  - `duration_ms`, input/output item counts, and truncated item count when
+    available
+  - candidate/transformed text and cache hit/miss counts for deterministic
+    operator-input compression
+  - `note` (optional path detail or preserved failure)
 
 These event shapes may change as we iterate.
 

@@ -23,6 +23,9 @@ use code_apply_patch::ApplyPatchAction;
 use code_apply_patch::MaybeApplyPatchVerified;
 use crate::bridge_client::spawn_bridge_listener;
 use code_otel::otel_event_manager::{
+    ContextManagementOutcome,
+    ContextManagementPath,
+    ContextManagementPayload,
     OtelEventManager,
     ToolDecisionSource,
     TurnLatencyPayload,

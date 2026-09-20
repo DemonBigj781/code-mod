@@ -250,20 +250,46 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
         // conversation history on each turn. New pending items were persisted
         // exactly once above, so ordinary requests must not append them again as
         // request-only extras.
-        let turn_input: Vec<ResponseItem> = if is_review_mode {
-            crate::operator_input_compression::compress_operator_items(
+        let compression_started = Instant::now();
+        let (turn_input, compression_stats): (
+            Vec<ResponseItem>,
+            crate::operator_input_compression::OperatorInputCompressionStats,
+        ) = if is_review_mode {
+            crate::operator_input_compression::compress_operator_items_with_stats(
                 review_history.clone(),
                 &sess.input_compression_config,
             )
         } else {
             let turn_input = sess.turn_input_with_history(Vec::new());
             let mut cache = crate::codex::lock_or_panic!(sess.input_compression_cache);
-            crate::operator_input_compression::compress_operator_items_cached(
+            crate::operator_input_compression::compress_operator_items_cached_with_stats(
                 turn_input,
                 &sess.input_compression_config,
                 &mut cache,
             )
         };
+        sess.emit_context_management(ContextManagementPayload {
+            path: ContextManagementPath::OperatorInputCompression,
+            outcome: if sess.input_compression_config.enabled {
+                ContextManagementOutcome::Completed
+            } else {
+                ContextManagementOutcome::Skipped
+            },
+            duration_ms: Some(crate::codex::session::duration_to_millis(
+                compression_started.elapsed(),
+            )),
+            input_item_count: Some(compression_stats.input_item_count as u64),
+            output_item_count: Some(turn_input.len() as u64),
+            candidate_text_count: Some(compression_stats.candidate_text_count as u64),
+            transformed_item_count: Some(compression_stats.transformed_text_count as u64),
+            cache_hit_count: Some(compression_stats.cache_hit_count as u64),
+            cache_miss_count: Some(compression_stats.cache_miss_count as u64),
+            truncated_item_count: None,
+            note: Some(format!(
+                "aggressive={}; review_mode={is_review_mode}",
+                sess.input_compression_config.aggressive,
+            )),
+        });
 
         let turn = run_turn(
             &sess,

@@ -70,9 +70,13 @@ subdirectories such as:
 - `ui/theme_spinner`
 - `ui/theme_builder`
 - `cli/manual_prompt`
+- `turn_latency/<session UUID>_turn_latency.jsonl`
+- `context_management/<session UUID>_context_management.jsonl`
 
 Tags become nested path components, so custom helpers appear alongside the
-existing timestamped filenames.
+existing timestamped filenames. The session-scoped latency and context files
+are newline-delimited JSON, so they can be followed while reproducing a long
+session or compaction failure.
 
 Without `--debug`, Code only writes critical crash/error logs to
 `~/.code/debug_logs/critical.log.*`; routine log output is suppressed.

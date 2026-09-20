@@ -1,5 +1,5 @@
 use chrono::Local;
-use code_otel::otel_event_manager::TurnLatencyPayload;
+use code_otel::otel_event_manager::{ContextManagementPayload, TurnLatencyPayload};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -24,6 +24,8 @@ pub struct DebugLogger {
     session_usage_file: Mutex<PathBuf>,
     turn_latency_dir: PathBuf,
     turn_latency_file: Mutex<Option<PathBuf>>,
+    context_management_dir: PathBuf,
+    context_management_file: Mutex<Option<PathBuf>>,
 }
 
 impl DebugLogger {
@@ -37,6 +39,8 @@ impl DebugLogger {
                 session_usage_file: Mutex::new(PathBuf::new()),
                 turn_latency_dir: PathBuf::new(),
                 turn_latency_file: Mutex::new(None),
+                context_management_dir: PathBuf::new(),
+                context_management_file: Mutex::new(None),
             });
         }
 
@@ -51,6 +55,8 @@ impl DebugLogger {
 
         let turn_latency_dir = log_dir.join("turn_latency");
         fs::create_dir_all(&turn_latency_dir)?;
+        let context_management_dir = log_dir.join("context_management");
+        fs::create_dir_all(&context_management_dir)?;
 
         Ok(Self {
             enabled,
@@ -60,6 +66,8 @@ impl DebugLogger {
             session_usage_file: Mutex::new(PathBuf::new()),
             turn_latency_dir,
             turn_latency_file: Mutex::new(None),
+            context_management_dir,
+            context_management_file: Mutex::new(None),
         })
     }
 
@@ -272,7 +280,8 @@ impl DebugLogger {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = path;
 
-        self.set_turn_latency_file(session_id)
+        self.set_turn_latency_file(session_id)?;
+        self.set_context_management_file(session_id)
     }
 
     fn set_turn_latency_file(&self, session_id: &Uuid) -> Result<(), std::io::Error> {
@@ -299,6 +308,27 @@ impl DebugLogger {
         Ok(())
     }
 
+    fn set_context_management_file(&self, session_id: &Uuid) -> Result<(), std::io::Error> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let path = self
+            .context_management_dir
+            .join(format!("{session_id}_context_management.jsonl"));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        OpenOptions::new().create(true).append(true).open(&path)?;
+
+        let mut guard = self
+            .context_management_file
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = Some(path);
+        Ok(())
+    }
+
     pub fn log_turn_latency(&self, payload: &TurnLatencyPayload) -> Result<(), std::io::Error> {
         if !self.enabled {
             return Ok(());
@@ -312,6 +342,45 @@ impl DebugLogger {
             guard.clone()
         };
 
+        let Some(path) = path else {
+            return Ok(());
+        };
+
+        let payload_value = serde_json::to_value(payload).unwrap_or(Value::Null);
+        let entry = match payload_value {
+            Value::Object(mut map) => {
+                map.insert(
+                    "timestamp".to_owned(),
+                    Value::String(Local::now().to_rfc3339()),
+                );
+                Value::Object(map)
+            }
+            other => serde_json::json!({
+                "timestamp": Local::now().to_rfc3339(),
+                "payload": other,
+            }),
+        };
+
+        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+        writeln!(file, "{}", serde_json::to_string(&entry)?)?;
+        Ok(())
+    }
+
+    pub fn log_context_management(
+        &self,
+        payload: &ContextManagementPayload,
+    ) -> Result<(), std::io::Error> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let path = {
+            let guard = self
+                .context_management_file
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.clone()
+        };
         let Some(path) = path else {
             return Ok(());
         };
@@ -501,5 +570,67 @@ impl DebugLogger {
         fs::write(file_path, formatted)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use code_otel::otel_event_manager::{
+        ContextManagementOutcome,
+        ContextManagementPath,
+    };
+
+    #[test]
+    fn context_management_events_are_session_scoped_jsonl() {
+        let temp = tempfile::tempdir().expect("temporary debug log root");
+        let log_dir = temp.path().join("debug_logs");
+        let usage_dir = log_dir.join("usage");
+        let turn_latency_dir = log_dir.join("turn_latency");
+        let context_management_dir = log_dir.join("context_management");
+        for dir in [&log_dir, &usage_dir, &turn_latency_dir, &context_management_dir] {
+            fs::create_dir_all(dir).expect("create debug log directory");
+        }
+        let logger = DebugLogger {
+            enabled: true,
+            log_dir,
+            active_streams: Mutex::new(HashMap::new()),
+            usage_dir,
+            session_usage_file: Mutex::new(PathBuf::new()),
+            turn_latency_dir,
+            turn_latency_file: Mutex::new(None),
+            context_management_dir: context_management_dir.clone(),
+            context_management_file: Mutex::new(None),
+        };
+        let session_id = Uuid::new_v4();
+        logger
+            .set_session_usage_file(&session_id)
+            .expect("initialize session log files");
+        logger
+            .log_context_management(&ContextManagementPayload {
+                path: ContextManagementPath::RemoteCompaction,
+                outcome: ContextManagementOutcome::Fallback,
+                duration_ms: Some(12),
+                input_item_count: Some(8),
+                output_item_count: None,
+                candidate_text_count: None,
+                transformed_item_count: None,
+                cache_hit_count: None,
+                cache_miss_count: None,
+                truncated_item_count: Some(2),
+                note: Some("service unavailable".to_owned()),
+            })
+            .expect("append context telemetry");
+
+        let path = context_management_dir
+            .join(format!("{session_id}_context_management.jsonl"));
+        let contents = fs::read_to_string(path).expect("read context telemetry");
+        let lines = contents.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1);
+        let event: Value = serde_json::from_str(lines[0]).expect("valid JSONL event");
+        assert_eq!(event["path"], "remote_compaction");
+        assert_eq!(event["outcome"], "fallback");
+        assert_eq!(event["truncated_item_count"], 2);
+        assert!(event["timestamp"].is_string());
     }
 }

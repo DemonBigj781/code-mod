@@ -1310,6 +1310,13 @@ impl Session {
         self.client.log_turn_latency_debug(&payload);
     }
 
+    pub(super) fn emit_context_management(&self, payload: ContextManagementPayload) {
+        if let Some(otel) = self.client.get_otel_event_manager() {
+            otel.context_management_event(payload.clone());
+        }
+        self.client.log_context_management_debug(&payload);
+    }
+
     pub(super) fn scratchpad_push(
         &self,
         item: &ResponseItem,
