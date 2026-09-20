@@ -118,14 +118,19 @@ were both included in the archive.
   - Fallback-eligible endpoint and service failures now emit the original
     status/body before local summarization, while authentication and rate-limit
     failures remain failures instead of being disguised as fallback success.
-- [ ] Separate deterministic operator-input compression, remote compaction, and
+- [x] Separate deterministic operator-input compression, remote compaction, and
       local summary fallback in code, configuration, telemetry, and tests.
   - Deterministic input compression has its own persisted settings and tests,
     retains original operator text in the rollout, and now has bounded
     session-local reuse. Remote compaction and local emergency summary behavior
-    remain separate recovery paths. Resume-order acceptance is complete; the
-    remaining gap is durable per-path telemetry plus a live repaired-binary
-    exercise, rather than input rewriting.
+    remain separate recovery paths. `codex.context_management` now records
+    distinct input-compression, remote-compaction, local-summary, and emergency
+    paths with explicit outcomes, durations, bounded counts, and preserved
+    failure detail. Debug mode writes the same payloads to session-scoped
+    `context_management` JSONL. The schema test, nine compression tests,
+    session-log regression, 13 local-compaction tests, and two remote-fallback
+    tests pass with one test thread. Live reproduction remains part of the
+    separate long-session gate above.
 - [x] Reproduce and fix the display-side form of long-session response decay
       that the operator called "late prompt text entropy."
   - Prior-session evidence records the operator first identifying a broken
@@ -254,18 +259,21 @@ were both included in the archive.
 - [x] Build and test the currently repaired source with exactly one compiler
       thread.
   - `CARGO_BUILD_JOBS=1 cargo build -j1 -p code-cli --bin code` passed, as did
-    the focused regression suites recorded above; the latest incremental build
-    of checkpoint `0678deda9` completed in 4 minutes 00 seconds.
+    the focused regression suites recorded above. The latest full build of
+    context-telemetry checkpoint `2562ab30a` completed in 9 minutes 14 seconds;
+    the preceding agent-overview checkpoint `0678deda9` completed in 4 minutes
+    00 seconds.
 - [x] Verify the deployed executable separately from compilation and tests.
   - `/var/home/jack/bin/code` matches the built candidate SHA-256
-    `8523d0318ff8cf9ba95ad743456e55e107e8a13a3ea6ccc99ff841796d7d0299`;
+    `632a678f472b6868baaa94f69f3701447cd25ca9098e6265c34c715343fcbe49`;
     `--version`, generated Bash completion syntax, and `doctor` pass.
   - The immediately replaced binary is preserved at
-    `/var/home/jack/backups/code-installed-predeploy-20260920T095939Z/code`
+    `/var/home/jack/backups/code-installed-predeploy-20260920T120250Z/code`
     with SHA-256
-    `e4ffc04386a719bf7ff8bed9da303c6cf0c46d95324152076337431028bd51e4`;
-    the earlier installed binaries remain in the timestamped `092743Z`,
-    `090550Z`, `075659Z`, `064835Z`, `052810Z`, and `043514Z` backups.
+    `8523d0318ff8cf9ba95ad743456e55e107e8a13a3ea6ccc99ff841796d7d0299`;
+    the earlier installed binaries remain in the timestamped `095939Z`,
+    `092743Z`, `090550Z`, `075659Z`, `064835Z`, `052810Z`, and `043514Z`
+    backups.
 - [x] Remove the stale copied worktree and obsolete binary snapshot from the
       project directory after their archive is re-verified.
   - The recovery archive again passed its recorded SHA-256 and `zstd -t` before
