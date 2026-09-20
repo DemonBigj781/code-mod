@@ -237,6 +237,11 @@
                         widget.apply_model_role_update(name, role, enabled, description, command);
                     }
                 }
+                AppEvent::UpdateAllModelRoles { name, enabled, description, command } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_all_model_roles_update(name, enabled, description, command);
+                    }
+                }
                 AppEvent::UpdateAgentConfig { intent, name, enabled, args_read_only, args_write, instructions, description, command } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.apply_agent_update(crate::chatwidget::AgentUpdateRequest {

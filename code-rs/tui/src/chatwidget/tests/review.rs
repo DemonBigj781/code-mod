@@ -770,6 +770,30 @@
     }
 
     #[test]
+    fn all_model_roles_update_changes_every_capability_together() {
+    let _guard = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+
+    chat.apply_all_model_roles_update(
+        "code-gpt-5.3-codex".to_owned(),
+        false,
+        None,
+        "coder".to_owned(),
+    );
+
+    let configured = code_core::agent_defaults::agent_config_for_model(
+        &chat.config.agents,
+        "gpt-5.3-codex",
+    )
+    .expect("configured model");
+    assert!(!configured.session_enabled);
+    assert!(!configured.enabled);
+    assert!(!configured.review_enabled);
+    assert!(!configured.auto_drive_enabled);
+    }
+
+    #[test]
     fn model_role_filters_are_independent_across_selectors() {
     let _guard = enter_test_runtime_guard();
     let mut harness = ChatWidgetHarness::new();

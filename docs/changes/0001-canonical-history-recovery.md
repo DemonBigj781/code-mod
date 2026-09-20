@@ -187,6 +187,20 @@ were both included in the archive.
     editor tests pass with one test thread.
 - [x] Repair scrolling, alignment, and independent role toggles in the agent
       model settings UI.
+  - The prior checkbox was not supported by the actual overview renderer: it
+    always rendered from content row zero, mouse hit-testing ignored viewport
+    position, and the model-name cell opened the editor instead of controlling
+    the complete model entry.
+  - The overview now derives rendering and mouse hit-testing from the same
+    bounded scroll offset, keeps the selected row visible, and exposes the model
+    name as a separate keyboard and mouse target. Selecting that target changes
+    Session, Sub-agent, Review, and Auto Drive together through one persisted
+    configuration transaction; individual role columns remain independently
+    selectable, and `E` opens model configuration.
+  - The original bounded-viewport regression failed with model 11 selected while
+    models 0-2 remained visible. The repaired 11-test overview module, atomic
+    all-role persistence regression, existing single-role regression, and
+    direct-provider role regression all pass with one test thread.
 - [x] Verify unified selectors for general, agent, subagent, review, and
       autodrive roles, including persistent settings.
 - [x] Repair irreversible provider/model switching and distinguish free versus

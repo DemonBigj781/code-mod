@@ -8,6 +8,32 @@ use super::model::{
 };
 
 impl AgentsSettingsContent {
+    fn toggle_model_target(
+        state: &AgentsOverviewState,
+        app_event_tx: &AppEventSender,
+    ) -> bool {
+        let Some(row) = state.rows.get(state.selected) else {
+            return false;
+        };
+        if let Some(role) = state.selected_role {
+            app_event_tx.send(AppEvent::UpdateModelRole {
+                name: row.name.clone(),
+                role,
+                enabled: !row.role_enabled(role),
+                description: row.description.clone(),
+                command: row.command.clone(),
+            });
+        } else {
+            app_event_tx.send(AppEvent::UpdateAllModelRoles {
+                name: row.name.clone(),
+                enabled: !row.all_roles_enabled(),
+                description: row.description.clone(),
+                command: row.command.clone(),
+            });
+        }
+        true
+    }
+
     pub(super) fn handle_overview_key(
         state: &mut AgentsOverviewState,
         key: KeyEvent,
@@ -52,20 +78,22 @@ impl AgentsSettingsContent {
                 true
             }
             KeyCode::Char(' ') => {
-                if let Some(row) = state.rows.get(state.selected) {
-                    let role = state.selected_role;
-                    app_event_tx.send(AppEvent::UpdateModelRole {
-                        name: row.name.clone(),
-                        role,
-                        enabled: !row.role_enabled(role),
-                        description: row.description.clone(),
-                        command: row.command.clone(),
-                    });
+                if state.selected < state.rows.len() {
+                    Self::toggle_model_target(state, app_event_tx);
                 } else if state.selected == state.rows.len() {
                     app_event_tx.send(AppEvent::UpdateSubagentsEnabled {
                         enabled: !state.agents_enabled,
                     });
                 }
+                true
+            }
+            KeyCode::Char('e' | 'E') => {
+                let Some(row) = state.rows.get(state.selected) else {
+                    return false;
+                };
+                app_event_tx.send(AppEvent::ShowAgentEditor {
+                    name: row.name.clone(),
+                });
                 true
             }
             KeyCode::Char('i' | 'I') => {
@@ -85,17 +113,14 @@ impl AgentsSettingsContent {
                 let idx = state.selected;
                 let master_idx = state.rows.len();
                 let add_agent_idx = master_idx + 1;
-                if idx == master_idx {
+                if idx < master_idx {
+                    Self::toggle_model_target(state, app_event_tx);
+                } else if idx == master_idx {
                     app_event_tx.send(AppEvent::UpdateSubagentsEnabled {
                         enabled: !state.agents_enabled,
                     });
                 } else if idx == add_agent_idx {
                     app_event_tx.send(AppEvent::ShowAgentEditorNew);
-                } else if idx < add_agent_idx {
-                    let row = &state.rows[idx];
-                    app_event_tx.send(AppEvent::ShowAgentEditor {
-                        name: row.name.clone(),
-                    });
                 } else {
                     let cmd_idx = idx.saturating_sub(state.rows.len() + 2);
                     if cmd_idx < state.commands.len() {

@@ -51,17 +51,16 @@ impl SettingsContent for AgentsSettingsContent {
                 let Some(next) = Self::overview_selection_at(state, area, mouse_event) else {
                     return false;
                 };
-                let next_role = (next < state.rows.len())
-                    .then(|| Self::overview_role_at(state, area, mouse_event))
-                    .flatten();
+                let next_target = (next < state.rows.len())
+                    .then(|| Self::overview_role_at(state, area, mouse_event));
                 if state.selected == next
-                    && next_role.is_none_or(|role| role == state.selected_role)
+                    && next_target.is_none_or(|target| target == state.selected_role)
                 {
                     return false;
                 }
                 state.selected = next;
-                if let Some(role) = next_role {
-                    state.selected_role = role;
+                if let Some(target) = next_target {
+                    state.selected_role = target;
                 }
                 self.app_event_tx.send(AppEvent::AgentsOverviewSelectionChanged {
                     index: state.selected,
@@ -72,17 +71,16 @@ impl SettingsContent for AgentsSettingsContent {
                 let Some(next) = Self::overview_selection_at(state, area, mouse_event) else {
                     return false;
                 };
-                let clicked_role = (next < state.rows.len())
-                    .then(|| Self::overview_role_at(state, area, mouse_event))
-                    .flatten();
+                let clicked_target = (next < state.rows.len())
+                    .then(|| Self::overview_role_at(state, area, mouse_event));
                 state.selected = next;
-                if let Some(role) = clicked_role {
-                    state.selected_role = role;
+                if let Some(target) = clicked_target {
+                    state.selected_role = target;
                 }
                 self.app_event_tx.send(AppEvent::AgentsOverviewSelectionChanged {
                     index: state.selected,
                 });
-                let activation = if clicked_role.is_some() {
+                let activation = if next < state.rows.len() {
                     KeyCode::Char(' ')
                 } else {
                     KeyCode::Enter

@@ -22,30 +22,31 @@ impl AgentsSettingsContent {
         }
 
         let rel_y = mouse_event.row.saturating_sub(area.y) as usize;
+        let content_y = rel_y.saturating_add(state.scroll_offset(area.height as usize));
         let rows_len = state.rows.len();
         let command_len = state.commands.len();
 
-        if rel_y >= 2 && rel_y < 2 + rows_len {
-            return Some(rel_y - 2);
+        if content_y >= 2 && content_y < 2 + rows_len {
+            return Some(content_y - 2);
         }
 
         let master_line = rows_len + 3;
-        if rel_y == master_line {
+        if content_y == master_line {
             return Some(rows_len);
         }
 
         let add_agent_line = rows_len + 4;
-        if rel_y == add_agent_line {
+        if content_y == add_agent_line {
             return Some(rows_len + 1);
         }
 
         let command_start = rows_len + 7;
-        if rel_y >= command_start && rel_y < command_start + command_len {
-            return Some(rows_len + 2 + (rel_y - command_start));
+        if content_y >= command_start && content_y < command_start + command_len {
+            return Some(rows_len + 2 + (content_y - command_start));
         }
 
         let add_command_line = command_start + command_len;
-        if rel_y == add_command_line {
+        if content_y == add_command_line {
             return Some(rows_len + 2 + command_len);
         }
 

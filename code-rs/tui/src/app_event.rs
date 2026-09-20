@@ -1066,6 +1066,12 @@ pub(crate) enum AppEvent {
         description: Option<String>,
         command: String,
     },
+    UpdateAllModelRoles {
+        name: String,
+        enabled: bool,
+        description: Option<String>,
+        command: String,
+    },
     /// Add or update an agent's settings (enabled, params, instructions)
     UpdateAgentConfig {
         intent: AgentUpdateIntent,

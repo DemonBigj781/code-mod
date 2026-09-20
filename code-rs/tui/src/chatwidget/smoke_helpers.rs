@@ -187,6 +187,15 @@ impl ChatWidgetHarness {
                     self.chat
                         .apply_model_role_update(name, role, enabled, description, command);
                 }
+                AppEvent::UpdateAllModelRoles {
+                    name,
+                    enabled,
+                    description,
+                    command,
+                } => {
+                    self.chat
+                        .apply_all_model_roles_update(name, enabled, description, command);
+                }
                 AppEvent::AgentValidationFinished { name, result, attempt_id } => {
                     self.chat.handle_agent_validation_finished(&name, attempt_id, result);
                 }

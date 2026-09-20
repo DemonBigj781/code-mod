@@ -13,6 +13,10 @@ impl AgentsSettingsContent {
     pub(super) fn render_overview(&self, area: Rect, buf: &mut Buffer, state: &AgentsOverviewState) {
         let lines = Self::build_overview_lines(state, Some(area.width as usize));
         Paragraph::new(lines)
+            .scroll((
+                state.scroll_offset(area.height as usize).min(u16::MAX as usize) as u16,
+                0,
+            ))
             .style(crate::colors::style_text_on_bg())
             .render(area, buf);
     }
@@ -35,16 +39,21 @@ impl AgentsSettingsContent {
             available_width.unwrap_or(100).min(u16::MAX as usize) as u16,
         );
         let mut header = vec![Span::raw("  ")];
+        let model_header_style = if state.selected_role.is_none() {
+            s_primary_bold.add_modifier(Modifier::UNDERLINED)
+        } else {
+            s_text_dim.add_modifier(Modifier::BOLD)
+        };
         header.push(Span::styled(
             pad_cell("Model", layout.name_width as usize, false),
-            s_text_dim.add_modifier(Modifier::BOLD),
+            model_header_style,
         ));
         header.push(Span::raw("  "));
         for (index, (role, label, width)) in model_roles().enumerate() {
             if index > 0 {
                 header.push(Span::raw(" "));
             }
-            let style = if role == state.selected_role {
+            let style = if Some(role) == state.selected_role {
                 s_primary_bold.add_modifier(Modifier::UNDERLINED)
             } else {
                 s_text_dim.add_modifier(Modifier::BOLD)
@@ -74,7 +83,9 @@ impl AgentsSettingsContent {
             );
             spans.push(Span::styled(
                 pad_cell(&name, layout.name_width as usize, false),
-                if selected {
+                if selected && state.selected_role.is_none() {
+                    s_primary_bold.add_modifier(Modifier::REVERSED)
+                } else if selected {
                     s_primary_bold
                 } else if !row.installed {
                     Style::default().fg(crate::colors::warning())
@@ -93,7 +104,7 @@ impl AgentsSettingsContent {
                 } else {
                     crate::icons::checkbox_off()
                 };
-                let active = selected && role == state.selected_role;
+                let active = selected && Some(role) == state.selected_role;
                 let mut style = if enabled {
                     Style::default().fg(crate::colors::success())
                 } else {
@@ -232,9 +243,9 @@ impl AgentsSettingsContent {
         lines.push(Line::from(""));
         lines.push(crate::bottom_pane::settings_ui::hints::shortcut_line(&[
             crate::bottom_pane::settings_ui::hints::hint_nav(" navigate"),
-            crate::bottom_pane::settings_ui::hints::KeyHint::new("←/→", " role"),
-            crate::bottom_pane::settings_ui::hints::KeyHint::new("Space", " access"),
-            crate::bottom_pane::settings_ui::hints::hint_enter(" open"),
+            crate::bottom_pane::settings_ui::hints::KeyHint::new("←/→", " target"),
+            crate::bottom_pane::settings_ui::hints::KeyHint::new("Space/Enter", " toggle"),
+            crate::bottom_pane::settings_ui::hints::KeyHint::new("E", " configure"),
             crate::bottom_pane::settings_ui::hints::KeyHint::new("I", " install missing"),
             crate::bottom_pane::settings_ui::hints::hint_esc(" close"),
         ]));

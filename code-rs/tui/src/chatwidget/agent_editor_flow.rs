@@ -340,14 +340,12 @@ impl ChatWidget<'_> {
         self.commit_agent_update(pending);
     }
 
-    pub(crate) fn apply_model_role_update(
-        &mut self,
+    fn model_role_update_config(
+        &self,
         name: String,
-        role: code_core::config_types::ModelRole,
-        enabled: bool,
         description: Option<String>,
         command: String,
-    ) {
+    ) -> AgentConfig {
         let canonical = agent_model_spec(&name).map(|spec| spec.slug);
         let existing_index = self.config.agents.iter().position(|agent| {
             if let Some(canonical) = canonical {
@@ -383,6 +381,32 @@ impl ChatWidget<'_> {
         if config.description.is_none() {
             config.description = description;
         }
+        config
+    }
+
+    fn disables_active_planning_model(&self, config: &AgentConfig) -> bool {
+        let active_planning_model = if self.config.planning_use_chat_model {
+            self.config.model.as_str()
+        } else {
+            self.config.planning_model.as_str()
+        };
+        matches!(self.collaboration_mode, CollaborationModeKind::Plan)
+            && code_core::agent_defaults::agent_config_for_model(
+                std::slice::from_ref(config),
+                active_planning_model,
+            )
+            .is_some()
+    }
+
+    pub(crate) fn apply_model_role_update(
+        &mut self,
+        name: String,
+        role: code_core::config_types::ModelRole,
+        enabled: bool,
+        description: Option<String>,
+        command: String,
+    ) {
+        let mut config = self.model_role_update_config(name, description, command);
         match role {
             code_core::config_types::ModelRole::Session => config.session_enabled = enabled,
             code_core::config_types::ModelRole::Subagent => config.enabled = enabled,
@@ -390,19 +414,32 @@ impl ChatWidget<'_> {
             code_core::config_types::ModelRole::AutoDrive => config.auto_drive_enabled = enabled,
         }
 
-        let active_planning_model = if self.config.planning_use_chat_model {
-            self.config.model.as_str()
-        } else {
-            self.config.planning_model.as_str()
-        };
         let disables_active_planning_model = role == code_core::config_types::ModelRole::Review
             && !enabled
-            && matches!(self.collaboration_mode, CollaborationModeKind::Plan)
-            && code_core::agent_defaults::agent_config_for_model(
-                std::slice::from_ref(&config),
-                active_planning_model,
-            )
-            .is_some();
+            && self.disables_active_planning_model(&config);
+
+        self.commit_agent_update(PendingAgentUpdate {
+            id: Uuid::new_v4(),
+            cfg: config,
+        });
+        if disables_active_planning_model {
+            self.set_collaboration_mode(CollaborationModeKind::Default, true);
+        }
+    }
+
+    pub(crate) fn apply_all_model_roles_update(
+        &mut self,
+        name: String,
+        enabled: bool,
+        description: Option<String>,
+        command: String,
+    ) {
+        let mut config = self.model_role_update_config(name, description, command);
+        config.session_enabled = enabled;
+        config.enabled = enabled;
+        config.review_enabled = enabled;
+        config.auto_drive_enabled = enabled;
+        let disables_active_planning_model = !enabled && self.disables_active_planning_model(&config);
 
         self.commit_agent_update(PendingAgentUpdate {
             id: Uuid::new_v4(),

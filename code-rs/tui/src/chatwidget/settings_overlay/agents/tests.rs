@@ -2,6 +2,7 @@ use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
 use super::model::{
@@ -27,7 +28,7 @@ fn state(role: ModelRole, enabled: bool) -> AgentsOverviewState {
         commands: Vec::new(),
         agents_enabled: true,
         selected: 0,
-        selected_role: role,
+        selected_role: Some(role),
     }
 }
 
@@ -74,7 +75,7 @@ fn left_and_right_move_between_capability_columns() {
         KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
         &sender,
     ));
-    assert_eq!(state.selected_role, ModelRole::Subagent);
+    assert_eq!(state.selected_role, Some(ModelRole::Subagent));
     assert!(rx.try_recv().is_err());
 
     assert!(AgentsSettingsContent::handle_overview_key(
@@ -82,11 +83,11 @@ fn left_and_right_move_between_capability_columns() {
         KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
         &sender,
     ));
-    assert_eq!(state.selected_role, ModelRole::Session);
+    assert_eq!(state.selected_role, Some(ModelRole::Session));
 }
 
 #[test]
-fn enter_opens_uninstalled_model_for_editing() {
+fn e_opens_uninstalled_model_for_editing() {
     let (tx, rx) = mpsc::channel();
     let sender = AppEventSender::new(tx);
     let mut state = state(ModelRole::Session, true);
@@ -94,7 +95,7 @@ fn enter_opens_uninstalled_model_for_editing() {
 
     assert!(AgentsSettingsContent::handle_overview_key(
         &mut state,
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
         &sender,
     ));
 
@@ -161,7 +162,7 @@ fn mouse_activation_toggles_the_clicked_role() {
 }
 
 #[test]
-fn mouse_activation_on_model_name_opens_the_model_editor() {
+fn mouse_activation_on_model_name_toggles_all_roles() {
     let (tx, rx) = mpsc::channel();
     let sender = AppEventSender::new(tx);
     let mut content = AgentsSettingsContent::new_overview(
@@ -185,7 +186,28 @@ fn mouse_activation_on_model_name_opens_the_model_editor() {
 
     assert!(matches!(
         rx.try_iter().last(),
-        Some(AppEvent::ShowAgentEditor { name }) if name == "provider/model",
+        Some(AppEvent::UpdateAllModelRoles { name, enabled: true, .. })
+            if name == "provider/model",
+    ));
+}
+
+#[test]
+fn enter_on_model_name_toggles_all_roles_together() {
+    let (tx, rx) = mpsc::channel();
+    let sender = AppEventSender::new(tx);
+    let mut state = state(ModelRole::Review, false);
+    state.selected_role = None;
+
+    assert!(AgentsSettingsContent::handle_overview_key(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &sender,
+    ));
+
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AppEvent::UpdateAllModelRoles { name, enabled: true, .. })
+            if name == "provider/model",
     ));
 }
 
@@ -205,6 +227,81 @@ fn overview_renders_universal_capability_headers() {
     assert!(rendered.contains("Review"));
     assert!(rendered.contains("Auto Drive"));
     assert!(rendered.contains("Read agents"));
+}
+
+#[test]
+fn overview_scrolls_the_selected_model_into_a_bounded_viewport() {
+    let rows = (0..12)
+        .map(|index| AgentOverviewRow {
+            name: format!("provider/model-{index}"),
+            session_enabled: true,
+            subagent_enabled: true,
+            review_enabled: true,
+            auto_drive_enabled: true,
+            installed: true,
+            description: None,
+            command: "coder".to_owned(),
+        })
+        .collect::<Vec<_>>();
+    let (tx, _rx) = mpsc::channel();
+    let content = AgentsSettingsContent::new_overview(
+        rows,
+        Vec::new(),
+        true,
+        11,
+        AppEventSender::new(tx),
+    );
+    let area = Rect::new(0, 0, 80, 5);
+    let mut buffer = Buffer::empty(area);
+
+    content.render(area, &mut buffer);
+
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("provider/model-11"),
+        "selected model must remain visible:\n{rendered}"
+    );
+}
+
+#[test]
+fn scrolled_overview_mouse_hit_testing_uses_the_visible_model_row() {
+    let mut overview = state(ModelRole::Session, true);
+    overview.rows = (0..12)
+        .map(|index| AgentOverviewRow {
+            name: format!("provider/model-{index}"),
+            session_enabled: true,
+            subagent_enabled: true,
+            review_enabled: true,
+            auto_drive_enabled: true,
+            installed: true,
+            description: None,
+            command: "coder".to_owned(),
+        })
+        .collect();
+    overview.selected = 11;
+    let area = Rect::new(0, 0, 80, 5);
+    let visible_selected_row = MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: 3,
+        row: 4,
+        modifiers: KeyModifiers::NONE,
+    };
+
+    assert_eq!(
+        AgentsSettingsContent::overview_selection_at(
+            &overview,
+            area,
+            visible_selected_row,
+        ),
+        Some(11),
+    );
 }
 
 #[test]

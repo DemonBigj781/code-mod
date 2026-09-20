@@ -56,21 +56,23 @@ pub(super) fn model_roles() -> impl Iterator<Item = (ModelRole, &'static str, u1
     ROLE_COLUMNS.into_iter()
 }
 
-pub(super) fn next_model_role(role: ModelRole) -> ModelRole {
+pub(super) fn next_model_role(role: Option<ModelRole>) -> Option<ModelRole> {
     match role {
-        ModelRole::Session => ModelRole::Subagent,
-        ModelRole::Subagent => ModelRole::Review,
-        ModelRole::Review => ModelRole::AutoDrive,
-        ModelRole::AutoDrive => ModelRole::Session,
+        None => Some(ModelRole::Session),
+        Some(ModelRole::Session) => Some(ModelRole::Subagent),
+        Some(ModelRole::Subagent) => Some(ModelRole::Review),
+        Some(ModelRole::Review) => Some(ModelRole::AutoDrive),
+        Some(ModelRole::AutoDrive) => None,
     }
 }
 
-pub(super) fn previous_model_role(role: ModelRole) -> ModelRole {
+pub(super) fn previous_model_role(role: Option<ModelRole>) -> Option<ModelRole> {
     match role {
-        ModelRole::Session => ModelRole::AutoDrive,
-        ModelRole::Subagent => ModelRole::Session,
-        ModelRole::Review => ModelRole::Subagent,
-        ModelRole::AutoDrive => ModelRole::Review,
+        None => Some(ModelRole::AutoDrive),
+        Some(ModelRole::Session) => None,
+        Some(ModelRole::Subagent) => Some(ModelRole::Session),
+        Some(ModelRole::Review) => Some(ModelRole::Subagent),
+        Some(ModelRole::AutoDrive) => Some(ModelRole::Review),
     }
 }
 
@@ -87,6 +89,13 @@ pub(crate) struct AgentOverviewRow {
 }
 
 impl AgentOverviewRow {
+    pub(super) fn all_roles_enabled(&self) -> bool {
+        self.session_enabled
+            && self.subagent_enabled
+            && self.review_enabled
+            && self.auto_drive_enabled
+    }
+
     pub(super) fn role_enabled(&self, role: ModelRole) -> bool {
         match role {
             ModelRole::Session => self.session_enabled,
@@ -103,7 +112,7 @@ pub(super) struct AgentsOverviewState {
     pub(super) commands: Vec<String>,
     pub(super) agents_enabled: bool,
     pub(super) selected: usize,
-    pub(super) selected_role: ModelRole,
+    pub(super) selected_role: Option<ModelRole>,
 }
 
 impl AgentsOverviewState {
@@ -121,6 +130,38 @@ impl AgentsOverviewState {
         } else if self.selected >= total {
             self.selected = total - 1;
         }
+    }
+
+    pub(super) fn selected_line(&self) -> usize {
+        let rows_len = self.rows.len();
+        if self.selected < rows_len {
+            return self.selected + 2;
+        }
+        if self.selected == rows_len {
+            return rows_len + 3;
+        }
+        if self.selected == rows_len + 1 {
+            return rows_len + 4;
+        }
+        rows_len + 7 + self.selected.saturating_sub(rows_len + 2)
+    }
+
+    pub(super) fn content_line_count(&self) -> usize {
+        self.rows
+            .len()
+            .saturating_add(self.commands.len())
+            .saturating_add(10)
+    }
+
+    pub(super) fn scroll_offset(&self, viewport_height: usize) -> usize {
+        if viewport_height == 0 {
+            return 0;
+        }
+        let max_offset = self.content_line_count().saturating_sub(viewport_height);
+        self.selected_line()
+            .saturating_add(1)
+            .saturating_sub(viewport_height)
+            .min(max_offset)
     }
 }
 
@@ -148,7 +189,7 @@ impl AgentsSettingsContent {
             commands,
             agents_enabled,
             selected,
-            selected_role: ModelRole::Session,
+            selected_role: None,
         };
         overview.clamp_selection();
         Self {
@@ -166,7 +207,7 @@ impl AgentsSettingsContent {
     ) {
         let selected_role = match &self.pane {
             AgentsPane::Overview(state) => state.selected_role,
-            AgentsPane::Subagent(_) | AgentsPane::Agent(_) => ModelRole::Session,
+            AgentsPane::Subagent(_) | AgentsPane::Agent(_) => None,
         };
         let mut overview = AgentsOverviewState {
             rows,
