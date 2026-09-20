@@ -531,6 +531,8 @@ pub(crate) struct Session {
     pub(super) memories_config: crate::config_types::MemoriesConfig,
     pub(super) input_compression_config:
         crate::config_types::OperatorInputCompressionConfig,
+    pub(super) input_compression_cache:
+        Mutex<crate::operator_input_compression::OperatorInputCompressionCache>,
     pub(super) memory_mode: Mutex<crate::rollout::catalog::SessionMemoryMode>,
     pub(super) dynamic_tools: Vec<DynamicToolSpec>,
     pub(super) exec_command_manager: Arc<crate::exec_command::SessionManager>,
@@ -1444,6 +1446,8 @@ impl Session {
     pub fn replace_history(&self, items: Vec<ResponseItem>) {
         let mut state = crate::codex::lock_or_panic!(self.state);
         state.history.replace(items);
+        drop(state);
+        crate::codex::lock_or_panic!(self.input_compression_cache).clear();
     }
 
     pub fn remove_task(&self, sub_id: &str) {

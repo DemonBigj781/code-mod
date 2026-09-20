@@ -38,6 +38,19 @@ fn input_items<'a>(body: &'a serde_json::Value, item_type: &str) -> Vec<&'a serd
         .collect()
 }
 
+fn assistant_output_texts(body: &serde_json::Value) -> Vec<&str> {
+    body["input"]
+        .as_array()
+        .expect("responses request should include input")
+        .iter()
+        .filter(|item| item.get("role").and_then(|value| value.as_str()) == Some("assistant"))
+        .filter_map(|item| item.get("content").and_then(|value| value.as_array()))
+        .flatten()
+        .filter(|item| item.get("type").and_then(|value| value.as_str()) == Some("output_text"))
+        .filter_map(|item| item.get("text").and_then(|value| value.as_str()))
+        .collect()
+}
+
 fn sse_response(body: String) -> ResponseTemplate {
     ResponseTemplate::new(200)
         .insert_header("content-type", "text/event-stream")
@@ -328,6 +341,183 @@ fn count_items_with_type_and_call_id(
         }
         _ => 0,
     }
+}
+
+async fn check_partial_response_retry(include_incomplete_event: bool) {
+    let code_home = TempDir::new().unwrap();
+    let project_dir = TempDir::new().unwrap();
+    let server = MockServer::start().await;
+
+    let partial_delta = json!({
+        "type": "response.output_text.delta",
+        "item_id": "partial-message",
+        "output_index": 0,
+        "content_index": 0,
+        "sequence_number": 1,
+        "delta": "I",
+    });
+    let incomplete = json!({
+        "type": "response.incomplete",
+        "sequence_number": 2,
+        "response": {
+            "id": "incomplete-response",
+            "object": "response",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+        }
+    });
+    let incomplete_body = if include_incomplete_event {
+        format!(
+            "event: response.output_text.delta\ndata: {partial_delta}\n\n\
+event: response.incomplete\ndata: {incomplete}\n\n"
+        )
+    } else {
+        format!(
+            "event: response.output_text.delta\ndata: {partial_delta}\n\n\
+event: response.output_text.delta\ndata: not-json\n\n"
+        )
+    };
+
+    let complete_text = "This is the complete recovered response.";
+    let complete_message = json!({
+        "type": "response.output_item.done",
+        "sequence_number": 1,
+        "output_index": 0,
+        "item": {
+            "type": "message",
+            "id": "complete-message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": complete_text}],
+        }
+    });
+    let completed = json!({
+        "type": "response.completed",
+        "sequence_number": 2,
+        "response": {
+            "id": "complete-response",
+            "usage": {
+                "input_tokens": 0,
+                "input_tokens_details": null,
+                "output_tokens": 0,
+                "output_tokens_details": null,
+                "total_tokens": 0
+            }
+        }
+    });
+    let complete_body = format!(
+        "event: response.output_item.done\ndata: {complete_message}\n\n\
+event: response.completed\ndata: {completed}\n\n"
+    );
+    let follow_up_body =
+        load_sse_fixture_with_id("tests/fixtures/completed_template.json", "follow-up");
+
+    for body in [incomplete_body, complete_body, follow_up_body] {
+        Mock::given(method("POST"))
+            .and(path_regex(".*/responses$"))
+            .respond_with(sse_response(body))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+    }
+
+    let mut config = load_default_config_for_test(&code_home);
+    config.cwd = project_dir.path().to_path_buf();
+    config.input_compression.enabled = false;
+    config.model_provider = ModelProviderInfo {
+        base_url: Some(format!("{}/v1", server.uri())),
+        ..built_in_model_providers(None)["openai"].clone()
+    };
+    config.model = "gpt-5.1-codex".to_owned();
+
+    let conversation = ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"))
+        .new_conversation(config)
+        .await
+        .expect("create conversation")
+        .conversation;
+    conversation
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: "answer fully despite a dropped provider stream".into(),
+            }],
+            final_output_json_schema: None,
+        })
+        .await
+        .unwrap();
+
+    let mut deltas = Vec::new();
+    let mut finalized_messages = Vec::new();
+    let completed_last_message = timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let event = conversation.next_event().await.expect("event stream");
+            match event.msg {
+                EventMsg::AgentMessageDelta(event) => deltas.push(event.delta),
+                EventMsg::AgentMessage(event) => finalized_messages.push(event.message),
+                EventMsg::TaskComplete(event) => break event.last_agent_message,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("incomplete response should retry and complete");
+
+    assert_eq!(deltas, vec!["I"]);
+    assert_eq!(finalized_messages, vec![complete_text]);
+    assert_eq!(completed_last_message.as_deref(), Some(complete_text));
+
+    let requests = server.received_requests().await.unwrap();
+    let response_bodies = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .map(|request| request.body_json::<serde_json::Value>().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(response_bodies.len(), 2, "incomplete stream should cause one retry");
+    let retry_texts = input_texts(&response_bodies[1]);
+    assert!(
+        retry_texts.iter().any(|text| {
+            text.contains("[EPHEMERAL:RETRY_HINT]")
+                && text.contains("Last assistant text fragment:\nI")
+        }),
+        "retry request should include the bounded partial-output hint"
+    );
+
+    conversation
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: "verify retained history after the retry".into(),
+            }],
+            final_output_json_schema: None,
+        })
+        .await
+        .unwrap();
+    wait_for_event(&conversation, |event| matches!(event, EventMsg::TaskComplete(_))).await;
+
+    let requests = server.received_requests().await.unwrap();
+    let response_bodies = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .map(|request| request.body_json::<serde_json::Value>().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(response_bodies.len(), 3);
+    assert_eq!(assistant_output_texts(&response_bodies[2]), vec![complete_text]);
+    assert!(
+        input_texts(&response_bodies[2])
+            .iter()
+            .all(|text| !text.contains("[EPHEMERAL:RETRY_HINT]")),
+        "ephemeral retry context must not enter retained conversation history"
+    );
+
+    conversation.submit(Op::Shutdown).await.unwrap();
+    wait_for_event(&conversation, |event| matches!(event, EventMsg::ShutdownComplete)).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn incomplete_partial_response_retries_without_finalizing_or_persisting_the_fragment() {
+    check_partial_response_retry(true).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_closed_partial_response_retries_without_finalizing_or_persisting_the_fragment() {
+    check_partial_response_retry(false).await;
 }
 
 #[tokio::test(flavor = "current_thread")]

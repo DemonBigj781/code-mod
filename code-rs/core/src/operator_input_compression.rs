@@ -1,13 +1,156 @@
 use crate::config_types::OperatorInputCompressionConfig;
 use code_protocol::models::{ContentItem, ResponseItem};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
+const MAX_CACHE_SUBMISSIONS: usize = 16_384;
+const MAX_CACHE_BYTES: usize = 32 * 1024 * 1024;
+
+enum CachedCompression {
+    Unchanged,
+    Compressed(String),
+}
+
+impl CachedCompression {
+    fn byte_len(&self) -> usize {
+        match self {
+            Self::Unchanged => 0,
+            Self::Compressed(text) => text.len(),
+        }
+    }
+
+    fn apply(&self, text: &mut String) {
+        if let Self::Compressed(compressed) = self {
+            text.clone_from(compressed);
+        }
+    }
+}
+
+#[derive(Default)]
+struct CachedSubmission {
+    standard: Vec<Option<CachedCompression>>,
+    aggressive: Vec<Option<CachedCompression>>,
+    cached_bytes: usize,
+}
+
+#[derive(Default)]
+pub(crate) struct OperatorInputCompressionCache {
+    submissions: HashMap<String, CachedSubmission>,
+    insertion_order: VecDeque<String>,
+    cached_bytes: usize,
+    #[cfg(test)]
+    hits: usize,
+    #[cfg(test)]
+    misses: usize,
+}
+
+impl OperatorInputCompressionCache {
+    fn apply_cached(
+        &mut self,
+        submission_id: &str,
+        content_index: usize,
+        aggressive: bool,
+        text: &mut String,
+    ) -> bool {
+        let found = self.submissions.get(submission_id).is_some_and(|submission| {
+            let entries = if aggressive {
+                &submission.aggressive
+            } else {
+                &submission.standard
+            };
+            let Some(value) = entries.get(content_index).and_then(Option::as_ref) else {
+                return false;
+            };
+            value.apply(text);
+            true
+        });
+        #[cfg(test)]
+        if found {
+            self.hits += 1;
+        } else {
+            self.misses += 1;
+        }
+        found
+    }
+
+    fn insert(
+        &mut self,
+        submission_id: &str,
+        content_index: usize,
+        aggressive: bool,
+        value: CachedCompression,
+    ) {
+        if !self.submissions.contains_key(submission_id) {
+            self.submissions
+                .insert(submission_id.to_owned(), CachedSubmission::default());
+            self.insertion_order.push_back(submission_id.to_owned());
+            self.cached_bytes = self.cached_bytes.saturating_add(submission_id.len());
+        }
+
+        let submission = self
+            .submissions
+            .get_mut(submission_id)
+            .expect("compression cache submission was just inserted");
+        let entries = if aggressive {
+            &mut submission.aggressive
+        } else {
+            &mut submission.standard
+        };
+        if entries.len() <= content_index {
+            entries.resize_with(content_index + 1, || None);
+        }
+        let old_bytes = entries[content_index]
+            .as_ref()
+            .map_or(0, CachedCompression::byte_len);
+        let new_bytes = value.byte_len();
+        entries[content_index] = Some(value);
+        submission.cached_bytes = submission
+            .cached_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(new_bytes);
+        self.cached_bytes = self
+            .cached_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(new_bytes);
+
+        while self.submissions.len() > MAX_CACHE_SUBMISSIONS
+            || self.cached_bytes > MAX_CACHE_BYTES
+        {
+            let Some(oldest_id) = self.insertion_order.pop_front() else {
+                break;
+            };
+            if let Some(oldest) = self.submissions.remove(&oldest_id) {
+                self.cached_bytes = self
+                    .cached_bytes
+                    .saturating_sub(oldest_id.len())
+                    .saturating_sub(oldest.cached_bytes);
+            }
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    #[cfg(test)]
+    fn test_counts(&self) -> (usize, usize) {
+        (self.hits, self.misses)
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn compress_operator_text(
     input: &str,
     config: &OperatorInputCompressionConfig,
 ) -> String {
+    compress_operator_text_if_changed(input, config).unwrap_or_else(|| input.to_owned())
+}
+
+fn compress_operator_text_if_changed(
+    input: &str,
+    config: &OperatorInputCompressionConfig,
+) -> Option<String> {
     if !config.enabled || input.trim().chars().count() < 24 || input.contains("```") {
-        return input.to_owned();
+        return None;
     }
 
     let mut seen = HashSet::new();
@@ -38,11 +181,12 @@ pub(crate) fn compress_operator_text(
         }
     }
 
-    if output.is_empty() {
-        input.to_owned()
+    let compressed = if output.is_empty() {
+        return None;
     } else {
         output.join("\n\n")
-    }
+    };
+    (compressed != input).then_some(compressed)
 }
 
 pub(crate) fn compress_operator_items(
@@ -68,11 +212,50 @@ pub(crate) fn compress_operator_items(
         }
         for content_item in content {
             if let ContentItem::InputText { text } = content_item {
-                let compressed = compress_operator_text(text, config);
-                if !compressed.trim().is_empty() {
+                if let Some(compressed) = compress_operator_text_if_changed(text, config) {
                     *text = compressed;
                 }
             }
+        }
+    }
+
+    items
+}
+
+pub(crate) fn compress_operator_items_cached(
+    mut items: Vec<ResponseItem>,
+    config: &OperatorInputCompressionConfig,
+    cache: &mut OperatorInputCompressionCache,
+) -> Vec<ResponseItem> {
+    if !config.enabled {
+        return items;
+    }
+
+    for item in &mut items {
+        let ResponseItem::Message {
+            id: Some(submission_id),
+            role,
+            content,
+            ..
+        } = item
+        else {
+            continue;
+        };
+        if role != "user" {
+            continue;
+        }
+        for (content_index, content_item) in content.iter_mut().enumerate() {
+            let ContentItem::InputText { text } = content_item else {
+                continue;
+            };
+            if cache.apply_cached(submission_id, content_index, config.aggressive, text) {
+                continue;
+            }
+
+            let value = compress_operator_text_if_changed(text, config)
+                .map_or(CachedCompression::Unchanged, CachedCompression::Compressed);
+            value.apply(text);
+            cache.insert(submission_id, content_index, config.aggressive, value);
         }
     }
 
@@ -290,5 +473,51 @@ mod tests {
         let input = "Please update the documentation.\n\nPlease update the documentation.";
         let once = compress_operator_text(input, &standard());
         assert_eq!(compress_operator_text(&once, &standard()), once);
+    }
+
+    #[test]
+    fn cached_item_compression_reuses_immutable_submission_content() {
+        let original = "Please   update the documentation.\n\nPlease update the documentation.";
+        let item = ResponseItem::Message {
+            id: Some("submission-cache".to_owned()),
+            role: "user".to_owned(),
+            content: vec![ContentItem::InputText {
+                text: original.to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+        let mut cache = OperatorInputCompressionCache::default();
+
+        let first = compress_operator_items_cached(vec![item.clone()], &standard(), &mut cache);
+        assert_eq!(cache.test_counts(), (0, 1));
+        let second = compress_operator_items_cached(vec![item], &standard(), &mut cache);
+        assert_eq!(cache.test_counts(), (1, 1));
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn cached_item_compression_keeps_standard_and_aggressive_modes_separate() {
+        let item = ResponseItem::Message {
+            id: Some("submission-modes".to_owned()),
+            role: "user".to_owned(),
+            content: vec![ContentItem::InputText {
+                text: "I would like you to review the code, and then you should fix the bug."
+                    .to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+        let mut aggressive = standard();
+        aggressive.aggressive = true;
+        let mut cache = OperatorInputCompressionCache::default();
+
+        let standard_items =
+            compress_operator_items_cached(vec![item.clone()], &standard(), &mut cache);
+        let aggressive_items =
+            compress_operator_items_cached(vec![item], &aggressive, &mut cache);
+
+        assert_ne!(standard_items, aggressive_items);
+        assert_eq!(cache.test_counts(), (0, 2));
     }
 }

@@ -438,6 +438,9 @@ impl Runner<'_> {
             tools_config,
             memories_config: config.memories.clone(),
             input_compression_config: config.input_compression.clone(),
+            input_compression_cache: Mutex::new(
+                crate::operator_input_compression::OperatorInputCompressionCache::default(),
+            ),
             memory_mode: Mutex::new(if config.memories.generate_memories {
                 crate::rollout::catalog::SessionMemoryMode::Enabled
             } else {

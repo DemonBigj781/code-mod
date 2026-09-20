@@ -99,6 +99,14 @@ were both included in the archive.
         Explicit `CODEX_COMPACT_TRACE` diagnostics now inspect at most the most
         recent 32 items, emit at most 8 KiB, and report payload sizes without
         copying tool-output bodies.
+  - [x] Stop recomputing deterministic operator-input compression for every
+        historical user message on every normal provider iteration. A
+        per-session cache now reuses results by immutable submission ID,
+        content slot, and standard/aggressive mode; it is capped at 16,384
+        submissions or 32 MiB of compressed text, stores no duplicate text for
+        unchanged/protected inputs, and resets when history is replaced. All
+        eight compression unit tests and all ten operator-input integration
+        tests pass with one test thread.
 - [x] Trace remote `/responses/compact` failure paths and preserve the exact
       error instead of silently treating summary/context clearing as equivalent.
   - Fallback-eligible endpoint and service failures now emit the original
@@ -106,6 +114,11 @@ were both included in the archive.
     failures remain failures instead of being disguised as fallback success.
 - [ ] Separate deterministic operator-input compression, remote compaction, and
       local summary fallback in code, configuration, telemetry, and tests.
+  - Deterministic input compression has its own persisted settings and tests,
+    retains original operator text in the rollout, and now has bounded
+    session-local reuse. Remote compaction and local emergency summary behavior
+    remain separate recovery paths; their remaining telemetry and resume-order
+    acceptance checks are tracked below rather than folded into input rewriting.
 - [x] Reproduce and fix the display-side form of long-session response decay
       that the operator called "late prompt text entropy."
   - Prior-session evidence records the operator first identifying a broken
@@ -118,9 +131,21 @@ were both included in the archive.
     and requests a redraw. The bounded long-transcript rendering probe passes
     all seven active cutoff regressions; its one diagnostic scan remains
     intentionally ignored.
-- [ ] Reproduce or rule out provider-side response truncation independently of
-      the repaired display path. Rendered-history success does not prove that
-      every provider stream reaches `response.completed`.
+- [x] Reproduce provider-side response truncation independently of the repaired
+      display path and verify bounded recovery for the failure classes present
+      in the historical evidence.
+  - Two full conversation regressions now begin with a one-character assistant
+    delta. One ends in typed `response.incomplete`; the other feeds a malformed
+    event and closes before `response.completed`, matching the historical
+    WebSocket deserialization-failure class. Both retry once, carry the fragment
+    only in a bounded `[EPHEMERAL:RETRY_HINT]`, finalize the complete replacement
+    response, and prove on the following turn that neither the fragment nor the
+    retry hint entered retained history. Both tests pass with one test thread.
+  - The affected 2026-08-18 log contains one WebSocket deserialization failure
+    at 14:02, no recorded typed incomplete response or exhausted retry, and then
+    the independently repaired stale height-cache flood beginning at 15:52.
+    Live ChatGPT transport confirmation after process restart remains a runtime
+    acceptance check, not an unverified source-code claim.
 - [ ] Verify resume after fallback does not duplicate, omit, or reorder operator
       input, tool output, or assistant content.
 

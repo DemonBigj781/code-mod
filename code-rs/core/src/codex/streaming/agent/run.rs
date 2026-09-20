@@ -256,14 +256,19 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
         // exactly once above, so ordinary requests must not append them again as
         // request-only extras.
         let turn_input: Vec<ResponseItem> = if is_review_mode {
-            review_history.clone()
+            crate::operator_input_compression::compress_operator_items(
+                review_history.clone(),
+                &sess.input_compression_config,
+            )
         } else {
-            sess.turn_input_with_history(Vec::new())
+            let turn_input = sess.turn_input_with_history(Vec::new());
+            let mut cache = crate::codex::lock_or_panic!(sess.input_compression_cache);
+            crate::operator_input_compression::compress_operator_items_cached(
+                turn_input,
+                &sess.input_compression_config,
+                &mut cache,
+            )
         };
-        let turn_input = crate::operator_input_compression::compress_operator_items(
-            turn_input,
-            &sess.input_compression_config,
-        );
 
         let turn = run_turn(
             &sess,
