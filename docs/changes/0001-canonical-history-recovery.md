@@ -226,17 +226,17 @@ were both included in the archive.
       thread.
   - `CARGO_BUILD_JOBS=1 cargo build -j1 -p code-cli --bin code` passed, as did
     the focused regression suites recorded above; the latest incremental build
-    of checkpoint `884ea57f5` completed in 4 minutes 50 seconds.
+    of checkpoint `0678deda9` completed in 4 minutes 00 seconds.
 - [x] Verify the deployed executable separately from compilation and tests.
   - `/var/home/jack/bin/code` matches the built candidate SHA-256
-    `e4ffc04386a719bf7ff8bed9da303c6cf0c46d95324152076337431028bd51e4`;
+    `8523d0318ff8cf9ba95ad743456e55e107e8a13a3ea6ccc99ff841796d7d0299`;
     `--version`, generated Bash completion syntax, and `doctor` pass.
   - The immediately replaced binary is preserved at
-    `/var/home/jack/backups/code-installed-predeploy-20260920T092743Z/code`
+    `/var/home/jack/backups/code-installed-predeploy-20260920T095939Z/code`
     with SHA-256
-    `e6747916066b345a331e439963b144374b5e1bc5e19582cfc36772585d1d1d25`;
-    the earlier installed binaries remain in the timestamped `090550Z`,
-    `075659Z`, `064835Z`, `052810Z`, and `043514Z` backups.
+    `e4ffc04386a719bf7ff8bed9da303c6cf0c46d95324152076337431028bd51e4`;
+    the earlier installed binaries remain in the timestamped `092743Z`,
+    `090550Z`, `075659Z`, `064835Z`, `052810Z`, and `043514Z` backups.
 - [x] Remove the stale copied worktree and obsolete binary snapshot from the
       project directory after their archive is re-verified.
   - The recovery archive again passed its recorded SHA-256 and `zstd -t` before
