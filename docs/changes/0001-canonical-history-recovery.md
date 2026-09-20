@@ -146,14 +146,20 @@ were both included in the archive.
     `/var/home/jack/backups/code-installed-predeploy-20260920T043514Z/code`
     with SHA-256
     `ca5b936c598c16c5bb94af5b6774060fa5d043fb42124d0c8d524ffd74c21a4d`.
-- [ ] Remove the stale copied worktree and obsolete binary snapshot from the
+- [x] Remove the stale copied worktree and obsolete binary snapshot from the
       project directory after their archive is re-verified.
-- [ ] Rename the surviving branch to `main` and delete every other local
+  - The recovery archive again passed its recorded SHA-256 and `zstd -t` before
+    `code-ci-snapshot-BAK` and `code-update-20260909` were removed.
+- [x] Rename the surviving branch to `main` and delete every other local
       branch only after reachability and content checks pass.
+  - The runtime repair commit is `f02f45d3e0e041a0cada90f0bdc37e6286567368`;
+    every
+    removed pre-repair branch tip remains listed in the backup manifest.
 - [ ] Delete obsolete remote branches and make remote `main` match the verified
       result after GitHub authentication is restored.
-- [ ] Verify one `main` branch, one registered worktree, one Code source
+- [x] Verify one `main` branch, one registered worktree, one Code source
       checkout in active project/temp locations, and a clean worktree.
+  - `scripts/verify-repository-layout.sh --local` passes.
 
 ## Current blockers
 
