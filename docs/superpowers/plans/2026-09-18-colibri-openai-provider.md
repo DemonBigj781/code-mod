@@ -12,6 +12,17 @@
 
 **Design:** `docs/superpowers/specs/2026-09-18-colibri-openai-provider-design.md`
 
+> **Reconciled 2026-09-20:** The implementation was completed in the earlier
+> repair session but this checklist was never updated. A current-branch audit
+> found the planned constants, built-in provider registration, core exports,
+> TUI catalog classification, tests, and operator documentation in place. The
+> full core provider group passes 14/14 and the direct-provider TUI group passes
+> 4/4 with one compiler worker. The one-thread CLI build also covers both
+> affected crates. `zramctl` remains empty, `/var/home/swapfile` remains the
+> active 16 GiB swap tier, and the zram generator configuration remains
+> disabled. This reconciliation does not claim that a live Colibri endpoint was
+> launched or exercised.
+
 **Worktree safety:** The branch already contains extensive protected uncommitted work, including changes in `code-rs/core/src/lib.rs`, `code-rs/tui/src/direct_provider.rs`, and `code-rs/config.md`. Implementation MUST use surgical patches, MUST inspect each final hunk, MUST NOT stage or commit unrelated work, and MUST leave implementation uncommitted if an isolated commit cannot be proven safe.
 
 ---
@@ -32,7 +43,7 @@ No Colibri source, model files, systemd units, `/etc` files, swap devices, or zr
 - Modify: `code-rs/core/src/model_provider_info.rs:861`
 - Test: `code-rs/core/src/model_provider_info.rs:1313`
 
-- [ ] **Step 1: Add a failing provider-contract test**
+- [x] **Step 1: Add a failing provider-contract test**
 
 Add this test beside the existing built-in provider tests:
 
@@ -55,7 +66,7 @@ fn built_in_model_providers_include_colibri() {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -69,7 +80,7 @@ Expected: compilation fails because `COLIBRI_PROVIDER_ID` and
 `COLIBRI_API_BASE_URL` do not exist, or the assertion fails because the provider
 is absent.
 
-- [ ] **Step 3: Define constants and register the provider**
+- [x] **Step 3: Define constants and register the provider**
 
 Add these constants near the existing local-provider constants:
 
@@ -96,7 +107,7 @@ provider entry:
 Do not add custom headers, authentication, retry values, or Colibri-specific
 request handling.
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run:
 
@@ -106,7 +117,7 @@ CARGO_BUILD_JOBS=1 cargo test -p code-core built_in_model_providers_include_coli
 
 Expected: one matching test passes with zero failures.
 
-- [ ] **Step 5: Inspect the surgical diff**
+- [x] **Step 5: Inspect the surgical diff**
 
 Run:
 
@@ -125,7 +136,7 @@ Expected: only the constants, provider entry, and focused test are new.
 - Modify: `code-rs/tui/src/direct_provider.rs:71`
 - Test: `code-rs/tui/src/direct_provider.rs:248`
 
-- [ ] **Step 1: Re-export the core constants**
+- [x] **Step 1: Re-export the core constants**
 
 Add these exports beside the existing model-provider exports:
 
@@ -134,7 +145,7 @@ pub use model_provider_info::COLIBRI_API_BASE_URL;
 pub use model_provider_info::COLIBRI_PROVIDER_ID;
 ```
 
-- [ ] **Step 2: Extend the existing discovery test before implementation**
+- [x] **Step 2: Extend the existing discovery test before implementation**
 
 Add this assertion to `built_in_remote_catalog_providers_are_discoverable`:
 
@@ -147,7 +158,7 @@ assert!(is_model_catalog_provider_definition(
 ));
 ```
 
-- [ ] **Step 3: Run the focused TUI test and verify RED**
+- [x] **Step 3: Run the focused TUI test and verify RED**
 
 Run:
 
@@ -160,7 +171,7 @@ Working directory: `code-rs`
 Expected: the new Colibri assertion fails because the provider is not yet
 classified as a model-catalog source.
 
-- [ ] **Step 4: Add Colibri to catalog-provider classification**
+- [x] **Step 4: Add Colibri to catalog-provider classification**
 
 Change the explicit provider match to include Colibri:
 
@@ -176,7 +187,7 @@ matches!(
 Do not special-case Colibri anywhere else; the existing remote-model manager
 must perform `GET /v1/models` and cache handling.
 
-- [ ] **Step 5: Run the focused TUI test and verify GREEN**
+- [x] **Step 5: Run the focused TUI test and verify GREEN**
 
 Run:
 
@@ -187,7 +198,7 @@ CARGO_BUILD_JOBS=1 cargo test -p code-tui built_in_remote_catalog_providers_are_
 Expected: the discovery test passes with the OpenRouter, Stable Horde,
 Colibri, and OpenAI expectations intact.
 
-- [ ] **Step 6: Inspect protected-file diffs**
+- [x] **Step 6: Inspect protected-file diffs**
 
 Run:
 
@@ -205,7 +216,7 @@ made by this task. Existing unrelated hunks remain untouched.
 
 - Modify: `code-rs/config.md:51`
 
-- [ ] **Step 1: Add a Colibri provider example after the Ollama example**
+- [x] **Step 1: Add a Colibri provider example after the Ollama example**
 
 Add this configuration:
 
@@ -219,7 +230,7 @@ base_url = "http://127.0.0.1:8000/v1"
 wire_api = "chat"
 ```
 
-- [ ] **Step 2: Document the independent server command**
+- [x] **Step 2: Document the independent server command**
 
 Add this command as a single-line example:
 
@@ -235,7 +246,7 @@ State explicitly:
 - zram remains disabled and is not required by the integration.
 - Model files must stay on normal storage rather than a RAM-backed filesystem.
 
-- [ ] **Step 3: Validate the documentation diff**
+- [x] **Step 3: Validate the documentation diff**
 
 Run:
 
@@ -255,7 +266,7 @@ Expected: no whitespace errors and all required operational terms are present.
 - Verify: `code-rs/tui/src/direct_provider.rs`
 - Verify: `code-rs/config.md`
 
-- [ ] **Step 1: Run core provider tests**
+- [x] **Step 1: Run core provider tests**
 
 Run:
 
@@ -267,7 +278,7 @@ Expected: all model-provider tests pass. If an unrelated pre-existing assertion
 fails, record the exact failure and run the Colibri-specific test separately;
 do not change unrelated provider behavior.
 
-- [ ] **Step 2: Run direct-provider TUI tests**
+- [x] **Step 2: Run direct-provider TUI tests**
 
 Run:
 
@@ -277,7 +288,7 @@ CARGO_BUILD_JOBS=1 cargo test -p code-tui direct_provider::tests -- --nocapture
 
 Expected: all direct-provider tests pass.
 
-- [ ] **Step 3: Compile affected crates with one worker**
+- [x] **Step 3: Compile affected crates with one worker**
 
 Run:
 
@@ -287,7 +298,7 @@ CARGO_BUILD_JOBS=1 cargo check -p code-core -p code-tui
 
 Expected: both crates compile successfully with no new errors.
 
-- [ ] **Step 4: Prove no system memory configuration changed**
+- [x] **Step 4: Prove no system memory configuration changed**
 
 Run:
 
@@ -300,7 +311,7 @@ sed -n '1,40p' /etc/systemd/zram-generator.conf
 Expected: no zram device is active, `/var/home/swapfile` remains active, and the
 zram generator override remains disabled.
 
-- [ ] **Step 5: Review the final scoped diff**
+- [x] **Step 5: Review the final scoped diff**
 
 Run:
 
@@ -312,7 +323,7 @@ git status --short
 Expected: no whitespace errors, no generated artifacts, and no files outside
 the four implementation targets changed by this feature.
 
-- [ ] **Step 6: Preserve the operator's existing worktree**
+- [x] **Step 6: Preserve the operator's existing worktree**
 
 Do not create an implementation commit if staging any target path would include
 pre-existing user changes. Report the verified source changes as uncommitted and

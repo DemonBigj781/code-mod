@@ -68,7 +68,7 @@ force.
 | Boundary latency | Input submitted during active work is visible at the earliest safe provider-request boundary | Multi-tool request-capture integration test | Validated |
 | Local compaction | Compaction receives structurally valid, non-duplicated history and preserves useful recent context in emergency fallback | Compact sanitization and emergency-history tests | Validated |
 | Remote compaction | Remote service failures fall back locally while account/rate-limit failures remain explicit and bounded | Remote fallback classification test | Validated for implemented fallback boundary |
-| Long transcript rendering | Complete assistant output remains visible after long histories and compaction | August 23 regressions plus current history-cutoff suite | Final current-branch run pending |
+| Long transcript rendering | Complete assistant output remains visible after long histories and compaction | August 23 regressions plus current history-cutoff suite | Validated by seven active cutoff regressions |
 | Agent configuration | TUI edits persist, runtime dispatch consumes aliases/canonical names, and effective execution identity reaches progress UI | Persistence/reload/dispatch and TUI progress tests | Validated |
 | Agent context loading | Only explicit accessible files are attached; directories are rejected before dispatch | Positive file and negative directory tests | Validated |
 | Image preflight | Embedded image inputs are resized below 30,000 32-by-32 patches before the first provider request | Message, function-output, and image-generation replay tests | Validated |
@@ -358,8 +358,11 @@ artifact trees, backups, debug logs, and diagnostics.
   must remain unchanged with an actionable error.
 - [x] Bound emergency fallback and preserve recent user/assistant context rather
   than replacing history with only a generic warning.
-- [ ] Re-run the complete long-history rendering regression suite from the
+- [x] Re-run the complete long-history rendering regression suite from the
   August 23 plan during the final verification gate.
+  - The later recovery audit ran all seven active history-cutoff regressions on
+    the current branch; the separate diagnostic scan remains intentionally
+    ignored.
 
 ### Phase 3: Repair agent configuration ownership
 

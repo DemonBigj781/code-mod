@@ -107,6 +107,12 @@ were both included in the archive.
         unchanged/protected inputs, and resets when history is replaced. All
         eight compression unit tests and all ten operator-input integration
         tests pass with one test thread.
+  - [x] Add bounded phase timing at turn schedule, stream, completion, and
+        failure boundaries. `codex.turn_latency` records phase duration and
+        inter-phase gap alongside pending queue counts, prompt item/status
+        counts, and token usage; debug mode also writes session-local JSONL.
+        A live long-session capture from the newly installed binary still
+        requires the operator to restart Code and reproduce the slowdown.
 - [x] Trace remote `/responses/compact` failure paths and preserve the exact
       error instead of silently treating summary/context clearing as equivalent.
   - Fallback-eligible endpoint and service failures now emit the original
@@ -117,8 +123,9 @@ were both included in the archive.
   - Deterministic input compression has its own persisted settings and tests,
     retains original operator text in the rollout, and now has bounded
     session-local reuse. Remote compaction and local emergency summary behavior
-    remain separate recovery paths; their remaining telemetry and resume-order
-    acceptance checks are tracked below rather than folded into input rewriting.
+    remain separate recovery paths. Resume-order acceptance is complete; the
+    remaining gap is durable per-path telemetry plus a live repaired-binary
+    exercise, rather than input rewriting.
 - [x] Reproduce and fix the display-side form of long-session response decay
       that the operator called "late prompt text entropy."
   - Prior-session evidence records the operator first identifying a broken
@@ -212,6 +219,23 @@ were both included in the archive.
       TUI.
 - [x] Verify multiline input and navigation bindings, including Shift+Enter.
 
+## Earlier repair coverage retained
+
+- [x] Retain the Colibri built-in OpenAI-compatible provider, `/v1/models`
+      discovery classification, and independent-server documentation without
+      changing the host's swap or zram configuration. The current branch passes
+      all 14 core provider tests and all four direct-provider TUI tests.
+- [x] Keep ghost-commit snapshot tempdirs on the home-backed temporary root
+      when available; `ghost_index_tempdir_uses_home_tmp_when_available` passes.
+- [x] Resize oversized embedded images before the first provider request and in
+      image-generation replay. The utility downscale test, three formatted-input
+      tests, and replay regression all pass.
+- [x] Keep generated agent artifacts session-scoped and delete only marked
+      product-owned sessions outside the retention window. Both ownership and
+      retention regressions pass.
+- [x] Remove failed plugin marketplace staging clones through scoped ownership;
+      `failed_marketplace_sync_removes_staging_clone` passes.
+
 ## Repository recovery and cleanup
 
 - [x] Inventory the exact checkout, branch tips, registered worktrees, stale
@@ -220,8 +244,13 @@ were both included in the archive.
       the deployment snapshot in a checksummed archive.
 - [x] Reopen this falsely completed recovery record and remove Git ancestry as
       the asserted source of historical truth.
-- [ ] Reconcile every required source change onto `main` using the session
+- [x] Reconcile every required source change onto `main` using the session
       ledger and source/test behavior, not commit ancestry as provenance.
+  - The audit cross-checked authoritative prior sessions
+    `code:ccb698d4-e83d-44a7-b903-df4c5e31a713` and
+    `code:b28bed46-eb53-448a-aeed-61fdc367be55` against current source and
+    focused tests. Remaining manual-runtime and remote-authentication gates are
+    tracked separately below; they are not missing source changes.
 - [x] Build and test the currently repaired source with exactly one compiler
       thread.
   - `CARGO_BUILD_JOBS=1 cargo build -j1 -p code-cli --bin code` passed, as did
