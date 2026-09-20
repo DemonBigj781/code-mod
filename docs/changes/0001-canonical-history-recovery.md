@@ -106,12 +106,21 @@ were both included in the archive.
     failures remain failures instead of being disguised as fallback success.
 - [ ] Separate deterministic operator-input compression, remote compaction, and
       local summary fallback in code, configuration, telemetry, and tests.
-- [ ] Reproduce and fix response truncation or one-character output after long
-      conversations.
-  - [x] The bounded long-transcript rendering probe passes all seven active
-        cutoff regressions; its one diagnostic scan remains intentionally
-        ignored. This rules out rendered-history tail loss but does not yet
-        prove provider-stream completion.
+- [x] Reproduce and fix the display-side form of long-session response decay
+      that the operator called "late prompt text entropy."
+  - Prior-session evidence records the operator first identifying a broken
+    display and asking for the answer to be printed again, then reporting that
+    long-session responses appeared to decay below a couple of characters.
+    The same dated diagnostic window repeatedly reports stale reasoning-cell
+    heights with nonzero cached rows and zero recomputed rows.
+  - Height reconciliation now replaces the stale cache entry, invalidates
+    prefix sums and append-only assumptions, schedules virtualization rebuild,
+    and requests a redraw. The bounded long-transcript rendering probe passes
+    all seven active cutoff regressions; its one diagnostic scan remains
+    intentionally ignored.
+- [ ] Reproduce or rule out provider-side response truncation independently of
+      the repaired display path. Rendered-history success does not prove that
+      every provider stream reaches `response.completed`.
 - [ ] Verify resume after fallback does not duplicate, omit, or reorder operator
       input, tool output, or assistant content.
 
