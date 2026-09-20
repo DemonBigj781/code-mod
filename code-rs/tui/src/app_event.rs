@@ -685,6 +685,8 @@ pub(crate) enum AppEvent {
     UpdateSubagentCommand(code_core::config_types::SubagentCommandConfig),
     /// Remove a subagent command from memory (UI already deleted from config.toml)
     DeleteSubagentCommand(String),
+    /// Enable or disable all model-invoked read agents.
+    UpdateSubagentsEnabled { enabled: bool },
     /// Return to the Agents settings list view
     // ShowAgentsSettings removed; overview replaces it
     /// Return to the Agents overview (Agents + Commands)

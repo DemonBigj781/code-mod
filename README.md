@@ -176,35 +176,36 @@ branch, context remaining, rate limits, REPL status, and more. Use
 
 ## Dev notes
 
-Rust sources live in `code-rs/` (~60 crates). `codex-rs/` is a read-only
-mirror of upstream OpenAI Codex, kept around for reference.
+Rust sources live in `code-rs/` (~60 crates). `codex-rs/` is retained only as a
+source reference.
+
+The current Git graph does not establish this project's provenance. Prior-session
+evidence identifies the working source lineage as the operator's development from
+`immateria/codex-mod`, itself a fork in the broader Codex family; later repository
+bootstrap and history-repair attempts recorded misleading ancestry. Use
+`docs/changes/0001-canonical-history-recovery.md` for the evidence boundary and
+current recovery state. Do not infer source history from remotes, fork labels, or
+commit ancestry alone.
 
 ### Build
 
 ```bash
-./build-fast.sh                                       # full validation, required before push
+CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 ./build-fast.sh # full validation, required before push
 
-cd code-rs && cargo check -p code-tui                 # quick incremental check
-cd code-rs && cargo clippy --workspace --all-targets  # all warnings must be clean
-cd code-rs && cargo nextest run --no-fail-fast         # tests
+cd code-rs && CARGO_BUILD_JOBS=1 cargo check -j1 -p code-tui
+cd code-rs && CARGO_BUILD_JOBS=1 cargo clippy -j1 --workspace --all-targets
+cd code-rs && CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo nextest run --test-threads=1 --no-fail-fast
 ```
 
 ### Building without the network proxy
 
 ```bash
-cargo build -p code-cli                              # proxy enabled (default)
-cargo build -p code-cli --no-default-features         # proxy compiled out
-```
-
-## Compare with upstream
-
-```bash
-git diff every-code/main..main
-git log --oneline every-code/main..main
+CARGO_BUILD_JOBS=1 cargo build -j1 -p code-cli
+CARGO_BUILD_JOBS=1 cargo build -j1 -p code-cli --no-default-features
 ```
 
 ## Validate
 
 ```bash
-./build-fast.sh
+CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 ./build-fast.sh
 ```

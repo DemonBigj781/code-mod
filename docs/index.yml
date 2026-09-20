@@ -11,9 +11,9 @@ changes:
   - id: "0001"
     name: canonical-history-recovery
     path: changes/0001-canonical-history-recovery.md
-    description: Rebase every integration onto the intended codex-mod source line.
+    description: Recover Code from prior-session evidence, repair runtime defects, and normalize one main checkout.
     spec: null
-    status: complete
+    status: in-progress
     depends_on: []
   # - id: "NNNN"
   #   name: <change-name>

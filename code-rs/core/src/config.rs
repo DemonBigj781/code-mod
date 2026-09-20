@@ -666,6 +666,9 @@ pub struct Config {
     /// the built-in defaults for that slash command.
     pub subagent_commands: Vec<crate::config_types::SubagentCommandConfig>,
 
+    /// Master switch for model-invoked read agents.
+    pub subagents_enabled: bool,
+
     /// Maximum allowed nesting depth for agent-spawned agent runs.
     /// `1` allows root sessions to spawn agents, and blocks deeper nesting.
     pub subagent_max_depth: i32,
@@ -2644,6 +2647,11 @@ impl Config {
             auto_drive.model_routing_entries = default_auto_drive_model_routing_entries();
         }
 
+        let subagents_enabled = cfg
+            .subagents
+            .as_ref()
+            .and_then(|subagents| subagents.enabled)
+            .unwrap_or(true);
         let subagent_max_depth = cfg
             .subagents
             .as_ref()
@@ -2871,8 +2879,10 @@ impl Config {
             validation: cfg.validation.unwrap_or_default(),
             subagent_commands: cfg
                 .subagents
-                .map(|s| s.commands)
+                .as_ref()
+                .map(|s| s.commands.clone())
                 .unwrap_or_default(),
+            subagents_enabled,
             subagent_max_depth,
             experimental_resume: cfg.experimental_resume,
             max_run_seconds: None,
@@ -4592,6 +4602,37 @@ module_dirs = ["/nested/node_modules"]
         assert!(enabled_names.contains("claude-sonnet-4.5"));
         assert!(enabled_names.contains("gemini-3-pro"));
         assert!(enabled_names.contains("qwen-3-coder"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_subagents_master_switch_defaults_on_and_honors_explicit_off() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            ..Default::default()
+        };
+
+        let mut default_cfg = fixture.cfg.clone();
+        default_cfg.subagents = None;
+        let default_loaded = Config::load_from_base_config_with_overrides(
+            default_cfg,
+            overrides.clone(),
+            fixture.code_home(),
+        )?;
+        assert!(default_loaded.subagents_enabled);
+
+        let mut disabled_cfg = fixture.cfg.clone();
+        disabled_cfg.subagents = Some(crate::config_types::SubagentsToml {
+            enabled: Some(false),
+            ..Default::default()
+        });
+        let disabled_loaded = Config::load_from_base_config_with_overrides(
+            disabled_cfg,
+            overrides,
+            fixture.code_home(),
+        )?;
+        assert!(!disabled_loaded.subagents_enabled);
         Ok(())
     }
 

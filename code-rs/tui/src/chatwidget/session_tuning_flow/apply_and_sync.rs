@@ -45,18 +45,23 @@ impl ChatWidget<'_> {
             return Ok(false);
         }
 
-        let previous_provider_id = self.model_provider_before_direct.as_deref();
-        let (provider_id, provider) = previous_provider_id
-            .and_then(|provider_id| self.configured_non_catalog_provider(provider_id))
-            .or_else(|| self.fallback_non_catalog_provider())
+        let (provider_id, provider, profile) = self
+            .model_provider_before_direct
+            .take()
+            .or_else(|| {
+                self.fallback_non_catalog_provider().map(|(provider_id, provider)| {
+                    (provider_id, provider, self.config.active_profile.clone())
+                })
+            })
             .ok_or_else(|| {
                 "No primary model provider is available for this selection.".to_owned()
             })?;
-        let changed =
-            self.config.model_provider_id != provider_id || self.config.model_provider != provider;
-        self.model_provider_before_direct = None;
+        let changed = self.config.model_provider_id != provider_id
+            || self.config.model_provider != provider
+            || self.config.active_profile != profile;
         self.config.model_provider_id = provider_id;
         self.config.model_provider = provider;
+        self.config.active_profile = profile;
         Ok(changed)
     }
 
@@ -80,14 +85,28 @@ impl ChatWidget<'_> {
                     format!("The selected model provider '{provider_id}' is unavailable.")
                 })?;
 
-            if !self.active_provider_has_own_catalog()
-                && self.config.model_provider_id != provider_id
-            {
-                self.model_provider_before_direct = Some(self.config.model_provider_id.clone());
-            }
-
             let clear_openrouter_profile =
                 self.config.active_profile.as_deref() == Some(OPENROUTER_FREE_PROFILE);
+            if self.model_provider_before_direct.is_none() {
+                self.model_provider_before_direct = if clear_openrouter_profile {
+                    self.model_provider_before_openrouter.clone().or_else(|| {
+                        self.fallback_non_catalog_provider().map(|(provider_id, provider)| {
+                            (provider_id, provider, None)
+                        })
+                    })
+                } else if !self.active_provider_has_own_catalog()
+                    && self.config.model_provider_id != provider_id
+                {
+                    Some((
+                        self.config.model_provider_id.clone(),
+                        self.config.model_provider.clone(),
+                        self.config.active_profile.clone(),
+                    ))
+                } else {
+                    None
+                };
+            }
+
             let changed = self.config.model_provider_id != provider_id
                 || self.config.model_provider != provider
                 || clear_openrouter_profile;

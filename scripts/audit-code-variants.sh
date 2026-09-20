@@ -7,7 +7,6 @@ scan_roots=(
   "$projects_root"
   /var/home/jack/.code-tmp
   /var/home/jack/tmp
-  /var/home/jack/backups
 )
 
 declare -A seen=()
@@ -31,6 +30,8 @@ for scan_root in "${scan_roots[@]}"; do
   done < <(
     find "$scan_root" -maxdepth 4 \
       -type d \( \
+        -name code -o \
+        -name 'code-*' -o \
         -name code-mod -o \
         -name codex-mod -o \
         -name 'code-mod-*' -o \
@@ -51,7 +52,7 @@ for scan_root in "${scan_roots[@]}"; do
 done
 
 if [[ "${#candidates[@]}" -ne 1 || "${candidates[0]:-}" != "$expected_root" ]]; then
-  echo "canonical-history: expected only $expected_root; found Code source variants:" >&2
+  echo "code-layout: expected only $expected_root; found Code source checkouts or copied worktrees:" >&2
   if [[ "${#candidates[@]}" -eq 0 ]]; then
     echo "  (none)" >&2
   else
@@ -60,4 +61,4 @@ if [[ "${#candidates[@]}" -ne 1 || "${candidates[0]:-}" != "$expected_root" ]]; 
   exit 1
 fi
 
-echo "canonical-history: verified sole Code source checkout $expected_root"
+echo "code-layout: verified sole Code source checkout $expected_root"

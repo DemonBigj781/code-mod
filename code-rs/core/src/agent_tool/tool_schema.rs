@@ -6,7 +6,7 @@ use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
 use crate::openai_tools::ResponsesApiTool;
 
-pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
+pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
     properties.insert(
@@ -49,22 +49,6 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         },
     );
     create_properties.insert(
-        "models".to_owned(),
-        JsonSchema::Array {
-            items: Box::new(JsonSchema::String {
-                description: None,
-                allowed_values: if allowed_models.is_empty() {
-                    None
-                } else {
-                    Some(allowed_models.to_vec())
-                },
-            }),
-            description: Some(
-                "Optional array of model names (e.g., ['code-gpt-5.2','claude-sonnet-4.5','code-gpt-5.2-codex','gemini-3-flash'])".to_owned(),
-            ),
-        },
-    );
-    create_properties.insert(
         "files".to_owned(),
         JsonSchema::Array {
             items: Box::new(JsonSchema::String {
@@ -79,22 +63,6 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         JsonSchema::String {
             description: Some("Optional desired output description".to_owned()),
             allowed_values: None,
-        },
-    );
-    create_properties.insert(
-        "write".to_owned(),
-        JsonSchema::Boolean {
-            description: Some(
-                "Enable isolated write worktrees for each agent (default: true). Set false to keep the agent read-only.".to_owned(),
-            ),
-        },
-    );
-    create_properties.insert(
-        "read_only".to_owned(),
-        JsonSchema::Boolean {
-            description: Some(
-                "Deprecated: inverse of `write`. Prefer setting `write` instead.".to_owned(),
-            ),
         },
     );
     properties.insert(
@@ -250,32 +218,22 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunAgentParams {
     pub task: String,
-    #[serde(default, deserialize_with = "deserialize_models_field")]
-    pub models: Vec<String>,
     pub context: Option<String>,
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
-    #[serde(default)]
-    pub write: Option<bool>,
-    #[serde(default)]
-    pub read_only: Option<bool>,
     pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentCreateOptions {
     pub task: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_models_field")]
-    pub models: Vec<String>,
     pub context: Option<String>,
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
-    #[serde(default)]
-    pub write: Option<bool>,
-    #[serde(default)]
-    pub read_only: Option<bool>,
     pub name: Option<String>,
 }
 
@@ -350,21 +308,36 @@ pub struct ListAgentsParams {
     pub recent_only: Option<bool>,
 }
 
-fn deserialize_models_field<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum ModelsInput {
-        Seq(Vec<String>),
-        One(String),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn create_schema_leaves_agent_selection_and_permissions_to_settings() {
+        let schema = serde_json::to_value(create_agent_tool(&["configured-model".to_owned()]))
+            .expect("agent tool should serialize");
+        let create_properties = schema
+            .pointer("/parameters/properties/create/properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("create properties should be an object");
+
+        assert!(!create_properties.contains_key("models"));
+        assert!(!create_properties.contains_key("write"));
+        assert!(!create_properties.contains_key("read_only"));
     }
 
-    let parsed = Option::<ModelsInput>::deserialize(deserializer)?;
-    Ok(match parsed {
-        Some(ModelsInput::Seq(seq)) => seq,
-        Some(ModelsInput::One(single)) => vec![single],
-        None => Vec::new(),
-    })
+    #[test]
+    fn create_options_reject_agent_selection_and_permission_overrides() {
+        for forbidden in [
+            json!({"task": "Inspect the configured project state", "models": ["other"]}),
+            json!({"task": "Inspect the configured project state", "write": true}),
+            json!({"task": "Inspect the configured project state", "read_only": false}),
+        ] {
+            assert!(
+                serde_json::from_value::<AgentCreateOptions>(forbidden).is_err(),
+                "agent creation must reject Settings-owned fields"
+            );
+        }
+    }
 }

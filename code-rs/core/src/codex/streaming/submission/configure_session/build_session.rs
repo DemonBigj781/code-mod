@@ -276,11 +276,15 @@ impl Runner<'_> {
             .as_ref()
             .is_some_and(|mgr| mgr.supports_pro_only_models());
 
-        let mut agent_models = crate::agent_defaults::subagent_model_names_for_auth(
-            &config.agents,
-            auth_mode,
-            supports_pro_only_models,
-        );
+        let mut agent_models = if config.subagents_enabled {
+            crate::agent_defaults::subagent_model_names_for_auth(
+                &config.agents,
+                auth_mode,
+                supports_pro_only_models,
+            )
+        } else {
+            Vec::new()
+        };
         agent_models.sort_by_key(|a| a.to_ascii_lowercase());
         agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
         tools_config.set_agent_models(agent_models);

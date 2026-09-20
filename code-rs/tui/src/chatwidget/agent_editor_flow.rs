@@ -1,6 +1,22 @@
 use super::*;
 
 impl ChatWidget<'_> {
+    pub(crate) fn apply_subagents_enabled(&mut self, enabled: bool) {
+        self.config.subagents_enabled = enabled;
+        if let Ok(home) = code_core::config::find_code_home() {
+            let tx = self.app_event_tx.clone();
+            tokio::spawn(async move {
+                if let Err(error) = code_core::config_edit::set_subagents_enabled(&home, enabled).await {
+                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(
+                        format!("Failed to persist the read-agent master switch: {error}"),
+                    )]));
+                }
+            });
+        }
+        self.submit_op(self.current_configure_session_op());
+        self.show_agents_overview_ui();
+    }
+
     pub(crate) fn show_subagent_editor_for_name(&mut self, name: String) {
         // Build available agents from enabled ones (or sensible defaults)
         let available_agents: Vec<String> = if self.config.agents.is_empty() {

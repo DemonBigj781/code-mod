@@ -31,7 +31,17 @@ const MAX_REMOTE_COMPACT_USAGE_LIMIT_RETRIES: usize = 2;
 
 fn should_fallback_to_local_compaction(err: &CodexErr) -> bool {
     match err {
-        CodexErr::UnexpectedStatus(response) => response.status != StatusCode::TOO_MANY_REQUESTS,
+        CodexErr::UnexpectedStatus(response) => {
+            response.status.is_server_error()
+                || matches!(
+                    response.status,
+                    StatusCode::BAD_REQUEST
+                        | StatusCode::NOT_FOUND
+                        | StatusCode::METHOD_NOT_ALLOWED
+                        | StatusCode::UNPROCESSABLE_ENTITY
+                        | StatusCode::NOT_IMPLEMENTED
+                )
+        }
         CodexErr::Stream(..)
         | CodexErr::ServerError(_)
         | CodexErr::ServerOverloaded
@@ -43,6 +53,29 @@ fn should_fallback_to_local_compaction(err: &CodexErr) -> bool {
     }
 }
 
+fn remote_compaction_fallback_message(err: &CodexErr) -> String {
+    format!(
+        "Remote compaction failed; using local summary fallback. Original error: {err}"
+    )
+}
+
+async fn report_remote_compaction_fallback(sess: &Session, sub_id: &str, err: &CodexErr) {
+    let message = remote_compaction_fallback_message(err);
+    tracing::warn!(
+        error = %err,
+        compaction_path = "remote",
+        fallback_path = "local_summary",
+        "remote compaction failed; using local summary fallback"
+    );
+    let event = sess.make_event(
+        sub_id,
+        EventMsg::Error(ErrorEvent {
+            message,
+        }),
+    );
+    sess.send_event(event).await;
+}
+
 pub(super) async fn run_inline_remote_auto_compact_task(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -52,10 +85,7 @@ pub(super) async fn run_inline_remote_auto_compact_task(
     match run_remote_compact_task_inner(&sess, &turn_context, &sub_id, extra_input).await {
         Ok(history) => history,
         Err(err) if should_fallback_to_local_compaction(&err) => {
-            tracing::warn!(
-                error = %err,
-                "remote compact endpoint is unavailable; falling back to local compaction"
-            );
+            report_remote_compaction_fallback(&sess, &sub_id, &err).await;
             run_inline_auto_compact_task(sess, turn_context).await
         }
         Err(err) => {
@@ -87,10 +117,7 @@ pub(super) async fn run_remote_compact_task(
             Ok(())
         }
         Err(err) if should_fallback_to_local_compaction(&err) => {
-            tracing::warn!(
-                error = %err,
-                "remote compact endpoint is unavailable; falling back to local compaction"
-            );
+            report_remote_compaction_fallback(&sess, &sub_id, &err).await;
             perform_compaction(sess, turn_context, sub_id, fallback_input, true).await
         }
         Err(err) => {
@@ -266,6 +293,7 @@ async fn run_remote_compact_task_inner(
 
 #[cfg(test)]
 mod tests {
+    use super::remote_compaction_fallback_message;
     use super::should_fallback_to_local_compaction;
     use crate::error::CodexErr;
     use crate::error::UnexpectedResponseError;
@@ -289,6 +317,16 @@ mod tests {
             body: "rate limited".to_string(),
             request_id: None,
         });
+        let unauthorized = CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::UNAUTHORIZED,
+            body: "expired token".to_string(),
+            request_id: None,
+        });
+        let forbidden = CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::FORBIDDEN,
+            body: "account cannot compact".to_string(),
+            request_id: None,
+        });
         let stream_error = CodexErr::Stream("connection reset".to_owned(), None, None);
         let usage_limit = CodexErr::UsageLimitReached(UsageLimitReachedError {
             plan_type: None,
@@ -300,8 +338,24 @@ mod tests {
         assert!(should_fallback_to_local_compaction(&server_error));
         assert!(should_fallback_to_local_compaction(&stream_error));
         assert!(!should_fallback_to_local_compaction(&rate_limited));
+        assert!(!should_fallback_to_local_compaction(&unauthorized));
+        assert!(!should_fallback_to_local_compaction(&forbidden));
         assert!(!should_fallback_to_local_compaction(&usage_limit));
         assert!(!should_fallback_to_local_compaction(&expired_auth));
         assert!(!should_fallback_to_local_compaction(&CodexErr::Interrupted));
+    }
+
+    #[test]
+    fn local_fallback_message_preserves_the_exact_remote_error() {
+        let error = CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::BAD_REQUEST,
+            body: r#"{"error":"Input required: prompt or messages"}"#.to_string(),
+            request_id: Some("compact-request-7".to_string()),
+        });
+
+        assert_eq!(
+            remote_compaction_fallback_message(&error),
+            "Remote compaction failed; using local summary fallback. Original error: unexpected status 400 Bad Request: {\"error\":\"Input required: prompt or messages\"}, request id: compact-request-7",
+        );
     }
 }

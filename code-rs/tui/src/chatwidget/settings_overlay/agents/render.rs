@@ -115,7 +115,29 @@ impl AgentsSettingsContent {
 
         lines.push(Line::from(""));
 
-        let add_agent_idx = state.rows.len();
+        let master_idx = state.rows.len();
+        let master_selected = master_idx == state.selected;
+        let master_marker = if state.agents_enabled {
+            crate::icons::checkbox_on()
+        } else {
+            crate::icons::checkbox_off()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                crate::icons::selection_prefix(master_selected),
+                if master_selected { s_primary } else { Style::default() },
+            ),
+            Span::styled(
+                format!("{master_marker} Read agents"),
+                if master_selected { s_primary_bold } else { Style::default() },
+            ),
+            Span::styled(
+                "  Master switch for model-invoked agents",
+                s_text_dim,
+            ),
+        ]));
+
+        let add_agent_idx = state.rows.len() + 1;
         let add_agent_selected = add_agent_idx == state.selected;
         let mut add_spans: Vec<Span<'static>> = Vec::new();
         add_spans.push(Span::styled(
@@ -150,7 +172,7 @@ impl AgentsSettingsContent {
         )));
 
         for (offset, cmd) in state.commands.iter().enumerate() {
-            let idx = state.rows.len() + 1 + offset;
+            let idx = state.rows.len() + 2 + offset;
             let selected = idx == state.selected;
             let mut spans = Vec::new();
             spans.push(Span::styled(
@@ -179,7 +201,7 @@ impl AgentsSettingsContent {
             lines.push(Line::from(spans));
         }
 
-        let add_idx = state.rows.len() + 1 + state.commands.len();
+        let add_idx = state.rows.len() + 2 + state.commands.len();
         let add_selected = add_idx == state.selected;
         let mut add_spans = Vec::new();
         add_spans.push(Span::styled(

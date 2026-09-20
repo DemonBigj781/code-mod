@@ -61,6 +61,10 @@ impl AgentsSettingsContent {
                         description: row.description.clone(),
                         command: row.command.clone(),
                     });
+                } else if state.selected == state.rows.len() {
+                    app_event_tx.send(AppEvent::UpdateSubagentsEnabled {
+                        enabled: !state.agents_enabled,
+                    });
                 }
                 true
             }
@@ -79,8 +83,13 @@ impl AgentsSettingsContent {
             }
             KeyCode::Enter => {
                 let idx = state.selected;
-                let add_agent_idx = state.rows.len();
-                if idx == add_agent_idx {
+                let master_idx = state.rows.len();
+                let add_agent_idx = master_idx + 1;
+                if idx == master_idx {
+                    app_event_tx.send(AppEvent::UpdateSubagentsEnabled {
+                        enabled: !state.agents_enabled,
+                    });
+                } else if idx == add_agent_idx {
                     app_event_tx.send(AppEvent::ShowAgentEditorNew);
                 } else if idx < add_agent_idx {
                     let row = &state.rows[idx];
@@ -88,7 +97,7 @@ impl AgentsSettingsContent {
                         name: row.name.clone(),
                     });
                 } else {
-                    let cmd_idx = idx.saturating_sub(state.rows.len() + 1);
+                    let cmd_idx = idx.saturating_sub(state.rows.len() + 2);
                     if cmd_idx < state.commands.len() {
                         if let Some(name) = state.commands.get(cmd_idx) {
                             app_event_tx.send(AppEvent::ShowSubagentEditorForName {

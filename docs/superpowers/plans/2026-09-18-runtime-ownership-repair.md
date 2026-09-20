@@ -1,9 +1,13 @@
 # Runtime Ownership Repair Dossier
 
-> **Status:** Canonical ownership, compaction hardening, agent configuration,
-> image preflight, and artifact lifecycle repairs are implemented with focused
-> regression coverage. The one-threaded root build passed and the verified
-> binary is deployed. The active process still requires restart.
+> **Status:** Historical failed-repair record. Its completion, build, and
+> deployment claims are not current acceptance evidence and were disproved by
+> the subsequent operator-input, agent-settings, compaction, provider-state,
+> and repository findings. Active work and verified results are tracked only in
+> `docs/changes/0001-canonical-history-recovery.md`.
+>
+> Preserve the body below as an audit artifact; do not resume or mark work from
+> this dossier independently of the recovery ledger.
 >
 > **Execution mode:** Inline only. Do not delegate to read agents or
 > sub-agents during this repair. Directory arguments can preload an entire

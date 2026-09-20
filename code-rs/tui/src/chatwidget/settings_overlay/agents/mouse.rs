@@ -29,19 +29,24 @@ impl AgentsSettingsContent {
             return Some(rel_y - 2);
         }
 
-        let add_agent_line = rows_len + 3;
-        if rel_y == add_agent_line {
+        let master_line = rows_len + 3;
+        if rel_y == master_line {
             return Some(rows_len);
         }
 
-        let command_start = rows_len + 6;
+        let add_agent_line = rows_len + 4;
+        if rel_y == add_agent_line {
+            return Some(rows_len + 1);
+        }
+
+        let command_start = rows_len + 7;
         if rel_y >= command_start && rel_y < command_start + command_len {
-            return Some(rows_len + 1 + (rel_y - command_start));
+            return Some(rows_len + 2 + (rel_y - command_start));
         }
 
         let add_command_line = command_start + command_len;
         if rel_y == add_command_line {
-            return Some(rows_len + 1 + command_len);
+            return Some(rows_len + 2 + command_len);
         }
 
         None

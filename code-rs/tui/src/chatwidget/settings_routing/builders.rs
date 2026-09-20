@@ -613,7 +613,13 @@ impl ChatWidget<'_> {
             self.agents_overview_selected_index.min(total.saturating_sub(1))
         };
         self.agents_overview_selected_index = selected;
-        AgentsSettingsContent::new_overview(rows, commands, selected, self.app_event_tx.clone())
+        AgentsSettingsContent::new_overview(
+            rows,
+            commands,
+            self.config.subagents_enabled,
+            selected,
+            self.app_event_tx.clone(),
+        )
     }
 
     pub(super) fn build_limits_settings_content(&mut self) -> LimitsSettingsContent {

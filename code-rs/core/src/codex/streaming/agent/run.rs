@@ -31,6 +31,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
     let mut review_history: Vec<ResponseItem> = Vec::new();
     let mut review_messages: Vec<String> = Vec::new();
     let mut review_exit_emitted = false;
+    let mut notification_input_messages: Vec<String> = Vec::new();
 
     let pending_only_turn = input.len() == 1
         && matches!(
@@ -72,7 +73,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
             permission_mode: crate::codex::hook_runtime::hook_permission_mode(
                 turn_context.approval_policy,
             ),
-            prompt,
+            prompt: prompt.clone(),
         };
 
         let hook_outcome =
@@ -94,6 +95,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
             crate::codex::hook_runtime::emit_hook_blocked_warning(&sess, &sub_id).await;
             blocked_by_user_prompt_hook = true;
         } else {
+            notification_input_messages.push(prompt);
             if is_review_mode {
                 review_history.push(response_item.clone());
             } else {
@@ -159,7 +161,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                         permission_mode: crate::codex::hook_runtime::hook_permission_mode(
                             turn_context.approval_policy,
                         ),
-                        prompt,
+                        prompt: prompt.clone(),
                     };
                     let hook_outcome = crate::codex::hook_runtime::run_user_prompt_submit_hooks(
                         &sess,
@@ -177,6 +179,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                             .await;
                         continue;
                     }
+                    notification_input_messages.push(prompt);
                     queued_items.push(response_item);
                 }
                 pending_input.extend(queued_items);
@@ -262,23 +265,6 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
             &sess.input_compression_config,
         );
 
-        let turn_input_messages: Vec<String> = turn_input
-            .iter()
-            .filter_map(|item| match item {
-                ResponseItem::Message { id, role, content, .. } if role == "user" => {
-                    code_protocol::items::parse_hook_prompt_message(id.as_deref(), content.as_slice())
-                        .is_none()
-                        .then_some(content)
-                }
-                _ => None,
-            })
-            .flat_map(|content| {
-                content.iter().filter_map(|item| match item {
-                    ContentItem::InputText { text } => Some(text.clone()),
-                    _ => None,
-                })
-            })
-            .collect();
         let turn = run_turn(
             &sess,
             &turn_context,
@@ -552,7 +538,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
 
                     sess.maybe_notify(UserNotification::AgentTurnComplete {
                         turn_id: sub_id.clone(),
-                        input_messages: turn_input_messages,
+                        input_messages: std::mem::take(&mut notification_input_messages),
                         last_assistant_message: last_task_message.clone(),
                     });
                     break;

@@ -131,20 +131,6 @@ fn extract_agent_result(
     }
 }
 
-fn resolve_agent_read_only(
-    write: Option<bool>,
-    read_only: Option<bool>,
-    config: Option<&crate::config_types::AgentConfig>,
-) -> bool {
-    if let Some(flag) = write {
-        return !flag;
-    }
-    if let Some(flag) = read_only {
-        return flag;
-    }
-    config.is_some_and(|c| c.read_only)
-}
-
 fn configured_agent_for_requested_model<'a>(
     agents: &'a [crate::config_types::AgentConfig],
     requested_model: &str,
@@ -210,39 +196,6 @@ mod resolve_read_only_tests {
             args_write: None,
             instructions: None,
         }
-    }
-
-    #[test]
-    fn explicit_write_overrides_config_read_only() {
-        let cfg = make_config(true);
-        assert!(
-            !resolve_agent_read_only(Some(true), None, Some(&cfg)),
-            "write=true should allow writes even when config prefers read-only"
-        );
-    }
-
-    #[test]
-    fn explicit_read_only_flag_takes_precedence() {
-        let cfg = make_config(false);
-        assert!(
-            resolve_agent_read_only(None, Some(true), Some(&cfg)),
-            "read_only=true should force read-only even when config allows writes"
-        );
-        assert!(
-            resolve_agent_read_only(Some(false), None, Some(&cfg)),
-            "write=false should force read-only"
-        );
-    }
-
-    #[test]
-    fn falls_back_to_config_when_request_absent() {
-        let cfg = make_config(true);
-        assert!(resolve_agent_read_only(None, None, Some(&cfg)));
-    }
-
-    #[test]
-    fn defaults_to_false_without_config() {
-        assert!(!resolve_agent_read_only(None, None, None));
     }
 
     #[test]
@@ -385,12 +338,9 @@ pub(crate) async fn handle_agent_tool(
                 }
             };
 
-            let models = std::mem::take(&mut create_opts.models);
             let context = create_opts.context.take();
             let output = create_opts.output.take();
             let files = create_opts.files.take();
-            let write = create_opts.write.take();
-            let read_only = create_opts.read_only.take();
             let mut normalized_name = normalize_agent_name(create_opts.name.take());
             if normalized_name.is_none() {
                 normalized_name = derive_agent_name_from_task(&task);
@@ -398,29 +348,14 @@ pub(crate) async fn handle_agent_tool(
 
             let run_params = RunAgentParams {
                 task: task.clone(),
-                models: models.clone(),
                 context: context.clone(),
                 output: output.clone(),
                 files: files.clone(),
-                write,
-                read_only,
                 name: normalized_name.clone(),
             };
 
             let mut create_event = serde_json::Map::new();
             create_event.insert("task".to_owned(), serde_json::Value::String(task));
-            if !models.is_empty() {
-                create_event.insert(
-                    "models".to_owned(),
-                    serde_json::Value::Array(
-                        models
-                            .iter()
-                            .cloned()
-                            .map(serde_json::Value::String)
-                            .collect(),
-                    ),
-                );
-            }
             if let Some(ref ctx_str) = context
                 && !ctx_str.is_empty() {
                     create_event.insert("context".to_owned(), serde_json::Value::String(ctx_str.clone()));
@@ -442,12 +377,6 @@ pub(crate) async fn handle_agent_tool(
                         ),
                     );
                 }
-            if let Some(flag) = write {
-                create_event.insert("write".to_owned(), serde_json::Value::Bool(flag));
-            }
-            if let Some(flag) = read_only {
-                create_event.insert("read_only".to_owned(), serde_json::Value::Bool(flag));
-            }
             if let Some(ref name_str) = normalized_name
                 && !name_str.is_empty() {
                     create_event.insert("name".to_owned(), serde_json::Value::String(name_str.clone()));
@@ -818,7 +747,6 @@ pub(crate) async fn handle_run_agent(
                 };
             }
 
-            let mut manager = AGENT_MANAGER.write().await;
             let mut agent_name = params.name.clone();
             if agent_name.is_none()
                 && let Some(fallback) = derive_agent_name_from_task(trimmed_task.as_str()) {
@@ -826,41 +754,35 @@ pub(crate) async fn handle_run_agent(
                     params.name = Some(fallback);
                 }
 
-            // Collect requested models from the `models` field.
-            let explicit_models = params.models.iter().any(|model| !model.trim().is_empty());
-
-            // Split comma-delimited strings, trim whitespace, and deduplicate case-insensitively.
-            let mut seen_models = HashSet::new();
-            let mut models: Vec<String> = Vec::new();
-            for entry in &params.models {
-                for candidate in entry.split(',') {
-                    let trimmed = candidate.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let dedupe_key = trimmed.to_lowercase();
-                    if seen_models.insert(dedupe_key) {
-                        models.push(trimmed.to_owned());
-                    }
-                }
-            }
-
-            if models.is_empty() {
-                if sess.tools_config.agent_model_allowed_values.is_empty() {
-                    models.push("code".to_owned());
-                } else {
-                    models.extend(
-                        sess
-                            .tools_config
-                            .agent_model_allowed_values
-                            .iter()
-                            .cloned(),
-                    );
-                }
-            }
+            // Agent selection is owned exclusively by Settings > Agents. The model
+            // cannot select a different set, change the count, or revive disabled agents.
+            let mut models = sess.tools_config.agent_model_allowed_values.clone();
+            models.retain(|model| !model.trim().is_empty());
 
             models.sort_by_key(|a| a.to_ascii_lowercase());
             models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+
+            if models.is_empty() {
+                let response = serde_json::json!({
+                    "status": "disabled",
+                    "reason": "no_enabled_agents",
+                    "message": "Agent execution is disabled because no subagent models are enabled in Settings > Agents.",
+                });
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        body: FunctionCallOutputBody::Text(response.to_string()),
+                        success: Some(false),
+                    },
+                };
+            }
+
+            let default_agents = sess
+                .agents
+                .is_empty()
+                .then(crate::agent_defaults::default_agent_configs);
+            let configured_agents = default_agents.as_deref().unwrap_or(&sess.agents);
+            let mut manager = AGENT_MANAGER.write().await;
 
             let multi_model = models.len() > 1;
             let display_label_for = |model: &str| -> String {
@@ -883,7 +805,7 @@ pub(crate) async fn handle_run_agent(
             let mut skipped: Vec<String> = Vec::new();
             for model in models {
                 // Check if this model is configured and enabled
-                let agent_config = configured_agent_for_requested_model(&sess.agents, &model);
+                let agent_config = configured_agent_for_requested_model(configured_agents, &model);
 
                 if let Some(config) = agent_config {
                     if !config.enabled {
@@ -897,13 +819,6 @@ pub(crate) async fn handle_run_agent(
                         continue;
                     }
 
-                    // Respect explicit read_only flag from the caller; otherwise fall back to the config default.
-                    let read_only = resolve_agent_read_only(
-                        params.write,
-                        params.read_only,
-                        Some(config),
-                    );
-
                     let agent_id = manager
                         .create_agent_with_config(
                             crate::agent_tool::AgentCreateRequest {
@@ -913,7 +828,7 @@ pub(crate) async fn handle_run_agent(
                                 context: params.context.clone(),
                                 output_goal: params.output.clone(),
                                 files: params.files.clone().unwrap_or_default(),
-                                read_only,
+                                read_only: config.read_only,
                                 batch_id: Some(batch_id.clone()),
                                 config: None,
                                 worktree_branch: None,
@@ -928,106 +843,35 @@ pub(crate) async fn handle_run_agent(
                     agent_labels.push((agent_id.clone(), label));
                     agent_ids.push(agent_id);
                 } else {
-                    // Use default configuration for unknown agents
-                    let (cmd_to_check, is_builtin) = resolve_agent_command_for_check(&model, None);
-                    if !is_builtin && !crate::agent_tool::external_agent_command_exists(&cmd_to_check) {
-                        skipped.push(format!("{model} (missing: {cmd_to_check})"));
-                        continue;
-                    }
-                    let read_only = resolve_agent_read_only(params.write, params.read_only, None);
-                    let agent_id = manager
-                        .create_agent(crate::agent_tool::AgentCreateRequest {
-                            model: model.clone(),
-                            name: agent_name.clone(),
-                            prompt: params.task.clone(),
-                            context: params.context.clone(),
-                            output_goal: params.output.clone(),
-                            files: params.files.clone().unwrap_or_default(),
-                            read_only,
-                            batch_id: Some(batch_id.clone()),
-                            config: None,
-                            worktree_branch: None,
-                            worktree_base: None,
-                            source_kind: None,
-                            reasoning_effort: sess.model_reasoning_effort.into(),
-                        })
-                        .await;
-                    let label = display_label_for(&model);
-                    agent_labels.push((agent_id.clone(), label));
-                    agent_ids.push(agent_id);
+                    skipped.push(format!("{model} (not configured)"));
                 }
             }
 
-            // If nothing runnable remains, only fall back to a built‑in Codex agent when
-            // the caller did not explicitly request models.
+            // Never substitute an unconfigured built-in agent. Missing commands and stale
+            // configuration must remain visible to the operator.
             if agent_ids.is_empty() {
-                if explicit_models {
-                    let mut response_map = serde_json::Map::new();
-                    response_map.insert(
-                        "batch_id".to_owned(),
-                        serde_json::Value::String(batch_id.clone()),
-                    );
-                    response_map.insert(
-                        "status".to_owned(),
-                        serde_json::Value::String("failed".to_owned()),
-                    );
-                    let message = if skipped.is_empty() {
-                        "No runnable agents matched the requested models.".to_owned()
-                    } else {
-                        format!(
-                            "No runnable agents matched the requested models. Skipped: {}",
-                            skipped.join(", ")
-                        )
-                    };
-                    response_map.insert(
-                        "message".to_owned(),
-                        serde_json::Value::String(message),
-                    );
-                    response_map.insert(
-                        "skipped".to_owned(),
-                        if skipped.is_empty() {
-                            serde_json::Value::Null
-                        } else {
-                            serde_json::Value::Array(
-                                skipped
-                                    .iter()
-                                    .cloned()
-                                    .map(serde_json::Value::String)
-                                    .collect(),
-                            )
-                        },
-                    );
-                    let response = serde_json::Value::Object(response_map);
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {
-                            body: FunctionCallOutputBody::Text(response.to_string()),
-                            success: Some(false),
-                        },
-                    };
-                }
-
-                let read_only = resolve_agent_read_only(params.write, params.read_only, None);
-                let agent_id = manager
-                    .create_agent(crate::agent_tool::AgentCreateRequest {
-                        model: "code".to_owned(),
-                        name: agent_name.clone(),
-                        prompt: params.task.clone(),
-                        context: params.context.clone(),
-                        output_goal: params.output.clone(),
-                        files: params.files.clone().unwrap_or_default(),
-                        read_only,
-                        batch_id: Some(batch_id.clone()),
-                        config: None,
-                        worktree_branch: None,
-                        worktree_base: None,
-                        source_kind: None,
-                        reasoning_effort: sess.model_reasoning_effort.into(),
-                    })
-                    .await;
-                let label = display_label_for("code");
-                agent_labels.push((agent_id.clone(), label));
-                agent_ids.push(agent_id);
+                let message = if skipped.is_empty() {
+                    "No enabled agent configured in Settings > Agents could be started.".to_owned()
+                } else {
+                    format!(
+                        "No enabled agent configured in Settings > Agents could be started. Skipped: {}",
+                        skipped.join(", ")
+                    )
+                };
+                let response = serde_json::json!({
+                    "batch_id": batch_id,
+                    "status": "failed",
+                    "reason": "no_runnable_configured_agents",
+                    "message": message,
+                    "skipped": skipped,
+                });
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        body: FunctionCallOutputBody::Text(response.to_string()),
+                        success: Some(false),
+                    },
+                };
             }
 
             // Send agent status update event

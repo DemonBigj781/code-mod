@@ -207,6 +207,11 @@
                         widget.delete_subagent_by_name(&name);
                     }
                 }
+                AppEvent::UpdateSubagentsEnabled { enabled } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_subagents_enabled(enabled);
+                    }
+                }
                 // ShowAgentsSettings removed
                 AppEvent::ShowAgentsOverview => {
                     if let AppState::Chat { widget } = &mut self.app_state {

@@ -1249,6 +1249,34 @@ pub async fn upsert_subagent_command(code_home: &Path, cmd: &SubagentCommandConf
     Ok(())
 }
 
+/// Persist the master switch for model-invoked read agents while preserving
+/// command definitions and other `[subagents]` settings.
+pub async fn set_subagents_enabled(code_home: &Path, enabled: bool) -> Result<()> {
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match tokio::fs::read_to_string(&read_path).await {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            tokio::fs::create_dir_all(code_home).await?;
+            DocumentMut::new()
+        }
+        Err(error) => return Err(error.into()),
+    };
+
+    if !doc.as_table().contains_key("subagents") {
+        doc["subagents"] = toml_edit::table();
+        if let Some(table) = doc["subagents"].as_table_mut() {
+            table.set_implicit(false);
+        }
+    }
+    doc["subagents"]["enabled"] = toml_edit::value(enabled);
+
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
+    tmp_file.persist(config_path)?;
+    Ok(())
+}
+
 /// Delete a `[[subagents.commands]]` entry by name. Returns true if removed.
 pub async fn delete_subagent_command(code_home: &Path, name: &str) -> Result<bool> {
     const CONFIG_TOML_FILE: &str = "config.toml";
@@ -1651,6 +1679,44 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn set_subagents_enabled_preserves_existing_subagent_settings() {
+        let tmpdir = tempdir().expect("tmp");
+        let code_home = tmpdir.path();
+        tokio::fs::write(
+            code_home.join(CONFIG_TOML_FILE),
+            "[subagents]\nmax-depth = 2\n\n[[subagents.commands]]\nname = \"plan\"\n",
+        )
+        .await
+        .expect("seed subagent settings");
+
+        set_subagents_enabled(code_home, false)
+            .await
+            .expect("persist master switch");
+
+        let contents = read_config(code_home).await;
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let subagents = parsed
+            .get("subagents")
+            .and_then(toml::Value::as_table)
+            .expect("subagents table");
+        assert_eq!(
+            subagents.get("enabled").and_then(toml::Value::as_bool),
+            Some(false),
+        );
+        assert_eq!(
+            subagents.get("max-depth").and_then(toml::Value::as_integer),
+            Some(2),
+        );
+        assert_eq!(
+            subagents
+                .get("commands")
+                .and_then(toml::Value::as_array)
+                .map(Vec::len),
+            Some(1),
+        );
+    }
 
     #[tokio::test]
     async fn upsert_agent_config_persists_all_model_roles() {

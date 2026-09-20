@@ -1,74 +1,169 @@
-# Canonical History Recovery
+# Code Recovery and Repository Normalization
 
-**Status:** complete
+**Status:** in-progress
 
-## Decision
+## Objective
 
-The only authoritative source base is
-[`immateria/codex-mod`](https://github.com/immateria/codex-mod). The writable
-integration repository is `DemonBigj781/code-mod`. The local canonical checkout
-must be `/var/home/jack/projects/AI_Project/code`, on `main`, with no linked Git
-worktrees.
+Recover the product from the failed September repair, correct the runtime defects
+identified across prior sessions, and leave one checkout at
+`/var/home/jack/projects/AI_Project/code` with one branch named `main` and no
+linked or copied worktrees in the project area.
 
-`just-every/code` and the former `DemonBigj781/code` history are evidence sources
-only. Neither may be merged into canonical history. Individual integrations must
-be reapplied or cherry-picked onto the recorded canonical base and then verified
-there.
+This document is the single recovery ledger. Do not create parallel recovery
+plans for the same work.
 
-## Reconstructed History
+## Evidence authority and boundary
 
-1. Development was intended to continue from `immateria/codex-mod`.
-2. Commit `f5dff6a9f2a8e05509aef5669223247137713511` from the wrong fork became the
-   parent of separate OpenRouter, CPU/history, remote-compaction, and startup-fix
-   branches.
-3. Those branches were treated as variants, so no single branch contained every
-   integration. A later merge also brought `just-every/code` history into a local
-   candidate instead of reconciling features onto the intended base.
-4. The feature-complete `code-elf` artifact retained evidence of the intended
-   OpenRouter picker and model variants, but it was not a reproducible source
-   lineage.
-5. On 2026-08-13, local `main` was reset to canonical base commit
-   `f471024e1985d32e98231b66469635d36f41ccf7`. OpenRouter routing and remote
-   compact fallback were reapplied as new commits. The checkpoint was pushed to
-   the writable integration repository at `4d6fa2f54de4055a3d6e09b859adf35f992bcc2b`.
-6. The requested backend update was already part of the authoritative base:
-   backend-auth, service-tier parity, image-generation events, downstream merge
-   repairs, and effective-settings work are ancestors of the canonical anchor.
-   They were retained from `immateria/codex-mod`, not reintroduced through the
-   rejected `just-every/code` merge.
-7. A second standalone checkout was discovered at
-   `/var/home/jack/projects/Linux_Project/codex-mod`. It was also rooted at the
-   canonical anchor but held 63 changed source files outside Git history. That
-   source was captured and reconciled onto canonical `main`, adding the missing
-   backend provider persistence, maximum reasoning mode, terminal/MCP lifecycle,
-   event deduplication, renderer safety, and browser stack-overflow integrations.
+Historical claims in this recovery come only from the read-only prior-sessions
+MCP corpus spanning Code and Codex. The current Git graph, GitHub fork labels,
+commit messages, repository names, generated documentation, and binary snapshots
+are recovery artifacts; they do not establish provenance.
 
-The merge base between the intended and wrong lines is
-`5b0c8300e56fdae096848a1376859e2d326b50e6`; shared ancestry before that point
-does not make the later forks interchangeable.
+The manually exported OpenAI account archive is older than the currently
+connected corpus but has not been connected yet. Its future import may extend or
+correct the earliest chronology. Until then, the ledger must distinguish
+confirmed session evidence from unknown history.
 
-## Prevention
+## Confirmed chronology
 
-- `.canonical-base` records the upstream URL, integration URL, anchor commit,
-  and known forbidden ancestors.
-- `scripts/verify-canonical-history.sh` rejects a main line that lacks the
-  canonical anchor or contains a known wrong-base ancestor.
-- GitHub runs that verifier for every pull request and every push to `main`.
-- The repository pre-push hook additionally rejects noncanonical local paths,
-  extra linked worktrees, or incorrect remote assignments.
-- `scripts/audit-code-variants.sh` scans project, temporary, and backup locations
-  for additional Code source checkouts. Local verification fails unless the
-  canonical checkout is the only one.
-- Integrations are tracked below as one change. A feature branch is temporary
-  delivery state, never a product variant; it is deleted after integration.
+1. In `code:9f863d9b-ed61-401a-bf5f-598912c21231` on 2026-07-31, the
+   operator identified `code-elf` as a compiled output of `code-mod` and
+   described the source lineage as the operator's fork of `code-mod`, itself a
+   fork of `just-every/code`, which was a fork of Codex.
+2. Development and deployment continued for months across Code and Codex
+   sessions. The current repository was not the start of the project.
+3. In `codex:019ffbfe-e90d-72c2-a00a-3bb1ea1d6a10` on 2026-08-13, a
+   consolidation attempted to reconstruct history from Git ancestry, created
+   the former “canonical history” guard, and marked recovery complete. That
+   method is invalid because the repository metadata was itself created and
+   rewritten to satisfy tooling and did not represent the real source history.
+4. August and September Code sessions repeatedly report delayed or duplicate
+   operator input, late events, response truncation, long-session slowdown,
+   broken model/agent settings, and unreliable compaction.
+5. In `code:ccb698d4-e83d-44a7-b903-df4c5e31a713` on 2026-09-18, the
+   operator reported that remote compaction frequently breaks and falls back to
+   a session summary plus context clearing, and that read agents are slow and
+   failure-prone.
+6. In `code:b28bed46-eb53-448a-aeed-61fdc367be55` on 2026-09-19, the
+   most recent repair added regression coverage and part of a shared
+   operator-input inbox, but left a failing multi-tool interruption test and did
+   not complete source integration, repository cleanup, or deployment.
 
-## Tasks
+## Pre-repair preservation
 
-- [x] Deliver one canonical Code update
-  - [x] Replace wrong-fork `main` ancestry with the recorded immateria base and push the checkpoint.
-  - [x] Assign `origin` to `DemonBigj781/code-mod`, assign `upstream` to `immateria/codex-mod`, and remove the `just-every/code` remote.
-  - [x] Reconcile OpenRouter routing, picker/provider selection, model variants, CPU/history performance, startup safety, remote compact fallback, and backend changes on canonical `main`.
-  - [x] Recover and reconcile the uncommitted backend/runtime source from `projects/Linux_Project/codex-mod`.
-  - [x] Build and validate the combined executable from canonical `main`.
-  - [x] Remove all Code-related linked worktrees and obsolete local variant branches.
-  - [x] Rename the sole checkout to `/var/home/jack/projects/AI_Project/code`, enable the pre-push hook, and verify the history guard locally.
+Before new edits, the current local artifact state was archived at
+`/var/home/jack/backups/code-pre-repair-20260920T012638Z`. Its manifest records
+the branch tips, remotes, stale worktree pointer, and evidence boundary. The
+archive's verified SHA-256 is
+`419e7375e7302c29082c4f4859e01658f29621031b80e9b5ab2c6b663f7b0da5`.
+
+The pre-repair checkout was clean at
+`300e231b28e5ef89dc67bd511c2beff28cf692b2` on
+`feat/codex-0.153.4-gpt6`, with ten local branches. The stale copied worktree
+`code-ci-snapshot-BAK` and the verified `code-update-20260909` binary snapshot
+were both included in the archive.
+
+## Product repair coverage
+
+### Operator input and event ownership
+
+- [x] Reproduce the lost second tool-output failure with an automated regression.
+- [x] Route every finalized tool call through the common scheduler before
+      execution, independent of model-family parallel-tool support.
+- [x] Verify all seven `operator_input_delivery` integration tests with one test
+      thread.
+- [ ] Audit model/session reconfiguration so queued input and partial responses
+      retain one owner.
+- [x] Audit late post-final tool/search events and stale layout-height gaps.
+  - Submission ownership rejects same-turn late search/exec events, preserves
+    events owned by other submissions, and spacer/scroll-position regressions
+    pass under bounded VT100 tests.
+- [ ] Verify prompt-history scrolling and view scrolling independently in SSH
+      and Decky Terminal contexts without controlling a game.
+
+### Long-session and compaction reliability
+
+- [ ] Reproduce the long-session send/receive/processing slowdown with bounded
+      instrumentation and identify the growing data structures or repeated work.
+  - [x] Stop rebuilding completion notifications from every historical operator
+        message on every provider iteration; notifications now consume only the
+        submissions accepted for the current agent run.
+- [x] Trace remote `/responses/compact` failure paths and preserve the exact
+      error instead of silently treating summary/context clearing as equivalent.
+  - Fallback-eligible endpoint and service failures now emit the original
+    status/body before local summarization, while authentication and rate-limit
+    failures remain failures instead of being disguised as fallback success.
+- [ ] Separate deterministic operator-input compression, remote compaction, and
+      local summary fallback in code, configuration, telemetry, and tests.
+- [ ] Reproduce and fix response truncation or one-character output after long
+      conversations.
+- [ ] Verify resume after fallback does not duplicate, omit, or reorder operator
+      input, tool output, or assistant content.
+
+### Agent, model, provider, and navigation settings
+
+- [x] Make operator settings the sole owner of read-agent enablement, model
+      selection, and count; the assistant may submit only a task.
+- [x] Add and verify a master read-agent disable switch; disabled models must
+      never be selected.
+  - The agent tool schema rejects model and permission overrides, the launcher
+    never substitutes an unconfigured fallback agent, and `subagents.enabled`
+    is persisted from the Settings > Agents “Read agents” row.
+- [ ] Preserve role instructions, conversation, and task context for alternative
+      agents.
+- [x] Repair scrolling, alignment, and independent role toggles in the agent
+      model settings UI.
+- [x] Verify unified selectors for general, agent, subagent, review, and
+      autodrive roles, including persistent settings.
+- [x] Repair irreversible provider/model switching and distinguish free versus
+      paid OpenRouter routes before dispatch.
+  - Provider transitions now preserve one complete provider/profile snapshot;
+    the previously failing direct-provider → OpenRouter → ordinary sequence and
+    the full 27-test provider group pass.
+- [x] Verify Stable Horde and other configured providers are discoverable in the
+      TUI.
+- [x] Verify multiline input and navigation bindings, including Shift+Enter.
+
+## Repository recovery and cleanup
+
+- [x] Inventory the exact checkout, branch tips, registered worktrees, stale
+      copied worktree, remotes, and deployment artifact.
+- [x] Preserve Git metadata, reflogs, unreachable objects, cleanup targets, and
+      the deployment snapshot in a checksummed archive.
+- [x] Reopen this falsely completed recovery record and remove Git ancestry as
+      the asserted source of historical truth.
+- [ ] Reconcile every required source change onto `main` using the session
+      ledger and source/test behavior, not commit ancestry as provenance.
+- [x] Build and test the currently repaired source with exactly one compiler
+      thread.
+  - `CARGO_BUILD_JOBS=1 cargo build -j1 -p code-cli --bin code` passed, as did
+    the focused regression suites recorded above.
+- [x] Verify the deployed executable separately from compilation and tests.
+  - `/var/home/jack/bin/code` matches the built candidate SHA-256
+    `a5023790e5e4488cae5e504aab0137dd09446f7ba364c3ba9a3797778ee2b3dc`;
+    `--version`, generated Bash completion syntax, and `doctor` pass.
+  - The replaced binary is preserved at
+    `/var/home/jack/backups/code-installed-predeploy-20260920T043514Z/code`
+    with SHA-256
+    `ca5b936c598c16c5bb94af5b6774060fa5d043fb42124d0c8d524ffd74c21a4d`.
+- [ ] Remove the stale copied worktree and obsolete binary snapshot from the
+      project directory after their archive is re-verified.
+- [ ] Rename the surviving branch to `main` and delete every other local
+      branch only after reachability and content checks pass.
+- [ ] Delete obsolete remote branches and make remote `main` match the verified
+      result after GitHub authentication is restored.
+- [ ] Verify one `main` branch, one registered worktree, one Code source
+      checkout in active project/temp locations, and a clean worktree.
+
+## Current blockers
+
+The configured GitHub token and stored account token are invalid. Local recovery,
+testing, and cleanup can continue, but remote branch deletion, fork-metadata
+correction, and the final push require authentication to be restored.
+
+## Acceptance gates
+
+Recovery is complete only when all product and repository tasks above are
+verified, `scripts/verify-repository-layout.sh --local` passes, the one-thread
+build and relevant test suites pass, the installed executable is verified
+separately, and this ledger contains no historical claims derived only from Git.

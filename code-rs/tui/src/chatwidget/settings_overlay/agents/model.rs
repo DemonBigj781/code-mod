@@ -101,6 +101,7 @@ impl AgentOverviewRow {
 pub(super) struct AgentsOverviewState {
     pub(super) rows: Vec<AgentOverviewRow>,
     pub(super) commands: Vec<String>,
+    pub(super) agents_enabled: bool,
     pub(super) selected: usize,
     pub(super) selected_role: ModelRole,
 }
@@ -110,7 +111,7 @@ impl AgentsOverviewState {
         self.rows
             .len()
             .saturating_add(self.commands.len())
-            .saturating_add(2)
+            .saturating_add(3)
     }
 
     pub(super) fn clamp_selection(&mut self) {
@@ -138,12 +139,14 @@ impl AgentsSettingsContent {
     pub(crate) fn new_overview(
         rows: Vec<AgentOverviewRow>,
         commands: Vec<String>,
+        agents_enabled: bool,
         selected: usize,
         app_event_tx: AppEventSender,
     ) -> Self {
         let mut overview = AgentsOverviewState {
             rows,
             commands,
+            agents_enabled,
             selected,
             selected_role: ModelRole::Session,
         };
@@ -158,6 +161,7 @@ impl AgentsSettingsContent {
         &mut self,
         rows: Vec<AgentOverviewRow>,
         commands: Vec<String>,
+        agents_enabled: bool,
         selected: usize,
     ) {
         let selected_role = match &self.pane {
@@ -167,6 +171,7 @@ impl AgentsSettingsContent {
         let mut overview = AgentsOverviewState {
             rows,
             commands,
+            agents_enabled,
             selected,
             selected_role,
         };

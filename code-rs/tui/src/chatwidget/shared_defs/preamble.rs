@@ -424,7 +424,7 @@ struct AutoResolveDecision {
     rationale: Option<String>,
 }
 
-const AGENTS_OVERVIEW_STATIC_ROWS: usize = 2; // spacer + "Add new agent" row
+const AGENTS_OVERVIEW_STATIC_ROWS: usize = 3; // master switch + add-model + add-command rows
 
 #[derive(Clone)]
 struct PendingAgentUpdate {
@@ -775,7 +775,8 @@ pub(crate) struct ChatWidget<'a> {
     /// Provider/profile in effect before the OpenRouter Free virtual model was selected.
     model_provider_before_openrouter: Option<(String, ModelProviderInfo, Option<String>)>,
     /// Non-direct provider restored when an ordinary model is selected after a direct endpoint.
-    model_provider_before_direct: Option<String>,
+    /// Provider/profile in effect before a catalog-backed direct provider was selected.
+    model_provider_before_direct: Option<(String, ModelProviderInfo, Option<String>)>,
     collaboration_mode: code_core::protocol::CollaborationModeKind,
 
     planning_restore: Option<(String, ReasoningEffort)>,

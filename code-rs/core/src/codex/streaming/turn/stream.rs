@@ -26,13 +26,6 @@ pub(super) async fn try_run_turn(
         Cow::Owned(Prompt { input, ..prompt.clone() })
     };
 
-    let enable_parallel_tool_calls = prompt
-        .as_ref()
-        .model_family_override
-        .as_ref()
-        .unwrap_or_else(|| sess.client.default_model_family())
-        .supports_parallel_tool_calls;
-
     let mut turn_latency_guard = TurnLatencyGuard::new(sess, attempt_req, prompt.as_ref());
     let opened = tokio::select! {
         biased;
@@ -106,7 +99,7 @@ pub(super) async fn try_run_turn(
                     continue;
                 }
 
-                if enable_parallel_tool_calls && is_tool_call {
+                if is_tool_call {
                     let output_pos = output.len();
                     // Persist finalized tool call items so retries can re-seed them if the
                     // stream disconnects before `response.completed`.
@@ -217,7 +210,7 @@ pub(super) async fn try_run_turn(
                         });
                     }
 
-                if enable_parallel_tool_calls && !pending_tool_calls.is_empty() {
+                if !pending_tool_calls.is_empty() {
                     let results = crate::tools::scheduler::dispatch_pending_tool_calls(
                         sess,
                         turn_diff_tracker,

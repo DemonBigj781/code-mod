@@ -255,6 +255,87 @@ async fn one_operator_submission_reaches_the_model_once_in_compressed_form() {
 
 #[cfg(not(windows))]
 #[tokio::test(flavor = "current_thread")]
+async fn turn_complete_notification_contains_only_the_current_submission() {
+    let code_home = TempDir::new().unwrap();
+    let project_dir = TempDir::new().unwrap();
+    let server = MockServer::start().await;
+    let sse = load_sse_fixture_with_id("tests/fixtures/completed_template.json", "notify");
+
+    Mock::given(method("POST"))
+        .and(path_regex(".*/responses$"))
+        .respond_with(sse_response(sse))
+        .mount(&server)
+        .await;
+
+    let notifications_path = code_home.path().join("notifications.jsonl");
+    let mut config = load_default_config_for_test(&code_home);
+    config.cwd = project_dir.path().to_path_buf();
+    config.approval_policy = AskForApproval::Never;
+    config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+    config.input_compression.enabled = false;
+    config.notify = Some(vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        r#"printf '%s\n' "$2" >> "$1""#.to_owned(),
+        "code-notify".to_owned(),
+        notifications_path.display().to_string(),
+    ]);
+    config.model_provider = ModelProviderInfo {
+        base_url: Some(format!("{}/v1", server.uri())),
+        ..built_in_model_providers(None)["openai"].clone()
+    };
+    config.model = "gpt-5.1-codex".to_owned();
+
+    let conversation = ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"))
+        .new_conversation(config)
+        .await
+        .expect("create conversation")
+        .conversation;
+
+    for text in ["first submission", "second submission"] {
+        conversation
+            .submit(Op::UserInput {
+                items: vec![InputItem::Text { text: text.into() }],
+                final_output_json_schema: None,
+            })
+            .await
+            .unwrap();
+        wait_for_event(&conversation, |event| matches!(event, EventMsg::TaskComplete(_))).await;
+    }
+
+    let notifications = timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let Ok(contents) = std::fs::read_to_string(&notifications_path) {
+                let notifications = contents
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                    .collect::<Vec<_>>();
+                if notifications.len() >= 2 {
+                    return notifications;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("notifier should receive both completed turns");
+
+    conversation.submit(Op::Shutdown).await.unwrap();
+    wait_for_event(&conversation, |event| matches!(event, EventMsg::ShutdownComplete)).await;
+
+    assert_eq!(
+        notifications[0]["input-messages"],
+        json!(["first submission"])
+    );
+    assert_eq!(
+        notifications[1]["input-messages"],
+        json!(["second submission"]),
+        "notification payload must not grow with retained conversation history"
+    );
+}
+
+#[cfg(not(windows))]
+#[tokio::test(flavor = "current_thread")]
 async fn queued_operator_input_and_tool_output_reach_each_model_request_once() {
     let code_home = TempDir::new().unwrap();
     let project_dir = TempDir::new().unwrap();

@@ -19,6 +19,7 @@ impl ChatWidget<'_> {
         let updated = self.try_update_agents_settings_overview(
             rows.clone(),
             commands.clone(),
+            self.config.subagents_enabled,
             selected,
         );
 
@@ -27,6 +28,7 @@ impl ChatWidget<'_> {
                 let content = AgentsSettingsContent::new_overview(
                     rows,
                     commands,
+                    self.config.subagents_enabled,
                     selected,
                     self.app_event_tx.clone(),
                 );
@@ -40,16 +42,18 @@ impl ChatWidget<'_> {
         &mut self,
         rows: Vec<AgentOverviewRow>,
         commands: Vec<String>,
+        agents_enabled: bool,
         selected: usize,
     ) -> bool {
         if let Some(overlay) = self.settings.overlay.as_mut()
             && overlay.active_section() == SettingsSection::Agents {
                 if let Some(content) = overlay.agents_content_mut() {
-                    content.set_overview(rows, commands, selected);
+                    content.set_overview(rows, commands, agents_enabled, selected);
                 } else {
                     overlay.set_agents_content(AgentsSettingsContent::new_overview(
                         rows,
                         commands,
+                        agents_enabled,
                         selected,
                         self.app_event_tx.clone(),
                     ));
@@ -94,6 +98,7 @@ impl ChatWidget<'_> {
                     let mut content = AgentsSettingsContent::new_overview(
                         rows,
                         commands,
+                        self.config.subagents_enabled,
                         selected,
                         self.app_event_tx.clone(),
                     );
@@ -145,6 +150,7 @@ impl ChatWidget<'_> {
                     let mut content = AgentsSettingsContent::new_overview(
                         rows,
                         commands,
+                        self.config.subagents_enabled,
                         selected,
                         self.app_event_tx.clone(),
                     );

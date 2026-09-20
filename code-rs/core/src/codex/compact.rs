@@ -49,19 +49,10 @@ const COMPACTION_EMERGENCY_MESSAGE: &str = "Compaction failed: the conversation 
 
 /// Determine whether to use remote compaction (ChatGPT-based) or local compaction.
 ///
-/// Upstream codex-rs checks if auth mode is `ChatGPT` and `RemoteCompaction` feature is enabled.
-/// In code-rs, remote compaction infrastructure is not yet implemented, so this always
-/// returns false (always use local compaction).
-///
-/// TODO: Once `ChatGPT` auth and remote compaction are implemented, update this to:
-/// ```
-/// session
-///     .services
-///     .auth_manager
-///     .auth()
-///     .is_some_and(|auth| auth.mode == AuthMode::ChatGPT)
-///     && session.enabled(Feature::RemoteCompaction).await
-/// ```
+/// ChatGPT-authenticated sessions use the `/responses/compact` endpoint. Other
+/// authentication modes use the local summarization path. Remote failures may
+/// fall back locally, but that transition is reported separately by
+/// `compact_remote` with the original error preserved.
 pub(super) fn should_use_remote_compact_task(session: &Session) -> bool {
     session
         .client

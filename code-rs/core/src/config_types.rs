@@ -1249,6 +1249,11 @@ pub struct SubagentCommandConfig {
 #[derive(Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct SubagentsToml {
+    /// Master switch for model-invoked read agents. When false, the agent tool
+    /// has no runnable models regardless of per-model role settings.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+
     /// Maximum nesting depth for agent-spawned agent runs.
     /// `1` allows root sessions to spawn agents, but blocks further nesting.
     #[serde(default)]

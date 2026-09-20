@@ -25,6 +25,7 @@ fn state(role: ModelRole, enabled: bool) -> AgentsOverviewState {
             command: "coder --model model -c model_provider=provider".to_owned(),
         }],
         commands: Vec::new(),
+        agents_enabled: true,
         selected: 0,
         selected_role: role,
     }
@@ -138,7 +139,7 @@ fn mouse_activation_toggles_the_clicked_role() {
             .expect("auto drive column"),
     );
     let mut content =
-        AgentsSettingsContent::new_overview(overview.rows, Vec::new(), 0, sender);
+        AgentsSettingsContent::new_overview(overview.rows, Vec::new(), true, 0, sender);
     assert!(content.handle_mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -166,6 +167,7 @@ fn mouse_activation_on_model_name_opens_the_model_editor() {
     let mut content = AgentsSettingsContent::new_overview(
         state(ModelRole::Review, false).rows,
         Vec::new(),
+        true,
         0,
         sender,
     );
@@ -202,4 +204,24 @@ fn overview_renders_universal_capability_headers() {
     assert!(rendered.contains("Sub-agent"));
     assert!(rendered.contains("Review"));
     assert!(rendered.contains("Auto Drive"));
+    assert!(rendered.contains("Read agents"));
+}
+
+#[test]
+fn master_switch_toggles_all_read_agents_independently() {
+    let (tx, rx) = mpsc::channel();
+    let sender = AppEventSender::new(tx);
+    let mut state = state(ModelRole::Subagent, true);
+    state.selected = state.rows.len();
+
+    assert!(AgentsSettingsContent::handle_overview_key(
+        &mut state,
+        KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+        &sender,
+    ));
+
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AppEvent::UpdateSubagentsEnabled { enabled: false }),
+    ));
 }
