@@ -24,6 +24,11 @@ connected corpus but has not been connected yet. Its future import may extend or
 correct the earliest chronology. Until then, the ledger must distinguish
 confirmed session evidence from unknown history.
 
+GitHub currently labels `DemonBigj781/code-mod` as a fork of
+`just-every/code`. That live fork-network metadata is known to be historically
+wrong and remains non-authoritative; the source remote for the actual Code Mod
+codebase is recorded separately as `immateria/codex-mod`.
+
 ## Confirmed chronology
 
 1. In `code:9f863d9b-ed61-401a-bf5f-598912c21231` on 2026-07-31, the
@@ -263,11 +268,35 @@ were both included in the archive.
     context-telemetry checkpoint `2562ab30a` completed in 9 minutes 14 seconds;
     the preceding agent-overview checkpoint `0678deda9` completed in 4 minutes
     00 seconds.
+  - The final guarded push built the `dev-fast` CLI, passed its curated smokes,
+    and ran the workspace with `CARGO_BUILD_JOBS=1`,
+    `NEXTEST_TEST_THREADS=1`, and `RUST_TEST_THREADS=1`: all 3,048 tests passed
+    and 9 were skipped. `NO_COLOR` was cleared for the run because the host's
+    exported value suppresses the ANSI sequences exercised by two vendored
+    Crossterm parser tests.
+  - Commit `1a07d0dca` closes failures that the emergency repair had left past
+    its release gate: stale config and app-server protocol schemas, pairing that
+    updated only its test instead of the production enable path, Shift+Enter
+    setup, OpenRouter profile restoration, missing-agent role state, and the
+    unreachable stale-reasoning-height repair. Focused regressions pass for each
+    corrected source path; serial execution distinguishes the remaining
+    full-suite resource contention from product failures.
+  - The first full gate exposed one remaining production defect rather than a
+    cleanup-only problem: an authenticated-account reconnect removed the old
+    remote client but cancellation also suppressed its `ConnectionClosed`
+    event. Commit `2e7350418` makes that cancellation-time notification
+    nonblocking, preserving prompt saturated-queue shutdown. The reconnect and
+    saturation regressions pass in both directions, all 108 app-server library
+    tests pass, and the final full gate is green.
 - [x] Verify the deployed executable separately from compilation and tests.
   - `/var/home/jack/bin/code` matches the built candidate SHA-256
-    `632a678f472b6868baaa94f69f3701447cd25ca9098e6265c34c715343fcbe49`;
+    `376fb247eab5b476dad73a061c26cce482db54bc80df52dd51c08d84d108a863`;
     `--version`, generated Bash completion syntax, and `doctor` pass.
   - The immediately replaced binary is preserved at
+    `/var/home/jack/backups/code-installed-predeploy-20260920T163525Z/code`
+    with SHA-256
+    `632a678f472b6868baaa94f69f3701447cd25ca9098e6265c34c715343fcbe49`.
+  - The preceding repair binary is preserved at
     `/var/home/jack/backups/code-installed-predeploy-20260920T120250Z/code`
     with SHA-256
     `8523d0318ff8cf9ba95ad743456e55e107e8a13a3ea6ccc99ff841796d7d0299`;
@@ -283,17 +312,31 @@ were both included in the archive.
   - The runtime repair commit is `f02f45d3e0e041a0cada90f0bdc37e6286567368`;
     every
     removed pre-repair branch tip remains listed in the backup manifest.
-- [ ] Delete obsolete remote branches and make remote `main` match the verified
+- [x] Delete obsolete remote branches and make remote `main` match the verified
       result after GitHub authentication is restored.
+  - GitHub authentication was restored. Remote branches
+    `ci/automatic-build-artifacts` and `ci/development-snapshot-20260907` were
+    deleted only after their recoverable tips were recorded in the preservation
+    manifest as `0cffac3393931caf0e31cf712324d427cb59eea2` and
+    `ed801c2275836697eaa433dbc22fc869ca4f5493` respectively.
+  - The guarded push was a normal fast-forward from `84c6dde86` to
+    `2e7350418`. A live `git ls-remote --heads origin` now returns only
+    `refs/heads/main` at `2e73504182ab97577d34e82b657e6e44559513ea`.
 - [x] Verify one `main` branch, one registered worktree, one Code source
       checkout in active project/temp locations, and a clean worktree.
   - `scripts/verify-repository-layout.sh --local` passes.
 
-## Current blockers
+## Remaining manual and external gates
 
-The configured GitHub token and stored account token are invalid. Local recovery,
-testing, and cleanup can continue, but remote branch deletion, fork-metadata
-correction, and the final push require authentication to be restored.
+- The operator must verify prompt-history scrolling and view scrolling
+  independently in SSH and Decky Terminal contexts.
+- The operator must restart Code manually, reproduce the long-session slowdown,
+  and then inspect the new session's `turn_latency` and `context_management`
+  debug logs. This recovery did not restart the active Code process.
+- GitHub still reports the historically wrong `just-every/code` fork parent.
+  Correcting a repository's fork-network parent is an external GitHub metadata
+  operation, not a branch, ref, or local-history cleanup; it must not be
+  represented as repaired by the normalized `main` ref.
 
 ## Acceptance gates
 
