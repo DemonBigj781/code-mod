@@ -478,6 +478,7 @@ impl Runner<'_> {
             model_reasoning_effort: config.model_reasoning_effort,
             notify,
             state: Mutex::new(state),
+            task_idle_notify: tokio::sync::Notify::new(),
             rollout: Mutex::new(rollout_recorder),
             code_linux_sandbox_exe: config.code_linux_sandbox_exe.clone(),
             disable_response_storage,

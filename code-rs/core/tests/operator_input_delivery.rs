@@ -4,7 +4,10 @@ mod common;
 
 use common::{load_default_config_for_test, load_sse_fixture_with_id, wait_for_event};
 use code_core::built_in_model_providers;
-use code_core::protocol::{AskForApproval, EventMsg, InputItem, Op, ReviewRequest, SandboxPolicy};
+use code_core::protocol::{
+    AskForApproval, CollaborationModeKind, ConfigureSessionOp, EventMsg, InputItem, Op,
+    ReviewRequest, SandboxPolicy,
+};
 use code_core::{CodexAuth, ConversationManager, ModelProviderInfo};
 use code_protocol::protocol::ReviewTarget;
 use serde_json::json;
@@ -39,6 +42,43 @@ fn sse_response(body: String) -> ResponseTemplate {
     ResponseTemplate::new(200)
         .insert_header("content-type", "text/event-stream")
         .set_body_string(body)
+}
+
+fn configure_session_op(config: &code_core::config::Config) -> Op {
+    Op::configure_session(ConfigureSessionOp {
+        provider_id: config.model_provider_id.clone(),
+        provider: config.model_provider.clone(),
+        model: config.model.clone(),
+        model_explicit: config.model_explicit,
+        model_reasoning_effort: config.model_reasoning_effort,
+        preferred_model_reasoning_effort: config.preferred_model_reasoning_effort,
+        model_reasoning_summary: config.model_reasoning_summary,
+        model_text_verbosity: config.model_text_verbosity,
+        service_tier: config.service_tier,
+        context_mode: config.context_mode,
+        model_context_window: config.model_context_window,
+        model_auto_compact_token_limit: config.model_auto_compact_token_limit,
+        user_instructions: config.user_instructions.clone(),
+        base_instructions: config.base_instructions.clone(),
+        approval_policy: config.approval_policy,
+        sandbox_policy: config.sandbox_policy.clone(),
+        disable_response_storage: config.disable_response_storage,
+        notify: config.notify.clone(),
+        cwd: config.cwd.clone(),
+        resume_path: None,
+        demo_developer_message: config.demo_developer_message.clone(),
+        dynamic_tools: config.dynamic_tools.clone(),
+        shell: config.shell.clone(),
+        shell_style_profiles: config.shell_style_profiles.clone(),
+        network: config.network.clone(),
+        tools_repl: config.tools_repl,
+        repl_default_runtime: config.repl_default_runtime,
+        repl_runtimes: config.repl_runtimes.clone(),
+        memories: config.memories.clone(),
+        input_compression: config.input_compression.clone(),
+        agents: Some(config.agents.clone()),
+        collaboration_mode: CollaborationModeKind::from_sandbox_policy(&config.sandbox_policy),
+    })
 }
 
 async fn wait_for_response_requests(server: &MockServer, count: usize) {
@@ -127,6 +167,115 @@ async fn operator_input_preempts_blocked_provider_request() {
 #[tokio::test(flavor = "current_thread")]
 async fn operator_input_preempts_blocked_provider_retry() {
     check_operator_input_preempts_blocked_request(true).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_reconfiguration_waits_for_the_active_turn_and_preserves_its_output() {
+    let code_home = TempDir::new().unwrap();
+    let project_dir = TempDir::new().unwrap();
+    let server = MockServer::start().await;
+    let first = load_sse_fixture_with_id("tests/fixtures/completed_template.json", "before-reconfigure");
+    let second = load_sse_fixture_with_id("tests/fixtures/completed_template.json", "after-reconfigure");
+
+    Mock::given(method("POST"))
+        .and(path_regex(".*/responses$"))
+        .respond_with(sse_response(first).set_delay(std::time::Duration::from_millis(500)))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex(".*/responses$"))
+        .respond_with(sse_response(second))
+        .mount(&server)
+        .await;
+
+    let mut config = load_default_config_for_test(&code_home);
+    config.cwd = project_dir.path().to_path_buf();
+    config.approval_policy = AskForApproval::Never;
+    config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+    config.input_compression.enabled = false;
+    config.model_provider = ModelProviderInfo {
+        base_url: Some(format!("{}/v1", server.uri())),
+        ..built_in_model_providers(None)["openai"].clone()
+    };
+    config.model = "gpt-5.1-codex".to_owned();
+
+    let mut reconfigured = config.clone();
+    reconfigured.model = "gpt-5.2-codex".to_owned();
+    reconfigured.model_explicit = true;
+    let reconfigure_op = configure_session_op(&reconfigured);
+
+    let conversation = ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"))
+        .new_conversation(config)
+        .await
+        .expect("create conversation")
+        .conversation;
+    let turn_id = conversation
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: "finish this response before applying settings".into(),
+            }],
+            final_output_json_schema: None,
+        })
+        .await
+        .unwrap();
+    wait_for_response_requests(&server, 1).await;
+    let reconfigure_id = conversation.submit(reconfigure_op).await.unwrap();
+
+    timeout(std::time::Duration::from_secs(5), async {
+        let mut turn_completed = false;
+        let mut reconfigured = false;
+        while !turn_completed || !reconfigured {
+            let event = conversation.next_event().await.expect("event stream");
+            if event.id == turn_id {
+                match event.msg {
+                    EventMsg::TaskComplete(_) => turn_completed = true,
+                    EventMsg::TurnAborted(_) => {
+                        panic!("settings reconfiguration must not abort the active turn")
+                    }
+                    _ => {}
+                }
+            } else if event.id == reconfigure_id
+                && matches!(event.msg, EventMsg::SessionConfigured(_))
+            {
+                assert!(
+                    turn_completed,
+                    "the active turn must complete before replacement session configuration"
+                );
+                reconfigured = true;
+            }
+        }
+    })
+    .await
+    .expect("turn completion and deferred session configuration");
+
+    conversation
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: "verify the reconfigured session retained history".into(),
+            }],
+            final_output_json_schema: None,
+        })
+        .await
+        .unwrap();
+    wait_for_event(&conversation, |event| matches!(event, EventMsg::TaskComplete(_))).await;
+
+    let requests = server.received_requests().await.unwrap();
+    let response_bodies = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .map(|request| request.body_json::<serde_json::Value>().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(response_bodies.len(), 2);
+    assert_eq!(response_bodies[1]["model"], "gpt-5.2-codex");
+    assert!(
+        input_texts(&response_bodies[1])
+            .contains(&"finish this response before applying settings"),
+        "the replacement session must retain the completed turn"
+    );
+
+    conversation.submit(Op::Shutdown).await.unwrap();
+    wait_for_event(&conversation, |event| matches!(event, EventMsg::ShutdownComplete)).await;
 }
 
 fn text_files_under(path: &std::path::Path) -> Vec<std::path::PathBuf> {

@@ -70,10 +70,16 @@ were both included in the archive.
 - [x] Reproduce the lost second tool-output failure with an automated regression.
 - [x] Route every finalized tool call through the common scheduler before
       execution, independent of model-family parallel-tool support.
-- [x] Verify all seven `operator_input_delivery` integration tests with one test
+- [x] Verify all eight `operator_input_delivery` integration tests with one test
       thread.
-- [ ] Audit model/session reconfiguration so queued input and partial responses
+- [x] Audit model/session reconfiguration so queued input and partial responses
       retain one owner.
+  - Settings rebuilds are deferred and coalesced while a task owns the session,
+    recheck idleness before replacement, and acknowledge the actual settings
+    submission instead of the startup ID.
+  - The integration regression proves the active turn completes without
+    `TurnAborted`, remains in replacement-session history, and the next request
+    uses the new model. The pending-input handoff unit test also passes.
 - [x] Audit late post-final tool/search events and stale layout-height gaps.
   - Submission ownership rejects same-turn late search/exec events, preserves
     events owned by other submissions, and spacer/scroll-position regressions
@@ -137,15 +143,17 @@ were both included in the archive.
 - [x] Build and test the currently repaired source with exactly one compiler
       thread.
   - `CARGO_BUILD_JOBS=1 cargo build -j1 -p code-cli --bin code` passed, as did
-    the focused regression suites recorded above.
+    the focused regression suites recorded above; the current incremental build
+    completed in 8 minutes 8 seconds.
 - [x] Verify the deployed executable separately from compilation and tests.
   - `/var/home/jack/bin/code` matches the built candidate SHA-256
-    `a5023790e5e4488cae5e504aab0137dd09446f7ba364c3ba9a3797778ee2b3dc`;
+    `af2be863389ab7a06728e33a78257d99b942705f86df83408c0592c847eb694a`;
     `--version`, generated Bash completion syntax, and `doctor` pass.
-  - The replaced binary is preserved at
-    `/var/home/jack/backups/code-installed-predeploy-20260920T043514Z/code`
+  - The immediately replaced binary is preserved at
+    `/var/home/jack/backups/code-installed-predeploy-20260920T052810Z/code`
     with SHA-256
-    `ca5b936c598c16c5bb94af5b6774060fa5d043fb42124d0c8d524ffd74c21a4d`.
+    `a5023790e5e4488cae5e504aab0137dd09446f7ba364c3ba9a3797778ee2b3dc`;
+    the earlier installed binary remains in the timestamped `043514Z` backup.
 - [x] Remove the stale copied worktree and obsolete binary snapshot from the
       project directory after their archive is re-verified.
   - The recovery archive again passed its recorded SHA-256 and `zstd -t` before

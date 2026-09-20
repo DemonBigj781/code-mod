@@ -560,6 +560,9 @@ pub(crate) struct Session {
     /// sessions can be replayed or inspected later.
     pub(super) rollout: Mutex<Option<RolloutRecorder>>,
     pub(super) state: Mutex<State>,
+    /// Wakes deferred session reconfiguration after the active task releases
+    /// ownership of the conversation state.
+    pub(super) task_idle_notify: tokio::sync::Notify,
     pub(super) code_linux_sandbox_exe: Option<PathBuf>,
     pub(super) user_shell: shell::Shell,
     pub(super) dangerous_command_detection_enabled: bool,
@@ -1445,10 +1448,12 @@ impl Session {
 
     pub fn remove_task(&self, sub_id: &str) {
         let mut state = crate::codex::lock_or_panic!(self.state);
-        if let Some(agent) = &state.current_task
+        let removed = if let Some(agent) = &state.current_task
             && agent.sub_id == sub_id {
-            state.current_task.take();
-        }
+            state.current_task.take().is_some()
+        } else {
+            false
+        };
         state.granted_permissions_by_turn.remove(sub_id);
 
         let pending_resource_ids = state
@@ -1464,10 +1469,23 @@ impl Session {
             .collect::<Vec<_>>();
         drop(state);
         deny_pending_resource_requests(pending_resources);
+        if removed {
+            self.task_idle_notify.notify_one();
+        }
     }
 
     pub fn has_running_task(&self) -> bool {
         crate::codex::lock_or_panic!(self.state).current_task.is_some()
+    }
+
+    pub(super) async fn wait_until_idle(&self) {
+        loop {
+            let notified = self.task_idle_notify.notified();
+            if !self.has_running_task() {
+                return;
+            }
+            notified.await;
+        }
     }
 
     pub fn queue_user_input(&self, queued: QueuedUserInput) {
@@ -2771,8 +2789,12 @@ impl Session {
         let current = state.current_task.take();
         drop(state);
         deny_pending_resource_requests(pending_resources.into_values());
+        let became_idle = current.is_some();
         if let Some(agent) = current {
             agent.abort(TurnAbortReason::Interrupted);
+        }
+        if became_idle {
+            self.task_idle_notify.notify_one();
         }
 
         // Terminate any PTY-based exec sessions so child processes do not linger.

@@ -24,8 +24,13 @@ impl Runner<'_> {
             return;
         };
 
+        let session_configured_id = if self.agent_manager_initialized {
+            submission_id.as_str()
+        } else {
+            INITIAL_SUBMIT_ID
+        };
         let events = std::iter::once(sess_arc.make_event(
-            INITIAL_SUBMIT_ID,
+            session_configured_id,
             EventMsg::SessionConfigured(SessionConfiguredEvent {
                 session_id: self.session_id,
                 model,

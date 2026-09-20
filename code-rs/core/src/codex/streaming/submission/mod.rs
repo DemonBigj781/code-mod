@@ -13,6 +13,9 @@ pub(in crate::codex) async fn submission_loop(
     let mut config = config;
     let mut sess: Option<Arc<Session>> = None;
     let mut agent_manager_initialized = false;
+    let (task_idle_tx, task_idle_rx) = async_channel::unbounded::<()>();
+    let mut deferred_configure: Option<Submission> = None;
+    let mut task_idle_wait_armed = false;
 
     let file_watcher = crate::file_watcher::FileWatcher::new(config.code_home.clone())
         .unwrap_or_else(|err| {
@@ -111,6 +114,31 @@ pub(in crate::codex) async fn submission_loop(
                 }
             }
             op @ Op::ConfigureSession { .. } => {
+                let configure_submission = Submission {
+                    id: sub.id,
+                    op,
+                };
+                if let Some(active_session) = sess.as_ref()
+                    && active_session.has_running_task()
+                {
+                    // Settings are last-write-wins while a turn owns the session.
+                    // Rebuilding now would abort the response and clone partial history.
+                    deferred_configure = Some(configure_submission);
+                    if !task_idle_wait_armed {
+                        task_idle_wait_armed = true;
+                        let active_session = Arc::clone(active_session);
+                        let task_idle_tx = task_idle_tx.clone();
+                        tokio::spawn(async move {
+                            active_session.wait_until_idle().await;
+                            let _ = task_idle_tx.send(()).await;
+                        });
+                    }
+                    continue;
+                }
+
+                // A newer configuration submitted after the task became idle
+                // supersedes any deferred snapshot whose wake-up is still queued.
+                deferred_configure = None;
                 let state = configure_session::ConfigureSessionState {
                     session_id,
                     config,
@@ -123,8 +151,8 @@ pub(in crate::codex) async fn submission_loop(
                     auth_manager.clone(),
                     &tx_event,
                     &file_watcher,
-                    sub.id,
-                    op,
+                    configure_submission.id,
+                    configure_submission.op,
                 )
                 .await;
 
@@ -685,6 +713,52 @@ pub(in crate::codex) async fn submission_loop(
                 }
                 break;
             }
+                }
+            }
+            idle = task_idle_rx.recv(), if task_idle_wait_armed => {
+                if idle.is_err() {
+                    break;
+                }
+                task_idle_wait_armed = false;
+                let Some(configure_submission) = deferred_configure.take() else {
+                    continue;
+                };
+
+                if let Some(active_session) = sess.as_ref()
+                    && active_session.has_running_task()
+                {
+                    deferred_configure = Some(configure_submission);
+                    task_idle_wait_armed = true;
+                    let active_session = Arc::clone(active_session);
+                    let task_idle_tx = task_idle_tx.clone();
+                    tokio::spawn(async move {
+                        active_session.wait_until_idle().await;
+                        let _ = task_idle_tx.send(()).await;
+                    });
+                    continue;
+                }
+
+                let state = configure_session::ConfigureSessionState {
+                    session_id,
+                    config,
+                    sess,
+                    agent_manager_initialized,
+                };
+                let (state, control) = configure_session::handle_configure_session(
+                    state,
+                    auth_manager.clone(),
+                    &tx_event,
+                    &file_watcher,
+                    configure_submission.id,
+                    configure_submission.op,
+                )
+                .await;
+                session_id = state.session_id;
+                config = state.config;
+                sess = state.sess;
+                agent_manager_initialized = state.agent_manager_initialized;
+                if matches!(control, configure_session::ConfigureSessionControl::Exit) {
+                    return;
                 }
             }
             watcher_event = file_watcher_rx.recv(), if file_watcher_enabled => {
