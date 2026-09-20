@@ -94,6 +94,11 @@ were both included in the archive.
   - [x] Stop rebuilding completion notifications from every historical operator
         message on every provider iteration; notifications now consume only the
         submissions accepted for the current agent run.
+  - [x] Stop constructing an unbounded diagnostic rendering of the entire
+        conversation at every provider boundary when compact tracing is off.
+        Explicit `CODEX_COMPACT_TRACE` diagnostics now inspect at most the most
+        recent 32 items, emit at most 8 KiB, and report payload sizes without
+        copying tool-output bodies.
 - [x] Trace remote `/responses/compact` failure paths and preserve the exact
       error instead of silently treating summary/context clearing as equivalent.
   - Fallback-eligible endpoint and service failures now emit the original
@@ -103,6 +108,10 @@ were both included in the archive.
       local summary fallback in code, configuration, telemetry, and tests.
 - [ ] Reproduce and fix response truncation or one-character output after long
       conversations.
+  - [x] The bounded long-transcript rendering probe passes all seven active
+        cutoff regressions; its one diagnostic scan remains intentionally
+        ignored. This rules out rendered-history tail loss but does not yet
+        prove provider-stream completion.
 - [ ] Verify resume after fallback does not duplicate, omit, or reorder operator
       input, tool output, or assistant content.
 
