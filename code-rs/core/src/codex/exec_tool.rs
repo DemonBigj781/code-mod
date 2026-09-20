@@ -107,7 +107,8 @@ pub(crate) async fn handle_wait(
                         st.background_execs.remove(&call_id);
                     }
                     let content = format_exec_output_with_limit(
-                        sess.get_cwd(),
+                        sess.client.code_home(),
+                        sess.id,
                         &ctx_inner.sub_id,
                         &ctx_inner.call_id,
                         &done,
@@ -269,7 +270,8 @@ pub(crate) async fn handle_wait(
                 };
                 if let Some(done) = done {
                     let content = format_exec_output_with_limit(
-                        sess.get_cwd(),
+                        sess.client.code_home(),
+                        sess.id,
                         &ctx_inner.sub_id,
                         &ctx_inner.call_id,
                         &done,
@@ -1793,6 +1795,8 @@ pub(crate) async fn handle_container_exec_with_params(
     let suppress_event_flag_task = suppress_event_flag.clone();
     let display_label_task = display_label.clone();
     let tool_output_max_bytes = sess.tool_output_max_bytes;
+    let artifact_code_home = sess.client.code_home().to_path_buf();
+    let artifact_session_id = sess.id;
     let managed_network_proxy = sess.managed_network_proxy();
     let network_approval = sess.network_approval();
     let zsh_fork_exec_config = compute_zsh_fork_exec_config(sess, sandbox_type, &params.command);
@@ -1961,7 +1965,8 @@ pub(crate) async fn handle_container_exec_with_params(
                     let header = format!("Background shell completed ({header_label}), exit_code={}, duration={:?}.", out.exit_code, out.duration);
                     let full_body = format_exec_output_str(&out);
                     let body = truncate_exec_output_for_storage(
-                        &sandbox_cwd,
+                        &artifact_code_home,
+                        artifact_session_id,
                         &sub_id_for_events,
                         &call_id_for_events,
                         &full_body,
@@ -2007,7 +2012,8 @@ pub(crate) async fn handle_container_exec_with_params(
         if let Some(done) = done_opt {
             let is_success = done.exit_code == 0;
             let mut content = format_exec_output_with_limit(
-                sess.get_cwd(),
+                sess.client.code_home(),
+                sess.id,
                 &sub_id,
                 &call_id,
                 &done,
@@ -2058,7 +2064,8 @@ pub(crate) async fn handle_container_exec_with_params(
 }
 
 fn truncate_exec_output_for_storage(
-    cwd: &Path,
+    code_home: &Path,
+    session_id: uuid::Uuid,
     sub_id: &str,
     call_id: &str,
     full: &str,
@@ -2072,7 +2079,7 @@ fn truncate_exec_output_for_storage(
 
     let safe_call_id = crate::fs_sanitize::safe_path_component(call_id, "exec");
     let filename = format!("exec-{safe_call_id}.txt");
-    let file_note = match ensure_agent_dir(cwd, sub_id)
+    let file_note = match ensure_agent_dir(code_home, session_id, sub_id)
         .and_then(|dir| write_agent_file(&dir, &filename, full))
     {
         Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
@@ -2086,15 +2093,22 @@ fn truncate_exec_output_for_storage(
 /// Exec output serialized for the model. If the payload is too large,
 /// write the full output to a file and include a truncated preview here.
 fn format_exec_output_with_limit(
-    cwd: &Path,
+    code_home: &Path,
+    session_id: uuid::Uuid,
     sub_id: &str,
     call_id: &str,
     exec_output: &ExecToolCallOutput,
     max_tool_output_bytes: usize,
 ) -> String {
     let full = format_exec_output_str(exec_output);
-    let final_output =
-        truncate_exec_output_for_storage(cwd, sub_id, call_id, &full, max_tool_output_bytes);
+    let final_output = truncate_exec_output_for_storage(
+        code_home,
+        session_id,
+        sub_id,
+        call_id,
+        &full,
+        max_tool_output_bytes,
+    );
     format_exec_output_payload(exec_output, &final_output)
 }
 
@@ -3345,6 +3359,7 @@ mod tests {
     use serde_json::Value;
     use std::time::Duration;
     use tempfile::TempDir;
+    use uuid::Uuid;
 
     fn make_exec_output(output: String) -> ExecToolCallOutput {
         ExecToolCallOutput {
@@ -3362,9 +3377,16 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let output = "line\n".repeat(200);
         let exec_output = make_exec_output(output);
+        let session_id = Uuid::new_v4();
 
-        let payload =
-            format_exec_output_with_limit(dir.path(), "sub", "call", &exec_output, 64);
+        let payload = format_exec_output_with_limit(
+            dir.path(),
+            session_id,
+            "sub",
+            "call",
+            &exec_output,
+            64,
+        );
         let parsed: Value = serde_json::from_str(&payload).expect("parse payload");
         let content = parsed
             .get("output")
@@ -3381,6 +3403,7 @@ mod tests {
         let exec_output = make_exec_output(output.clone());
         let payload = format_exec_output_with_limit(
             dir.path(),
+            Uuid::new_v4(),
             "sub",
             "call",
             &exec_output,

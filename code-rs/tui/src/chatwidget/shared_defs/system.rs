@@ -72,6 +72,7 @@ pub(crate) struct AutoDecisionEvent {
 }
 
 pub(crate) struct AgentUpdateRequest {
+    pub(crate) intent: crate::app_event::AgentUpdateIntent,
     pub(crate) name: String,
     pub(crate) enabled: bool,
     pub(crate) args_ro: Option<Vec<String>>,

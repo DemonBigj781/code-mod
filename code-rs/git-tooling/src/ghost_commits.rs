@@ -81,6 +81,21 @@ impl<'a> CreateGhostCommitOptions<'a> {
     }
 }
 
+fn create_index_tempdir(home_dir: Option<&Path>) -> std::io::Result<tempfile::TempDir> {
+    if let Some(home_dir) = home_dir {
+        let home_tmp = home_dir.join("tmp");
+        if std::fs::create_dir_all(&home_tmp).is_ok()
+            && let Ok(tempdir) = Builder::new()
+                .prefix("code-git-index-")
+                .tempdir_in(home_tmp)
+        {
+            return Ok(tempdir);
+        }
+    }
+
+    Builder::new().prefix("code-git-index-").tempdir()
+}
+
 /// Create a ghost commit capturing the current state of the repository's working tree.
 pub fn create_ghost_commit(
     options: &CreateGhostCommitOptions<'_>,
@@ -103,7 +118,8 @@ pub fn create_ghost_commit(
         .collect::<Result<Vec<_>, _>>()?;
     let force_include =
         apply_repo_prefix_to_force_include(repo_prefix.as_deref(), &normalized_force);
-    let index_tempdir = Builder::new().prefix("code-git-index-").tempdir()?;
+    let home_dir = dirs::home_dir();
+    let index_tempdir = create_index_tempdir(home_dir.as_deref())?;
     let index_path = index_tempdir.path().join("index");
     let base_env = vec![(
         OsString::from("GIT_INDEX_FILE"),
@@ -238,6 +254,15 @@ mod tests {
             .expect("git command");
         assert!(output.status.success(), "git command failed: {args:?}");
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn ghost_index_tempdir_uses_home_tmp_when_available() -> Result<(), GitToolingError> {
+        let home = tempfile::tempdir()?;
+        let index_tempdir = create_index_tempdir(Some(home.path()))?;
+
+        assert!(index_tempdir.path().starts_with(home.path().join("tmp")));
+        Ok(())
     }
 
     /// Initializes a repository with consistent settings for cross-platform tests.

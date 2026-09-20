@@ -36,7 +36,11 @@ use code_common::model_presets::clamp_reasoning_effort_for_model;
 use code_common::model_presets::ModelPreset;
 use code_common::shell_presets::merge_shell_presets;
 use code_common::shell_presets::ShellPreset;
-use code_core::agent_defaults::{agent_model_spec, enabled_agent_model_specs};
+use code_core::agent_defaults::{
+    agent_model_spec,
+    agent_model_specs,
+    enabled_agent_model_specs,
+};
 use code_core::smoke_test_agent_blocking;
 use code_core::config::Config;
 use code_core::config::persist_shell;
@@ -45,6 +49,7 @@ use code_core::git_info::CommitLogEntry;
 use code_core::config_types::AgentConfig;
 use code_core::config_types::AutoDriveContinueMode;
 use code_core::config_types::Notifications;
+use code_core::config_types::ModelRole;
 use code_core::config_types::ReasoningEffort;
 use code_core::config_types::ShellConfig;
 use code_core::config_types::ShellPresetConfig;

@@ -5,6 +5,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ImageProcessingError {
+    #[error("invalid image data URL: {message}")]
+    InvalidDataUrl { message: String },
+    #[error("failed to decode image data URL: {source}")]
+    DataUrlBase64 {
+        #[source]
+        source: base64::DecodeError,
+    },
     #[error("failed to read image at {path}: {source}")]
     Read {
         path: PathBuf,
@@ -36,4 +43,3 @@ impl ImageProcessingError {
         )
     }
 }
-

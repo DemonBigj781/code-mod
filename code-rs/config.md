@@ -56,6 +56,32 @@ name = "Ollama"
 base_url = "http://localhost:11434/v1"
 ```
 
+Colibri is available as the built-in `colibri` provider when its local server
+is running. The equivalent explicit configuration is:
+
+```toml
+model_provider = "colibri"
+model = "local-colibri"
+
+[model_providers.colibri]
+name = "Colibri"
+base_url = "http://127.0.0.1:8000/v1"
+wire_api = "chat"
+```
+
+Start Colibri independently before refreshing models in Code:
+
+```text
+coli serve --model /path/to/model --model-id local-colibri --ram 6 --host 127.0.0.1 --port 8000
+```
+
+The `--ram 6` value is a conservative starting point for a Steam Deck, not a
+universal optimum. Colibri remains responsible for model loading and Code does
+not start or manage the server. Swap remains controlled by the operating
+system; keep the existing disk-backed swap enabled for overflow. This
+integration does not require zram and does not copy model files to a RAM-backed
+filesystem.
+
 Or a third-party provider (using a distinct environment variable for the API key):
 
 ```toml
@@ -389,12 +415,20 @@ Each agent is configured using an `[[agents]]` section in your `config.toml`. He
 [[agents]]
 name = "claude"           # Agent identifier (required)
 command = "claude"        # Command to execute (required)
-enabled = true            # Enable/disable this agent (default: true)
+enabled = true            # Allow as a subagent (default: true)
+session-enabled = true    # Show in the main Agent model picker (default: true)
+review-enabled = true     # Allow for Review and Planning (default: true)
+auto-drive-enabled = true # Allow for Auto Drive selection and routing (default: true)
 read-only = false         # Restrict to read-only operations (default: false)
 description = "Claude AI assistant"  # Description shown in UI
 args = ["--dangerously-skip-permissions"]  # Default arguments
 env = { API_KEY = "value" }  # Environment variables
 ```
+
+The four capability fields are independent, so a model can be available for one role and disabled
+for another. Omitting any capability field preserves backward compatibility by enabling that role.
+The Agents settings page exposes the same policy as the `Session`, `Sub-agent`, `Review`, and
+`Auto Drive` columns in the model capabilities grid.
 
 ### Configuring agent commands
 

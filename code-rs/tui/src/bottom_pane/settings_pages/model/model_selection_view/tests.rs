@@ -37,6 +37,39 @@ fn preset_with_effort(model: &str, effort: ReasoningEffort) -> ModelPreset {
     }
 }
 
+fn rendered_text(view: &ModelSelectionView, area: Rect) -> String {
+    let mut buf = Buffer::empty(area);
+    view.content_only().render(area, &mut buf);
+    (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn openrouter_catalog_renders_free_before_paid() {
+    let mut view = make_view(ModelSelectionTarget::Session, Vec::new());
+    view.update_direct_provider_catalogs(vec![DirectProviderModelCatalog {
+        provider_id: "OpenRouter".to_owned(),
+        display_name: "OpenRouter".to_owned(),
+        status: RemoteModelsStatus::Fresh,
+        presets: vec![preset("vendor/paid"), preset("vendor/free:free")],
+    }]);
+
+    let rendered = rendered_text(&view, Rect::new(0, 0, 100, 60));
+    let free_heading = rendered.find("Free").expect("Free heading");
+    let free_model = rendered.find("vendor/free:free").expect("free model");
+    let paid_heading = rendered.find("Paid").expect("Paid heading");
+    let paid_model = rendered.find("vendor/paid").expect("paid model");
+    assert!(free_heading < free_model);
+    assert!(free_model < paid_heading);
+    assert!(paid_heading < paid_model);
+}
+
 fn make_view(target: ModelSelectionTarget, presets: Vec<ModelPreset>) -> ModelSelectionView {
     make_view_with_model(target, "gpt-5.4", presets)
 }

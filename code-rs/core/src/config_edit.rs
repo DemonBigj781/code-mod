@@ -1,4 +1,5 @@
 use crate::config::resolve_code_path_for_read;
+use crate::agent_defaults::agent_model_spec;
 use crate::config_types::{
     AppsSourcesModeToml,
     AppsSourcesToml,
@@ -1285,12 +1286,26 @@ pub async fn delete_subagent_command(code_home: &Path, name: &str) -> Result<boo
 pub struct AgentConfigPatch<'a> {
     pub name: &'a str,
     pub enabled: Option<bool>,
+    pub session_enabled: Option<bool>,
+    pub review_enabled: Option<bool>,
+    pub auto_drive_enabled: Option<bool>,
     pub args: Option<&'a [String]>,
     pub args_read_only: Option<&'a [String]>,
     pub args_write: Option<&'a [String]>,
     pub instructions: Option<&'a str>,
     pub description: Option<&'a str>,
     pub command: Option<&'a str>,
+}
+
+fn agent_names_equivalent(left: &str, right: &str) -> bool {
+    if left.eq_ignore_ascii_case(right) {
+        return true;
+    }
+
+    match (agent_model_spec(left), agent_model_spec(right)) {
+        (Some(left), Some(right)) => left.slug.eq_ignore_ascii_case(right.slug),
+        _ => false,
+    }
 }
 
 pub async fn upsert_agent_config(
@@ -1300,6 +1315,9 @@ pub async fn upsert_agent_config(
     let AgentConfigPatch {
         name,
         enabled,
+        session_enabled,
+        review_enabled,
+        auto_drive_enabled,
         args,
         args_read_only,
         args_write,
@@ -1331,6 +1349,9 @@ pub async fn upsert_agent_config(
                 AgentConfigPatch {
                     name,
                     enabled,
+                    session_enabled,
+                    review_enabled,
+                    auto_drive_enabled,
                     args,
                     args_read_only,
                     args_write,
@@ -1347,9 +1368,15 @@ pub async fn upsert_agent_config(
             let same = tbl
                 .get("name")
                 .and_then(|i| i.as_str())
-                .is_some_and(|s| s.eq_ignore_ascii_case(name));
+                .is_some_and(|existing_name| agent_names_equivalent(existing_name, name));
             if same {
+                tbl["name"] = toml_edit::value(
+                    agent_model_spec(name).map_or(name, |spec| spec.slug).to_owned(),
+                );
                 if let Some(val) = enabled { tbl["enabled"] = toml_edit::value(val); }
+                if let Some(val) = session_enabled { tbl["session-enabled"] = toml_edit::value(val); }
+                if let Some(val) = review_enabled { tbl["review-enabled"] = toml_edit::value(val); }
+                if let Some(val) = auto_drive_enabled { tbl["auto-drive-enabled"] = toml_edit::value(val); }
                 if let Some(a) = args { tbl["args"] = toml_edit::value(a.iter().cloned().collect::<toml_edit::Array>()); }
                 if let Some(ro) = args_read_only {
                     tbl["args-read-only"] = toml_edit::value(ro.iter().cloned().collect::<toml_edit::Array>());
@@ -1389,6 +1416,9 @@ pub async fn upsert_agent_config(
             AgentConfigPatch {
                 name,
                 enabled,
+                session_enabled,
+                review_enabled,
+                auto_drive_enabled,
                 args,
                 args_read_only,
                 args_write,
@@ -1414,6 +1444,9 @@ fn append_agent_entry(
     let AgentConfigPatch {
         name,
         enabled,
+        session_enabled,
+        review_enabled,
+        auto_drive_enabled,
         args,
         args_read_only,
         args_write,
@@ -1425,6 +1458,9 @@ fn append_agent_entry(
     t.set_implicit(true);
     t["name"] = toml_edit::value(name.to_owned());
     if let Some(val) = enabled { t["enabled"] = toml_edit::value(val); }
+    if let Some(val) = session_enabled { t["session-enabled"] = toml_edit::value(val); }
+    if let Some(val) = review_enabled { t["review-enabled"] = toml_edit::value(val); }
+    if let Some(val) = auto_drive_enabled { t["auto-drive-enabled"] = toml_edit::value(val); }
     if let Some(a) = args { t["args"] = toml_edit::value(a.iter().cloned().collect::<toml_edit::Array>()); }
     if let Some(ro) = args_read_only { t["args-read-only"] = toml_edit::value(ro.iter().cloned().collect::<toml_edit::Array>()); }
     if let Some(w) = args_write { t["args-write"] = toml_edit::value(w.iter().cloned().collect::<toml_edit::Array>()); }
@@ -1615,6 +1651,116 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn upsert_agent_config_persists_all_model_roles() {
+        let tmpdir = tempdir().expect("tmp");
+        let code_home = tmpdir.path();
+
+        upsert_agent_config(
+            code_home,
+            AgentConfigPatch {
+                name: "provider/model",
+                enabled: Some(false),
+                session_enabled: Some(true),
+                review_enabled: Some(false),
+                auto_drive_enabled: Some(true),
+                args: None,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
+                description: None,
+                command: Some("coder --model model -c model_provider=provider"),
+            },
+        )
+        .await
+        .expect("persist agent roles");
+
+        let contents = read_config(code_home).await;
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let agent = parsed
+            .get("agents")
+            .and_then(toml::Value::as_array)
+            .and_then(|agents| agents.first())
+            .and_then(toml::Value::as_table)
+            .expect("agent table");
+
+        assert_eq!(agent.get("enabled").and_then(toml::Value::as_bool), Some(false));
+        assert_eq!(
+            agent
+                .get("session-enabled")
+                .and_then(toml::Value::as_bool),
+            Some(true),
+        );
+        assert_eq!(
+            agent
+                .get("review-enabled")
+                .and_then(toml::Value::as_bool),
+            Some(false),
+        );
+        assert_eq!(
+            agent
+                .get("auto-drive-enabled")
+                .and_then(toml::Value::as_bool),
+            Some(true),
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_agent_config_updates_existing_alias_without_duplicate() {
+        let tmpdir = tempdir().expect("tmp");
+        let code_home = tmpdir.path();
+        tokio::fs::write(
+            code_home.join(CONFIG_TOML_FILE),
+            r#"[[agents]]
+name = "codex-mini"
+command = "coder"
+enabled = true
+"#,
+        )
+        .await
+        .expect("write alias config");
+
+        upsert_agent_config(
+            code_home,
+            AgentConfigPatch {
+                name: "code-gpt-5.4-mini",
+                enabled: Some(false),
+                session_enabled: Some(true),
+                review_enabled: Some(false),
+                auto_drive_enabled: Some(true),
+                args: None,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
+                description: None,
+                command: Some("coder"),
+            },
+        )
+        .await
+        .expect("update canonical model");
+
+        let contents = read_config(code_home).await;
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let agents = parsed
+            .get("agents")
+            .and_then(toml::Value::as_array)
+            .expect("agents array");
+
+        assert_eq!(agents.len(), 1, "alias and canonical model must share one entry");
+        let agent = agents[0].as_table().expect("agent table");
+        assert_eq!(
+            agent.get("name").and_then(toml::Value::as_str),
+            Some("code-gpt-5.4-mini"),
+        );
+        assert_eq!(agent.get("enabled").and_then(toml::Value::as_bool), Some(false));
+        assert_eq!(
+            agent
+                .get("review-enabled")
+                .and_then(toml::Value::as_bool),
+            Some(false),
+        );
+    }
 
     /// Verifies model and effort are written at top-level when no profile is set.
     #[tokio::test]

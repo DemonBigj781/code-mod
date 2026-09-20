@@ -1591,6 +1591,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "code-app-server",
+ "code-app-server-daemon",
  "code-app-server-protocol",
  "code-arg0",
  "code-chatgpt",
@@ -1741,6 +1742,7 @@ dependencies = [
  "codex-shell-escalation",
  "codex-terminal-detection",
  "codex-utils-absolute-path",
+ "codex-utils-image",
  "codex-utils-pty",
  "codex-utils-string",
  "codex-windows-sandbox",
@@ -1757,6 +1759,7 @@ dependencies = [
  "futures-util",
  "htmd",
  "httpdate",
+ "image 0.25.8",
  "img_hash",
  "indexmap 2.12.0",
  "keyring",
@@ -1903,6 +1906,7 @@ dependencies = [
 name = "code-git-tooling"
 version = "0.0.0"
 dependencies = [
+ "dirs",
  "pretty_assertions",
  "schemars 0.8.22",
  "serde",

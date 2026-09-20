@@ -664,6 +664,8 @@ impl ChatWidget<'_> {
             repl_default_runtime: self.config.repl_default_runtime,
             repl_runtimes: self.config.repl_runtimes.clone(),
             memories: self.config.memories.clone(),
+            input_compression: self.config.input_compression.clone(),
+            agents: Some(self.config.agents.clone()),
             collaboration_mode: self.current_collaboration_mode(),
         })
     }

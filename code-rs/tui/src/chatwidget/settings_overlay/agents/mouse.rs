@@ -1,7 +1,8 @@
 use crossterm::event::MouseEvent;
+use code_core::config_types::ModelRole;
 use ratatui::layout::Rect;
 
-use super::model::{AgentsOverviewState, AgentsSettingsContent};
+use super::model::{AgentsGridLayout, AgentsOverviewState, AgentsSettingsContent};
 
 impl AgentsSettingsContent {
     pub(super) fn overview_selection_at(
@@ -24,16 +25,16 @@ impl AgentsSettingsContent {
         let rows_len = state.rows.len();
         let command_len = state.commands.len();
 
-        if rel_y >= 1 && rel_y < 1 + rows_len {
-            return Some(rel_y - 1);
+        if rel_y >= 2 && rel_y < 2 + rows_len {
+            return Some(rel_y - 2);
         }
 
-        let add_agent_line = rows_len + 2;
+        let add_agent_line = rows_len + 3;
         if rel_y == add_agent_line {
             return Some(rows_len);
         }
 
-        let command_start = rows_len + 5;
+        let command_start = rows_len + 6;
         if rel_y >= command_start && rel_y < command_start + command_len {
             return Some(rows_len + 1 + (rel_y - command_start));
         }
@@ -45,5 +46,13 @@ impl AgentsSettingsContent {
 
         None
     }
-}
 
+    pub(super) fn overview_role_at(
+        state: &AgentsOverviewState,
+        area: Rect,
+        mouse_event: MouseEvent,
+    ) -> Option<ModelRole> {
+        let relative_column = mouse_event.column.checked_sub(area.x)?;
+        AgentsGridLayout::new(&state.rows, area.width).role_at(relative_column)
+    }
+}

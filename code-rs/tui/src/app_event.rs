@@ -202,6 +202,12 @@ pub(crate) struct AppLinkViewParams {
     pub app: AppInfo,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AgentUpdateIntent {
+    CreateModel,
+    Edit,
+}
+
 #[derive(Debug)]
 pub(crate) enum AppEvent {
     CodexEvent(Box<Event>),
@@ -901,6 +907,7 @@ pub(crate) enum AppEvent {
     SetExecLimitsSettings(code_core::config::ExecLimitsToml),
     SetReplSettings(code_core::config::ReplSettingsToml),
     SetTuiSettingsMenuConfig(SettingsMenuConfig),
+    SetInputCompressionConfig(code_core::config_types::OperatorInputCompressionConfig),
     SetTuiHotkeysConfig(TuiHotkeysConfig),
     SetIconMode(code_core::config_types::IconMode),
     SetModelPersonality(Option<code_core::config_types::Personality>),
@@ -1050,8 +1057,16 @@ pub(crate) enum AppEvent {
     },
     RequestAgentInstall { name: String, selected_index: usize },
     AgentsOverviewSelectionChanged { index: usize },
+    UpdateModelRole {
+        name: String,
+        role: code_core::config_types::ModelRole,
+        enabled: bool,
+        description: Option<String>,
+        command: String,
+    },
     /// Add or update an agent's settings (enabled, params, instructions)
     UpdateAgentConfig {
+        intent: AgentUpdateIntent,
         name: String,
         enabled: bool,
         args_read_only: Option<Vec<String>>,

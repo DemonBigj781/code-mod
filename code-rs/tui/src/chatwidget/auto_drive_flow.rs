@@ -164,6 +164,24 @@ impl ChatWidget<'_> {
                 reduced_motion,
             },
         );
+        let requested_model = self.config.auto_drive.model.trim();
+        let requested_model = if requested_model.is_empty() {
+            code_auto_drive_core::MODEL_SLUG.to_owned()
+        } else {
+            requested_model.to_owned()
+        };
+        if !code_core::agent_defaults::model_role_enabled(
+            &self.config.agents,
+            &requested_model,
+            ModelRole::AutoDrive,
+        ) {
+            let effects = self.auto_state.launch_failed(
+                goal,
+                format!("model '{requested_model}' is disabled for Auto Drive"),
+            );
+            self.auto_apply_controller_effects(effects);
+            return;
+        }
         self.config.auto_drive.cross_check_enabled = cross_check_enabled;
         self.config.auto_drive.qa_automation_enabled = qa_automation_enabled;
         let coordinator_events = {

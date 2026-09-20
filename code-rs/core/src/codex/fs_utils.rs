@@ -1,16 +1,76 @@
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
-pub(super) fn ensure_agent_dir(cwd: &Path, agent_id: &str) -> Result<PathBuf, String> {
+pub(crate) const AGENT_ARTIFACTS_SUBDIR: &str = "artifacts/agents";
+pub(crate) const ARTIFACT_OWNER_MARKER: &str = ".code-owned.json";
+
+fn ensure_artifact_session_dir(
+    code_home: &Path,
+    session_id: uuid::Uuid,
+) -> Result<PathBuf, String> {
+    let session_dir = code_home
+        .join(AGENT_ARTIFACTS_SUBDIR)
+        .join(session_id.to_string());
+    std::fs::create_dir_all(&session_dir).map_err(|e| {
+        format!(
+            "Failed to create artifact session dir {}: {e}",
+            session_dir.display()
+        )
+    })?;
+
+    let marker_path = session_dir.join(ARTIFACT_OWNER_MARKER);
+    if !marker_path.exists() {
+        let created_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let marker = format!("{{\"created_unix\":{created_unix}}}\n");
+        match std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&marker_path)
+        {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                file.write_all(marker.as_bytes()).map_err(|e| {
+                    format!(
+                        "Failed to mark artifact session dir {}: {e}",
+                        session_dir.display()
+                    )
+                })?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(format!(
+                    "Failed to mark artifact session dir {}: {error}",
+                    session_dir.display()
+                ));
+            }
+        }
+    }
+
+    Ok(session_dir)
+}
+
+pub(super) fn ensure_agent_dir(
+    code_home: &Path,
+    session_id: uuid::Uuid,
+    agent_id: &str,
+) -> Result<PathBuf, String> {
     let safe_agent_id = crate::fs_sanitize::safe_path_component(agent_id, "agent");
-    let dir = cwd.join(".code").join("agents").join(safe_agent_id);
+    let dir = ensure_artifact_session_dir(code_home, session_id)?.join(safe_agent_id);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create agent dir {}: {}", dir.display(), e))?;
     Ok(dir)
 }
 
-pub(super) fn ensure_user_dir(cwd: &Path) -> Result<PathBuf, String> {
-    let dir = cwd.join(".code").join("users");
+pub(super) fn ensure_user_dir(
+    code_home: &Path,
+    session_id: uuid::Uuid,
+) -> Result<PathBuf, String> {
+    let dir = ensure_artifact_session_dir(code_home, session_id)?.join("users");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create user dir {}: {}", dir.display(), e))?;
     Ok(dir)
@@ -56,3 +116,39 @@ pub(super) fn write_agent_file_display(
 
 pub(super) const UNKNOWN_ERROR: &str = "Unknown error";
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use uuid::Uuid;
+
+    #[test]
+    fn agent_artifacts_are_session_scoped_under_code_home() {
+        let code_home = TempDir::new().expect("temporary code home");
+        let session_id = Uuid::parse_str("11111111-2222-3333-4444-555555555555")
+            .expect("valid session id");
+
+        let dir = ensure_agent_dir(code_home.path(), session_id, "agent-1")
+            .expect("create agent artifact directory");
+
+        assert_eq!(
+            dir,
+            code_home
+                .path()
+                .join("artifacts")
+                .join("agents")
+                .join(session_id.to_string())
+                .join("agent-1")
+        );
+        assert!(
+            code_home
+                .path()
+                .join("artifacts")
+                .join("agents")
+                .join(session_id.to_string())
+                .join(".code-owned.json")
+                .is_file(),
+            "session artifact roots must be explicitly marked as Code-owned"
+        );
+    }
+}

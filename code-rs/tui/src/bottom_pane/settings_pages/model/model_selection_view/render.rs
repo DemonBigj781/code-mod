@@ -15,7 +15,13 @@ use crate::bottom_pane::settings_ui::panel::SettingsPanelStyle;
 use crate::bottom_pane::settings_ui::toggle;
 use crate::colors;
 
-use super::super::model_selection_state::{reasoning_effort_label, EntryKind, ModelSelectionData};
+use super::super::model_selection_state::{
+    EntryKind,
+    ModelSelectionData,
+    OpenRouterSection,
+    openrouter_section,
+    reasoning_effort_label,
+};
 use super::endpoint_form::EndpointFormState;
 use super::{EditTarget, ModelSelectionView, ViewMode};
 
@@ -352,6 +358,7 @@ impl ModelSelectionView {
                 Span::styled("]", Self::dim_style()),
             ])]));
 
+            let mut previous_section = None;
             for (entry_index, entry) in entries.iter().enumerate() {
                 let EntryKind::Preset(preset_index) = entry else {
                     continue;
@@ -359,6 +366,21 @@ impl ModelSelectionView {
                 let flat_preset = &self.data.flat_presets[*preset_index];
                 if flat_preset.provider_id.as_deref() != Some(catalog.provider_id.as_str()) {
                     continue;
+                }
+                let section = openrouter_section(
+                    flat_preset.provider_id.as_deref(),
+                    &flat_preset.model,
+                );
+                if section.is_some() && section != previous_section {
+                    let label = match section {
+                        Some(OpenRouterSection::Free) => "Free",
+                        Some(OpenRouterSection::Paid) => "Paid",
+                        None => unreachable!(),
+                    };
+                    lines.push(SelectableLineRun::plain(vec![Line::from(vec![
+                        Span::styled(format!("   {label}"), Self::dim_style()),
+                    ])]));
+                    previous_section = section;
                 }
 
                 let is_selected = entry_index == self.selected_index;

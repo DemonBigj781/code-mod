@@ -26,6 +26,7 @@ chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 clap_complete = { workspace = true }
 code-app-server = { workspace = true }
+code-app-server-daemon = { workspace = true }
 code-arg0 = { workspace = true }
 code-chatgpt = { workspace = true }
 code-common = { workspace = true, features = ["cli"] }

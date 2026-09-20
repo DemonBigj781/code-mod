@@ -16,6 +16,7 @@ fn ctrl_s_saves_settings_menu_config_when_dirty() {
         SettingsMenuConfig::default(),
         TuiHotkeysConfig::default(),
         code_core::config_types::IconMode::default(),
+        OperatorInputCompressionConfig::default(),
         app_event_tx,
     );
 
@@ -46,6 +47,7 @@ fn ctrl_s_with_no_changes_emits_no_events() {
         SettingsMenuConfig::default(),
         TuiHotkeysConfig::default(),
         code_core::config_types::IconMode::default(),
+        OperatorInputCompressionConfig::default(),
         app_event_tx,
     );
 
@@ -66,6 +68,7 @@ fn icon_mode_cycle_does_not_mutate_global() {
             SettingsMenuConfig::default(),
             TuiHotkeysConfig::default(),
             code_core::config_types::IconMode::Unicode,
+            OperatorInputCompressionConfig::default(),
             app_event_tx,
         );
 
@@ -105,6 +108,7 @@ fn close_reverts_unapplied_compact_hints_preview() {
             SettingsMenuConfig::default(),
             TuiHotkeysConfig::default(),
             code_core::config_types::IconMode::default(),
+            OperatorInputCompressionConfig::default(),
             app_event_tx,
         );
 
@@ -131,6 +135,7 @@ fn compact_hints_toggle_back_to_baseline_clears_dirty_and_save_event() {
             SettingsMenuConfig::default(),
             TuiHotkeysConfig::default(),
             code_core::config_types::IconMode::default(),
+            OperatorInputCompressionConfig::default(),
             app_event_tx,
         );
 
@@ -149,4 +154,30 @@ fn compact_hints_toggle_back_to_baseline_clears_dirty_and_save_event() {
             "no settings event should be emitted when the value is back at baseline",
         );
     });
+}
+
+#[test]
+fn compression_toggles_persist_together_and_keep_aggressive_value_when_disabled() {
+    let (tx, rx) = mpsc::channel();
+    let app_event_tx = AppEventSender::new(tx);
+    let mut view = InterfaceSettingsView::new(
+        PathBuf::from("/tmp"),
+        SettingsMenuConfig::default(),
+        TuiHotkeysConfig::default(),
+        code_core::config_types::IconMode::default(),
+        OperatorInputCompressionConfig::default(),
+        app_event_tx,
+    );
+
+    view.set_aggressive_compression(true);
+    view.set_input_compression(false);
+    view.apply_settings();
+
+    match rx.try_recv().expect("SetInputCompressionConfig") {
+        AppEvent::SetInputCompressionConfig(settings) => {
+            assert!(!settings.enabled);
+            assert!(settings.aggressive);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
 }

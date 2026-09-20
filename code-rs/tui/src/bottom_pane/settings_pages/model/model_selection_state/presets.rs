@@ -17,6 +17,46 @@ pub(crate) struct FlatPreset {
     pub(crate) picker_rank: u16,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum OpenRouterSection {
+    Free,
+    Paid,
+}
+
+pub(crate) fn openrouter_section(
+    provider_id: Option<&str>,
+    model: &str,
+) -> Option<OpenRouterSection> {
+    provider_id
+        .is_some_and(|provider| provider.eq_ignore_ascii_case("openrouter"))
+        .then(|| {
+            if model.to_ascii_lowercase().ends_with(":free") {
+                OpenRouterSection::Free
+            } else {
+                OpenRouterSection::Paid
+            }
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openrouter_sections_are_case_insensitive_and_free_first() {
+        assert_eq!(
+            openrouter_section(Some("OpenRouter"), "vendor/model:FREE"),
+            Some(OpenRouterSection::Free),
+        );
+        assert_eq!(
+            openrouter_section(Some("openrouter"), "vendor/model"),
+            Some(OpenRouterSection::Paid),
+        );
+        assert_eq!(openrouter_section(Some("openai"), "vendor/model:free"), None);
+        assert!(OpenRouterSection::Free < OpenRouterSection::Paid);
+    }
+}
+
 impl FlatPreset {
     pub(crate) fn from_model_preset(preset: &ModelPreset) -> Vec<Self> {
         preset
@@ -54,6 +94,7 @@ impl FlatPreset {
 
 pub(crate) fn reasoning_effort_label(effort: ReasoningEffort) -> &'static str {
     match effort {
+        ReasoningEffort::Ultra => "Ultra",
         ReasoningEffort::Max => "Max",
         ReasoningEffort::XHigh => "XHigh",
         ReasoningEffort::High => "High",
@@ -76,12 +117,13 @@ pub(crate) fn compare_presets(a: &FlatPreset, b: &FlatPreset) -> Ordering {
 
 fn effort_rank(effort: ReasoningEffort) -> u8 {
     match effort {
-        ReasoningEffort::Max => 0,
-        ReasoningEffort::XHigh => 1,
-        ReasoningEffort::High => 2,
-        ReasoningEffort::Medium => 3,
-        ReasoningEffort::Low => 4,
-        ReasoningEffort::Minimal => 5,
-        ReasoningEffort::None => 6,
+        ReasoningEffort::Ultra => 0,
+        ReasoningEffort::Max => 1,
+        ReasoningEffort::XHigh => 2,
+        ReasoningEffort::High => 3,
+        ReasoningEffort::Medium => 4,
+        ReasoningEffort::Low => 5,
+        ReasoningEffort::Minimal => 6,
+        ReasoningEffort::None => 7,
     }
 }

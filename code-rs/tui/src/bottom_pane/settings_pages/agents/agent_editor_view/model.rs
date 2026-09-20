@@ -14,6 +14,7 @@ pub(crate) struct AgentEditorView {
     pub(super) enabled: bool,
     pub(super) command: String,
     pub(super) command_field: FormTextField,
+    pub(super) simple_model_mode: bool,
     pub(super) params_ro: FormTextField,
     pub(super) params_wr: FormTextField,
     pub(super) description_field: FormTextField,
@@ -25,6 +26,7 @@ pub(crate) struct AgentEditorView {
     pub(super) install_hint: String,
     pub(super) description_error: Option<String>,
     pub(super) name_error: Option<String>,
+    pub(super) command_error: Option<String>,
     /// Scroll offset for the form viewport (uses Cell for interior mutability
     /// during render, where `&self` is required by the trait).
     pub(super) scroll_offset: Cell<u16>,
@@ -108,6 +110,7 @@ impl AgentEditorView {
             }
         }
 
+        let simple_model_mode = name.is_empty() && command.is_empty() && !builtin;
         let name_editable = name.is_empty();
         let mut name_field = FormTextField::new_single_line();
         name_field.set_text(&name);
@@ -131,6 +134,7 @@ impl AgentEditorView {
             enabled,
             command: command.clone(),
             command_field,
+            simple_model_mode,
             params_ro: FormTextField::new_multi_line(),
             params_wr: FormTextField::new_multi_line(),
             description_field,
@@ -142,6 +146,7 @@ impl AgentEditorView {
             install_hint: String::new(),
             description_error: None,
             name_error: None,
+            command_error: None,
             scroll_offset: Cell::new(0),
         };
 
@@ -185,4 +190,3 @@ impl AgentEditorView {
         v
     }
 }
-

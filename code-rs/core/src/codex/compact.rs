@@ -45,7 +45,7 @@ const MAX_COMPACTION_SNIPPETS: usize = 12;
 const COMPACT_STREAM_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_COMPACT_CONTEXT_OVERFLOW_TRIMS: usize = 32;
 const MAX_COMPACT_USAGE_LIMIT_RETRIES: usize = 2;
-const COMPACTION_EMERGENCY_MESSAGE: &str = "Compaction failed: the conversation history is too large to compact within the model's context limits. The history has been reset to prevent further errors. Start a new session or manually reduce context by clearing history.";
+const COMPACTION_EMERGENCY_MESSAGE: &str = "Compaction failed: the conversation history is too large to compact within the model's context limits. The history has been reduced to bounded recent context to prevent further errors. Start a new session or manually reduce context if more history is required.";
 
 /// Determine whether to use remote compaction (ChatGPT-based) or local compaction.
 ///
@@ -237,8 +237,13 @@ pub(super) async fn apply_emergency_compaction_fallback(
     );
     sess.send_event(event).await;
 
+    let source_history = {
+        let state = crate::codex::lock_or_panic!(sess.state);
+        state.history.contents()
+    };
     let initial_context = sess.build_initial_context(turn_context);
-    let emergency_history = build_emergency_compacted_history(initial_context, &message);
+    let emergency_history =
+        build_emergency_compacted_history(initial_context, &source_history, &message);
     sess.replace_history(emergency_history.clone());
     {
         let mut state = crate::codex::lock_or_panic!(sess.state);
@@ -640,7 +645,9 @@ pub(super) fn is_context_overflow_error(err: &CodexErr) -> bool {
 }
 
 pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem> {
-    items
+    let mut seen_output_call_ids = HashSet::new();
+    let mut duplicate_outputs = 0usize;
+    let sanitized = items
         .into_iter()
         .filter_map(|item| match item {
             ResponseItem::Message {
@@ -704,6 +711,10 @@ pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem>
                 })
             }
             ResponseItem::FunctionCallOutput { call_id, output } => {
+                if !seen_output_call_ids.insert(call_id.clone()) {
+                    duplicate_outputs = duplicate_outputs.saturating_add(1);
+                    return None;
+                }
                 let success = output.success;
                 let content = truncate_for_compact(output.to_string(), COMPACT_TOOL_OUTPUT_MAX_BYTES);
                 let mut output = FunctionCallOutputPayload::from_text(content);
@@ -734,6 +745,10 @@ pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem>
                 name,
                 output,
             } => {
+                if !seen_output_call_ids.insert(call_id.clone()) {
+                    duplicate_outputs = duplicate_outputs.saturating_add(1);
+                    return None;
+                }
                 let output = FunctionCallOutputPayload {
                     body: FunctionCallOutputBody::Text(truncate_for_compact(
                         output.body.to_text().unwrap_or_default(),
@@ -755,7 +770,13 @@ pub fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem>
             }),
             other => Some(other),
         })
-        .collect()
+        .collect();
+    if duplicate_outputs > 0 {
+        tracing::warn!(
+            "Dropping {duplicate_outputs} duplicate tool output(s) before compaction"
+        );
+    }
+    sanitized
 }
 
 /// Remove tool outputs that no longer have a matching tool call in the
@@ -841,20 +862,16 @@ pub(crate) fn build_compacted_history(
 }
 
 /// Build an emergency fallback history when compaction fails catastrophically.
-/// This returns just the initial context plus a warning message, ensuring the
-/// session can continue without hitting infinite retry loops.
+/// Retain bounded recent user and assistant context so the session can continue
+/// without either an infinite retry loop or a destructive context reset.
 pub(crate) fn build_emergency_compacted_history(
     initial_context: Vec<ResponseItem>,
+    source_history: &[ResponseItem],
     warning_message: &str,
 ) -> Vec<ResponseItem> {
-    let mut history = initial_context;
-    history.push(ResponseItem::Message {
-        id: None,
-        role: "user".to_owned(),
-        content: vec![ContentItem::InputText {
-            text: warning_message.to_owned(),
-        }], end_turn: None, phase: None});
-    history
+    let sanitized_history = sanitize_items_for_compact(source_history.to_vec());
+    let snippets = collect_compaction_snippets(&sanitized_history);
+    build_compacted_history(initial_context, &snippets, warning_message)
 }
 
 async fn drain_to_completed(
@@ -1145,7 +1162,64 @@ mod tests {
     }
 
     #[test]
-    fn build_emergency_compacted_history_creates_minimal_history() {
+    fn sanitize_items_for_compact_deduplicates_outputs_by_call_id() {
+        let items = vec![
+            ResponseItem::FunctionCall {
+                id: None,
+                name: "shell".to_owned(),
+                namespace: None,
+                arguments: "{}".to_owned(),
+                call_id: "call-1".to_owned(),
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call-1".to_owned(),
+                output: FunctionCallOutputPayload::from_text("first output".to_owned()),
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call-1".to_owned(),
+                output: FunctionCallOutputPayload::from_text("duplicate output".to_owned()),
+            },
+            ResponseItem::CustomToolCall {
+                id: None,
+                status: None,
+                call_id: "custom-1".to_owned(),
+                name: "custom".to_owned(),
+                input: "{}".to_owned(),
+            },
+            ResponseItem::CustomToolCallOutput {
+                call_id: "custom-1".to_owned(),
+                name: Some("custom".to_owned()),
+                output: FunctionCallOutputPayload::from_text("custom first".to_owned()),
+            },
+            ResponseItem::CustomToolCallOutput {
+                call_id: "custom-1".to_owned(),
+                name: Some("custom".to_owned()),
+                output: FunctionCallOutputPayload::from_text("custom duplicate".to_owned()),
+            },
+        ];
+
+        let sanitized = sanitize_items_for_compact(items);
+        let function_outputs = sanitized
+            .iter()
+            .filter(|item| matches!(item, ResponseItem::FunctionCallOutput { call_id, .. } if call_id == "call-1"))
+            .count();
+        let custom_outputs = sanitized
+            .iter()
+            .filter(|item| matches!(item, ResponseItem::CustomToolCallOutput { call_id, .. } if call_id == "custom-1"))
+            .count();
+
+        assert_eq!((function_outputs, custom_outputs), (1, 1));
+        assert!(sanitized.iter().any(|item| {
+            matches!(
+                item,
+                ResponseItem::FunctionCallOutput { call_id, output }
+                    if call_id == "call-1" && output.to_string() == "first output"
+            )
+        }));
+    }
+
+    #[test]
+    fn build_emergency_compacted_history_preserves_recent_context() {
         let initial_context = vec![
                 ResponseItem::Message {
                     id: None,
@@ -1161,9 +1235,33 @@ mod tests {
                     text: "<ENVIRONMENT_CONTEXT>cwd=/tmp</ENVIRONMENT_CONTEXT>".to_string(),
                 }], end_turn: None, phase: None},
         ];
+        let source_history = vec![
+            ResponseItem::Message {
+                id: Some("recent-user".to_owned()),
+                role: "user".to_owned(),
+                content: vec![ContentItem::InputText {
+                    text: "recent user request".to_owned(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::Message {
+                id: Some("recent-assistant".to_owned()),
+                role: "assistant".to_owned(),
+                content: vec![ContentItem::OutputText {
+                    text: "recent assistant answer".to_owned(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+        ];
 
         let warning = "Emergency fallback";
-        let history = build_emergency_compacted_history(initial_context.clone(), warning);
+        let history = build_emergency_compacted_history(
+            initial_context.clone(),
+            &source_history,
+            warning,
+        );
 
         assert_eq!(history.len(), initial_context.len() + 1);
 
@@ -1172,7 +1270,9 @@ mod tests {
             let Some(text) = content_items_to_text(content) else {
                 panic!("expected warning message text");
             };
-            assert_eq!(text, warning);
+            assert!(text.contains("recent user request"));
+            assert!(text.contains("recent assistant answer"));
+            assert!(text.contains(warning));
         } else {
             panic!("Expected warning message");
         }
@@ -1184,7 +1284,7 @@ mod tests {
     #[test]
     fn build_emergency_compacted_history_with_empty_context() {
         let warning = "Emergency fallback";
-        let history = build_emergency_compacted_history(Vec::new(), warning);
+        let history = build_emergency_compacted_history(Vec::new(), &[], warning);
 
         assert_eq!(history.len(), 1);
 
@@ -1193,7 +1293,7 @@ mod tests {
             let Some(text) = content_items_to_text(content) else {
                 panic!("expected warning message text");
             };
-            assert_eq!(text, warning);
+            assert!(text.contains(warning));
         } else {
             panic!("Expected warning message");
         }

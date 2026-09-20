@@ -1,8 +1,9 @@
 impl ChatWidget<'_> {
     fn open_model_settings_section(&mut self) -> bool {
         self.refresh_direct_provider_catalogs();
-        let presets = self.available_session_model_presets();
-        let direct_provider_catalogs = self.available_direct_provider_catalogs();
+        let presets = self.available_model_presets_for_role(ModelRole::Session);
+        let direct_provider_catalogs =
+            self.available_direct_provider_catalogs_for_role(ModelRole::Session);
         let current_model = self.config.model.clone();
         let current_model_provider_id = Some(self.config.model_provider_id.clone());
         let current_effort = self.config.model_reasoning_effort;

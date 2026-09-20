@@ -29,6 +29,7 @@ code-apply-patch = { workspace = true }
 code-file-search = { workspace = true }
 code-utils-absolute-path = { workspace = true }
 code-utils-json-to-toml = { workspace = true }
+code-utils-image = { workspace = true }
 code-utils-pty = { workspace = true }
 code-utils-string = { workspace = true }
 code-protocol = { workspace = true }
@@ -156,6 +157,7 @@ wiremock = { workspace = true }
 code-git-tooling = { path = "../git-tooling" }
 walkdir = { workspace = true }
 keyring = { workspace = true }
+image = { workspace = true, features = ["png"] }
 
 [package.metadata.cargo-shear]
 ignored = ["openssl-sys"]

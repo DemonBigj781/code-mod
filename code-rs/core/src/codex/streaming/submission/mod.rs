@@ -106,16 +106,8 @@ pub(in crate::codex) async fn submission_loop(
             Op::AddPendingInputDeveloper { text } => {
                 let Some(sess) = sess.clone() else { send_no_session_event(sub.id).await; continue; };
                 let dev_msg = ResponseInputItem::Message { role: "developer".to_owned(), content: vec![ContentItem::InputText { text }] };
-                let should_start_turn = sess.enqueue_out_of_turn_item(dev_msg);
-                if should_start_turn {
-                    sess.cleanup_old_status_items();
-                    let turn_context = sess.make_turn_context();
-                    let sub_id = sess.next_internal_sub_id();
-                    let sentinel_input = vec![InputItem::Text {
-                        text: PENDING_ONLY_SENTINEL.to_owned(),
-                    }];
-                    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, sentinel_input, TaskOriginKind::PendingInput, false);
-                    sess.set_task(agent);
+                if !sess.enqueue_out_of_turn_item_while_running(dev_msg) {
+                    tracing::debug!("discarding background completion after final response");
                 }
             }
             op @ Op::ConfigureSession { .. } => {

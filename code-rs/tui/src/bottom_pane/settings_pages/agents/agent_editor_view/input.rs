@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app_event::AppEvent;
+use crate::app_event::{AgentUpdateIntent, AppEvent};
 use crate::components::form_text_field::FormTextField;
 
 use super::model::{
@@ -18,6 +18,39 @@ use super::AgentEditorView;
 
 impl AgentEditorView {
     fn persist_current_agent(&mut self, require_description: bool) -> bool {
+        if self.simple_model_mode {
+            let provider = self.name_field.text().trim();
+            let model = self.command_field.text().trim();
+            self.name_error = if provider.is_empty() {
+                Some("Provider is required.".to_owned())
+            } else if provider.chars().any(char::is_whitespace) {
+                Some("Provider cannot contain whitespace.".to_owned())
+            } else {
+                None
+            };
+            self.command_error = if model.is_empty() {
+                Some("Model slug is required.".to_owned())
+            } else if model.chars().any(char::is_whitespace) {
+                Some("Model slug cannot contain whitespace.".to_owned())
+            } else {
+                None
+            };
+            if self.name_error.is_some() || self.command_error.is_some() {
+                return false;
+            }
+            self.app_event_tx.send(AppEvent::UpdateAgentConfig {
+                intent: AgentUpdateIntent::CreateModel,
+                name: format!("{provider}/{model}"),
+                enabled: self.enabled,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
+                description: None,
+                command: format!("coder --model {model} -c model_provider={provider}"),
+            });
+            return true;
+        }
+
         let ro = self
             .params_ro
             .text()
@@ -70,6 +103,7 @@ impl AgentEditorView {
             command_value.to_owned()
         };
         self.app_event_tx.send(AppEvent::UpdateAgentConfig {
+            intent: AgentUpdateIntent::Edit,
             name: final_name,
             enabled: self.enabled,
             args_read_only: ro_opt,
@@ -101,6 +135,25 @@ impl AgentEditorView {
 
     pub(super) fn handle_key_internal(&mut self, key_event: KeyEvent) -> bool {
         let last_field_idx = FIELD_CANCEL;
+        if self.simple_model_mode
+            && matches!(key_event.code, KeyCode::Char('a' | 'A'))
+            && self.field != FIELD_NAME
+            && self.field != FIELD_COMMAND
+        {
+            let provider = self.name_field.text().trim().to_owned();
+            let model = self.command_field.text().trim().to_owned();
+            if !provider.is_empty() && !model.is_empty() {
+                self.name_field.set_text(&format!("{provider}/{model}"));
+                self.command_field.set_text(&format!(
+                    "coder --model {model} -c model_provider={provider}"
+                ));
+            }
+            self.simple_model_mode = false;
+            self.name_error = None;
+            self.command_error = None;
+            self.field = FIELD_NAME;
+            return true;
+        }
         match key_event {
             KeyEvent {
                 code: KeyCode::Esc,
@@ -114,16 +167,34 @@ impl AgentEditorView {
                 code: KeyCode::Tab | KeyCode::Down,
                 ..
             } => {
-                self.field = (self.field + 1).min(last_field_idx);
+                self.field = if self.simple_model_mode {
+                    match self.field {
+                        FIELD_NAME => FIELD_COMMAND,
+                        FIELD_COMMAND => FIELD_TOGGLE,
+                        FIELD_TOGGLE => FIELD_SAVE,
+                        FIELD_SAVE => FIELD_CANCEL,
+                        _ => FIELD_CANCEL,
+                    }
+                } else {
+                    (self.field + 1).min(last_field_idx)
+                };
                 true
             }
             KeyEvent {
                 code: KeyCode::BackTab | KeyCode::Up,
                 ..
             } => {
-                if self.field > 0 {
-                    self.field -= 1;
-                }
+                self.field = if self.simple_model_mode {
+                    match self.field {
+                        FIELD_CANCEL => FIELD_SAVE,
+                        FIELD_SAVE => FIELD_TOGGLE,
+                        FIELD_TOGGLE => FIELD_COMMAND,
+                        FIELD_COMMAND => FIELD_NAME,
+                        _ => FIELD_NAME,
+                    }
+                } else {
+                    self.field.saturating_sub(1)
+                };
                 true
             }
             KeyEvent {
@@ -131,7 +202,9 @@ impl AgentEditorView {
                 ..
             } if self.field == FIELD_TOGGLE => {
                 self.enabled = true;
-                let _ = self.persist_current_agent(false);
+                if !self.simple_model_mode {
+                    let _ = self.persist_current_agent(false);
+                }
                 true
             }
             KeyEvent {
@@ -139,7 +212,9 @@ impl AgentEditorView {
                 ..
             } if self.field == FIELD_TOGGLE => {
                 self.enabled = false;
-                let _ = self.persist_current_agent(false);
+                if !self.simple_model_mode {
+                    let _ = self.persist_current_agent(false);
+                }
                 true
             }
             KeyEvent {
@@ -147,7 +222,9 @@ impl AgentEditorView {
                 ..
             } if self.field == FIELD_TOGGLE => {
                 self.enabled = !self.enabled;
-                let _ = self.persist_current_agent(false);
+                if !self.simple_model_mode {
+                    let _ = self.persist_current_agent(false);
+                }
                 true
             }
             ev @ KeyEvent { .. } if self.field == FIELD_NAME => {
@@ -158,6 +235,7 @@ impl AgentEditorView {
             }
             ev @ KeyEvent { .. } if self.field == FIELD_COMMAND => {
                 let _ = self.command_field.handle_key(ev);
+                self.command_error = None;
                 true
             }
             ev @ KeyEvent { .. } if self.field == FIELD_READ_ONLY => {
@@ -185,7 +263,13 @@ impl AgentEditorView {
                     self.complete = true;
                     self.app_event_tx.send(AppEvent::ShowAgentsOverview);
                 } else {
-                    self.field = FIELD_DESCRIPTION;
+                    self.field = if self.name_error.is_some() {
+                        FIELD_NAME
+                    } else if self.command_error.is_some() {
+                        FIELD_COMMAND
+                    } else {
+                        FIELD_DESCRIPTION
+                    };
                 }
                 true
             }
@@ -205,4 +289,3 @@ impl AgentEditorView {
         self.handle_key_internal(key_event)
     }
 }
-

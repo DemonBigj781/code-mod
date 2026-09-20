@@ -16,6 +16,7 @@ use super::BackendState;
 use super::ControlClient;
 use super::Daemon;
 use super::DaemonPaths;
+use super::DaemonSettings;
 use super::LifecycleCommand;
 use super::LifecycleStatus;
 use super::PairingOutput;
@@ -479,6 +480,13 @@ async fn remote_control_enable_disable_and_pairing_use_initialized_control_clien
     assert_eq!(disabled.status, RemoteControlStatus::Disabled);
     let PairingOutput { pairing, .. } = daemon.start_pairing().await.expect("pairing");
     assert_eq!(pairing.manual_pairing_code.as_deref(), Some("manual-code"));
+    assert_eq!(*client.enabled.lock().await, 2);
+    assert!(
+        DaemonSettings::load(&temp.path().join("app-server-daemon/settings.json"))
+            .await
+            .expect("pairing settings")
+            .remote_control_enabled
+    );
     let ready = daemon
         .ensure_remote_control_ready()
         .await
@@ -488,7 +496,7 @@ async fn remote_control_enable_disable_and_pairing_use_initialized_control_clien
         RemoteControlConnectionStatus::Connected
     );
 
-    assert_eq!(*client.enabled.lock().await, 2);
+    assert_eq!(*client.enabled.lock().await, 3);
     assert_eq!(*client.disabled.lock().await, 1);
     assert_eq!(*client.pairings.lock().await, 1);
 }

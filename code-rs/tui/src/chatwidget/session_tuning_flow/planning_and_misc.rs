@@ -267,7 +267,7 @@ impl ChatWidget<'_> {
         let trimmed = command_args.trim();
 
         if trimmed.is_empty() {
-            let presets = self.available_session_model_presets();
+            let presets = self.available_model_presets_for_role(ModelRole::Session);
             if presets.is_empty() {
                 let message =
                     "No model presets are available. Update your configuration to define models.".to_owned();
@@ -276,7 +276,8 @@ impl ChatWidget<'_> {
             }
 
             self.refresh_direct_provider_catalogs();
-            let direct_provider_catalogs = self.available_direct_provider_catalogs();
+            let direct_provider_catalogs =
+                self.available_direct_provider_catalogs_for_role(ModelRole::Session);
             self.bottom_pane
                 .show_model_selection(ModelSelectionViewParams {
                     presets,
@@ -300,6 +301,7 @@ impl ChatWidget<'_> {
                 "medium" | "med" => ReasoningEffort::Medium,
                 "xhigh" | "extra-high" | "extra_high" => ReasoningEffort::XHigh,
                 "max" => ReasoningEffort::Max,
+                "ultra" => ReasoningEffort::Ultra,
                 "high" => ReasoningEffort::High,
                 _ => {
                     // Invalid parameter, show error and return

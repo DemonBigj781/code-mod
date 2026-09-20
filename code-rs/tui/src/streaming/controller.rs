@@ -739,11 +739,26 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
                     );
                     return self.finalize(kind, immediate, sink);
                 }
-                // For Answer (or empty message), finalize existing streamed content.
-                tracing::debug!(
-                    "Already streaming {:?} via deltas, finalizing without injection",
-                    kind
-                );
+                if message.is_empty() {
+                    tracing::debug!(
+                        "Already streaming {:?} via deltas, finalizing without an empty final injection",
+                        kind
+                    );
+                    return self.finalize(kind, immediate, sink);
+                }
+
+                // Answer deltas are a responsive preview, while the final event is
+                // the authoritative complete message. Providers may omit or lose a
+                // trailing delta in long turns, so reconcile the collector with the
+                // full final payload before replacing the streaming cell.
+                let committed = state.collector.committed_count();
+                let mut msg = message.to_owned();
+                if !msg.ends_with('\n') {
+                    msg.push('\n');
+                }
+                self.state_mut(kind)
+                    .collector
+                    .replace_with_and_mark_committed(&msg, committed);
                 return self.finalize(kind, immediate, sink);
             } else if self.finishing_after_drain {
                 // We're already in the process of finishing this stream (animation phase)
@@ -789,5 +804,70 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
         }
 
         self.finalize(kind, immediate, sink)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use code_core::config::{ConfigOverrides, ConfigToml};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingSink {
+        final_sources: RefCell<Vec<String>>,
+    }
+
+    impl HistorySink for RecordingSink {
+        fn insert_history_with_kind(
+            &self,
+            _id: Option<String>,
+            _kind: StreamKind,
+            _lines: Vec<Line<'static>>,
+        ) {
+        }
+
+        fn insert_final_answer(
+            &self,
+            _id: Option<String>,
+            _lines: Vec<Line<'static>>,
+            full_markdown_source: String,
+        ) {
+            self.final_sources.borrow_mut().push(full_markdown_source);
+        }
+
+        fn start_commit_animation(&self) {}
+
+        fn stop_commit_animation(&self) {}
+    }
+
+    fn test_config() -> Config {
+        Config::load_from_base_config_with_overrides(
+            ConfigToml::default(),
+            ConfigOverrides::default(),
+            std::env::temp_dir(),
+        )
+        .expect("test config")
+    }
+
+    #[test]
+    fn final_answer_reconciles_missing_streamed_tail() {
+        let mut controller = StreamController::new(test_config());
+        let sink = RecordingSink::default();
+        let partial = "**What changed**\n\n- Preserved the streamed prefix.\n- Changes now apply.";
+        let complete = format!(
+            "{partial}\n- This tail was absent from the deltas.\n- The final event is authoritative."
+        );
+
+        controller.begin_with_id(StreamKind::Answer, Some("answer-1".to_owned()), &sink);
+        controller.push_and_maybe_commit(partial, &sink);
+        assert!(controller.apply_final_answer(&complete, &sink));
+
+        assert_eq!(
+            sink.final_sources.borrow().as_slice(),
+            &[format!("{complete}\n")],
+        );
     }
 }

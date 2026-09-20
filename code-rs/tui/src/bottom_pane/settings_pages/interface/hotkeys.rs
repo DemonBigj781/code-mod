@@ -489,6 +489,14 @@ impl InterfaceSettingsView {
 
         let mut saved_any = saved_settings || saved_icon;
 
+        if self.input_compression != self.input_compression_baseline {
+            self.app_event_tx.send(AppEvent::SetInputCompressionConfig(
+                self.input_compression.clone(),
+            ));
+            self.input_compression_baseline = self.input_compression.clone();
+            saved_any = true;
+        }
+
         if self.dirty_hotkeys {
             if let Err(err) = self.validate_hotkeys() {
                 let msg = if saved_any {
@@ -561,6 +569,24 @@ impl InterfaceSettingsView {
         );
         self.refresh_settings_dirty_state();
         self.status = None;
+    }
+
+    pub(super) fn set_input_compression(&mut self, enabled: bool) {
+        self.input_compression.enabled = enabled;
+        self.status = None;
+    }
+
+    pub(super) fn toggle_input_compression(&mut self) {
+        self.set_input_compression(!self.input_compression.enabled);
+    }
+
+    pub(super) fn set_aggressive_compression(&mut self, aggressive: bool) {
+        self.input_compression.aggressive = aggressive;
+        self.status = None;
+    }
+
+    pub(super) fn toggle_aggressive_compression(&mut self) {
+        self.set_aggressive_compression(!self.input_compression.aggressive);
     }
 
     fn scoped_hotkeys_resolved(&self) -> ResolvedTuiHotkeys {

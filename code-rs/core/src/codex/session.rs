@@ -12,6 +12,9 @@ use super::streaming::{
 use super::truncation::{truncate_middle_bytes, TRUNCATION_MARKER};
 use std::sync::RwLock as StdRwLock;
 
+mod operator_inbox;
+use operator_inbox::OperatorInbox;
+
 pub(super) const MAX_EVENT_SEQ_SUB_IDS: usize = 1024;
 pub(super) const MAX_BACKGROUND_SEQ_SUB_IDS: usize = 1024;
 pub(super) const MAX_WAIT_TRACKED_BATCHES: usize = 1024;
@@ -189,7 +192,7 @@ pub(super) struct State {
     pub(super) pending_request_resources: HashMap<String, PendingRequestResources>,
     pub(super) pending_dynamic_tools: HashMap<String, oneshot::Sender<DynamicToolResponse>>,
     pub(super) pending_input: Vec<ResponseInputItem>,
-    pub(super) pending_user_input: Vec<QueuedUserInput>,
+    pub(super) pending_user_input: OperatorInbox,
     pub(super) history: ConversationHistory,
     pub(super) granted_permissions_by_turn: HashMap<String, code_protocol::models::PermissionProfile>,
     pub(super) granted_permissions_for_session: Option<code_protocol::models::PermissionProfile>,
@@ -526,6 +529,8 @@ pub(crate) struct Session {
     pub(super) disable_response_storage: bool,
     pub(super) tools_config: ToolsConfig,
     pub(super) memories_config: crate::config_types::MemoriesConfig,
+    pub(super) input_compression_config:
+        crate::config_types::OperatorInputCompressionConfig,
     pub(super) memory_mode: Mutex<crate::rollout::catalog::SessionMemoryMode>,
     pub(super) dynamic_tools: Vec<DynamicToolSpec>,
     pub(super) exec_command_manager: Arc<crate::exec_command::SessionManager>,
@@ -1466,8 +1471,17 @@ impl Session {
     }
 
     pub fn queue_user_input(&self, queued: QueuedUserInput) {
-        let mut state = crate::codex::lock_or_panic!(self.state);
+        let state = crate::codex::lock_or_panic!(self.state);
         state.pending_user_input.push(queued);
+    }
+
+    pub(crate) fn has_pending_operator_input(&self) -> bool {
+        !crate::codex::lock_or_panic!(self.state).pending_user_input.is_empty()
+    }
+
+    pub(super) async fn wait_for_operator_input(&self) {
+        let inbox = crate::codex::lock_or_panic!(self.state).pending_user_input.clone();
+        inbox.wait().await;
     }
 
     pub(super) fn notify_wait_interrupted(&self, reason: WaitInterruptReason) {
@@ -1514,11 +1528,10 @@ impl Session {
             return;
         }
 
-        let cwd = self.get_cwd().to_path_buf();
         let safe_sub_id = crate::fs_sanitize::safe_path_component(sub_id, "sub");
         let uuid = Uuid::new_v4();
         let filename = format!("user-message-{safe_sub_id}-{uuid}.txt");
-        let file_note = match ensure_user_dir(&cwd)
+        let file_note = match ensure_user_dir(self.client.code_home(), self.id)
             .and_then(|dir| write_agent_file(&dir, &filename, &aggregated))
         {
             Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
@@ -1589,22 +1602,18 @@ impl Session {
     }
 
     pub fn pop_next_queued_user_input(&self) -> Option<QueuedUserInput> {
-        let mut state = crate::codex::lock_or_panic!(self.state);
-        if state.pending_user_input.is_empty() {
-            None
-        } else {
-            Some(state.pending_user_input.remove(0))
-        }
+        crate::codex::lock_or_panic!(self.state).pending_user_input.pop()
     }
 
-    /// Enqueue a response item that should be surfaced to the model at the start of the
-    /// next turn. Returns `true` if no agent is currently running and a new turn should be
-    /// scheduled immediately.
-    pub fn enqueue_out_of_turn_item(&self, item: ResponseInputItem) -> bool {
+    /// Queue internal context only while a model turn is still active. Once a final
+    /// response has ended the turn, late background completions must stay silent.
+    pub fn enqueue_out_of_turn_item_while_running(&self, item: ResponseInputItem) -> bool {
         let mut state = crate::codex::lock_or_panic!(self.state);
-        let should_start_turn = state.current_task.is_none();
+        if state.current_task.is_none() {
+            return false;
+        }
         state.pending_input.push(item);
-        should_start_turn
+        true
     }
 
     pub(crate) fn next_internal_sub_id(&self) -> String {
@@ -2671,52 +2680,21 @@ impl Session {
             std::mem::swap(&mut pending_input, &mut state.pending_input);
         }
 
-        let mut pending_user_input = Vec::new();
-        if !state.pending_user_input.is_empty() {
-            std::mem::swap(&mut pending_user_input, &mut state.pending_user_input);
-        }
+        let pending_user_input = state.pending_user_input.drain();
 
         (pending_input, pending_user_input)
     }
 
-    /// Returns pending input for the current turn. Callers can decide whether
-    /// queued user inputs should be drained immediately (`drain_user_inputs = true`)
-    /// or preserved for a later turn—for example, review mode keeps them queued
-    /// so the primary agent can resume once the review finishes.
-    pub fn get_pending_input_filtered(&self, drain_user_inputs: bool) -> Vec<ResponseInputItem> {
+    /// Drain internal model-visible context without consuming queued operator
+    /// submissions. Review mode uses this path so operator input remains owned
+    /// by the next normal turn.
+    pub fn drain_pending_input(&self) -> Vec<ResponseInputItem> {
         let mut state = crate::codex::lock_or_panic!(self.state);
-        if state.pending_input.is_empty()
-            && (drain_user_inputs || state.pending_user_input.is_empty())
-        {
-            Vec::with_capacity(0)
-        } else {
-            let mut ret = Vec::new();
-            if !state.pending_input.is_empty() {
-                let mut model_inputs = Vec::new();
-                std::mem::swap(&mut model_inputs, &mut state.pending_input);
-                ret.extend(model_inputs);
-            }
-
-            if !state.pending_user_input.is_empty() {
-                if drain_user_inputs {
-                    let mut queued_user_inputs = Vec::new();
-                    std::mem::swap(&mut queued_user_inputs, &mut state.pending_user_input);
-                    ret.extend(
-                        queued_user_inputs
-                            .into_iter()
-                            .map(|queued| queued.response_item),
-                    );
-                } else {
-                    ret.extend(
-                        state
-                            .pending_user_input
-                            .iter()
-                            .map(|queued| queued.response_item.clone()),
-                    );
-                }
-            }
-            ret
+        if state.pending_input.is_empty() {
+            return Vec::with_capacity(0);
         }
+
+        std::mem::take(&mut state.pending_input)
     }
 
     pub fn add_pending_input(&self, mut input: ResponseInputItem) {
@@ -3203,6 +3181,8 @@ impl State {
         Self {
             approved_commands: self.approved_commands.clone(),
             history: self.history.clone(),
+            pending_user_input: self.pending_user_input.clone(),
+            pending_input: self.pending_input.clone(),
             // Preserve request_ordinal so reconfigurations (e.g., /reasoning)
             // do not reset provider ordering mid-session.
             request_ordinal: self.request_ordinal,
@@ -3216,5 +3196,28 @@ impl State {
             context_stream_ids: self.context_stream_ids.clone(),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod operator_input_handoff_tests {
+    use super::*;
+
+    #[test]
+    fn reconfiguration_preserves_pending_operator_input() {
+        let state = State::default();
+        state.pending_user_input.push(QueuedUserInput {
+            submission_id: "operator-1".into(),
+            response_item: ResponseInputItem::Message {
+                role: "user".into(),
+                content: vec![ContentItem::InputText { text: "keep this correction".into() }],
+            },
+            core_items: vec![InputItem::Text { text: "keep this correction".into() }],
+        });
+        let replacement = state.partial_clone();
+        assert_eq!(replacement.pending_user_input.len(), 1,
+            "session reconfiguration must not discard an accepted operator message");
+        assert_eq!(replacement.pending_user_input.pop().unwrap().submission_id, "operator-1");
+        assert!(state.pending_user_input.is_empty(), "handoff must share ownership, not duplicate messages");
     }
 }

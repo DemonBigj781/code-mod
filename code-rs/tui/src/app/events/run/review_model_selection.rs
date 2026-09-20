@@ -227,9 +227,15 @@
                         widget.show_new_subagent_editor();
                     }
                 }
-                AppEvent::UpdateAgentConfig { name, enabled, args_read_only, args_write, instructions, description, command } => {
+                AppEvent::UpdateModelRole { name, role, enabled, description, command } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_model_role_update(name, role, enabled, description, command);
+                    }
+                }
+                AppEvent::UpdateAgentConfig { intent, name, enabled, args_read_only, args_write, instructions, description, command } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.apply_agent_update(crate::chatwidget::AgentUpdateRequest {
+                            intent,
                             name,
                             enabled,
                             args_ro: args_read_only,

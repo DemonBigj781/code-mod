@@ -36,6 +36,14 @@ impl ConversationHistory {
                 continue;
             }
 
+            if let Some(submission_id) = user_message_submission_id(&item)
+                && self.items.iter().any(|existing| {
+                    user_message_submission_id(existing) == Some(submission_id)
+                })
+            {
+                continue;
+            }
+
             self.items.push(item.clone());
         }
     }
@@ -80,6 +88,15 @@ fn is_api_message(message: &ResponseItem) -> bool {
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. } => true,
         ResponseItem::Other => false,
+    }
+}
+
+fn user_message_submission_id(message: &ResponseItem) -> Option<&str> {
+    match message {
+        ResponseItem::Message {
+            id: Some(id), role, ..
+        } if role == "user" => Some(id.as_str()),
+        _ => None,
     }
 }
 
@@ -143,5 +160,32 @@ mod tests {
                 , end_turn: None, phase: None}
             ]
         );
+    }
+
+    #[test]
+    fn deduplicates_user_messages_by_submission_id_not_text() {
+        let first = ResponseItem::Message {
+            id: Some("submission-1".to_owned()),
+            role: "user".to_owned(),
+            content: vec![ContentItem::InputText {
+                text: "repeatable prompt".to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+        let second_submission = ResponseItem::Message {
+            id: Some("submission-2".to_owned()),
+            role: "user".to_owned(),
+            content: vec![ContentItem::InputText {
+                text: "repeatable prompt".to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+
+        let mut history = ConversationHistory::default();
+        history.record_items([&first, &first, &second_submission]);
+
+        assert_eq!(history.contents(), vec![first, second_submission]);
     }
 }

@@ -38,11 +38,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 const AUTH_REQUIRED_MESSAGE: &str = "Authentication required. Run `code login` to continue.";
 
-use crate::agent_defaults::{
-    default_agent_configs,
-    enabled_agent_model_specs_for_auth,
-    filter_agent_model_names_for_auth,
-};
+use crate::agent_defaults::subagent_model_names_for_auth;
 use crate::chat_completions::AggregateStreamExt;
 use crate::chat_completions::stream_chat_completions;
 use crate::client_common::Prompt;
@@ -81,7 +77,6 @@ use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::TokenUsage;
 use crate::reasoning::clamp_reasoning_effort_for_model;
-use crate::slash_commands::get_enabled_agents;
 use crate::util::{backoff, header_map_to_json};
 use code_otel::otel_event_manager::{OtelEventManager, TurnLatencyPayload};
 use std::sync::Arc;
@@ -554,26 +549,11 @@ impl ModelClient {
             .as_ref()
             .is_some_and(|manager| manager.supports_pro_only_models());
 
-        let mut agent_models: Vec<String> = if self.config.agents.is_empty() {
-            default_agent_configs()
-                .into_iter()
-                .filter(|cfg| cfg.enabled)
-                .map(|cfg| cfg.name)
-                .collect()
-        } else {
-            get_enabled_agents(&self.config.agents)
-        };
-        agent_models = filter_agent_model_names_for_auth(
-            agent_models,
+        let mut agent_models = subagent_model_names_for_auth(
+            &self.config.agents,
             auth_mode,
             supports_pro_only_models,
         );
-        if agent_models.is_empty() {
-            agent_models = enabled_agent_model_specs_for_auth(auth_mode, supports_pro_only_models)
-                .into_iter()
-                .map(|spec| spec.slug.to_owned())
-                .collect();
-        }
         agent_models.sort_by_key(|a| a.to_ascii_lowercase());
         agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
         tools_config.set_agent_models(agent_models);

@@ -139,16 +139,20 @@ fn sync_openai_plugins_repo_via_http(code_home: &Path, api_base_url: &str) -> Re
         return Ok(remote_sha);
     }
 
-    let cloned_repo_path = prepare_repo_parent_and_temp_dir(&repo_path, "curated plugins repo")?;
+    let cloned_repo = prepare_repo_parent_and_temp_dir(&repo_path, "curated plugins repo")?;
+    let cloned_repo_path = cloned_repo.path();
     let zipball_bytes = runtime.block_on(fetch_curated_repo_zipball(api_base_url, &remote_sha))?;
-    extract_zipball_to_dir(&zipball_bytes, &cloned_repo_path)?;
-    ensure_marketplace_manifest_exists(&cloned_repo_path)?;
-    activate_repo(&repo_path, &cloned_repo_path, "curated plugins repo")?;
+    extract_zipball_to_dir(&zipball_bytes, cloned_repo_path)?;
+    ensure_marketplace_manifest_exists(cloned_repo_path)?;
+    activate_repo(&repo_path, cloned_repo_path, "curated plugins repo")?;
     write_repo_sha(&sha_path, &remote_sha, "curated plugins repo")?;
     Ok(remote_sha)
 }
 
-fn prepare_repo_parent_and_temp_dir(repo_path: &Path, label: &str) -> Result<PathBuf, String> {
+fn prepare_repo_parent_and_temp_dir(
+    repo_path: &Path,
+    label: &str,
+) -> Result<tempfile::TempDir, String> {
     let Some(parent) = repo_path.parent() else {
         return Err(format!(
             "failed to determine {label} parent directory for {}",
@@ -162,7 +166,7 @@ fn prepare_repo_parent_and_temp_dir(repo_path: &Path, label: &str) -> Result<Pat
         )
     })?;
 
-    let clone_dir = tempfile::Builder::new()
+    tempfile::Builder::new()
         .prefix("plugins-clone-")
         .tempdir_in(parent)
         .map_err(|err| {
@@ -170,8 +174,7 @@ fn prepare_repo_parent_and_temp_dir(repo_path: &Path, label: &str) -> Result<Pat
                 "failed to create temporary {label} directory in {}: {err}",
                 parent.display()
             )
-        })?;
-    Ok(clone_dir.keep())
+        })
 }
 
 fn ensure_marketplace_manifest_exists(repo_path: &Path) -> Result<(), String> {
@@ -281,7 +284,8 @@ fn sync_repo_via_git(
         return Ok(remote_sha);
     }
 
-    let cloned_repo_path = prepare_repo_parent_and_temp_dir(repo_path, label)?;
+    let cloned_repo = prepare_repo_parent_and_temp_dir(repo_path, label)?;
+    let cloned_repo_path = cloned_repo.path();
     let mut clone_command = Command::new(git_binary);
     clone_command
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -291,7 +295,7 @@ fn sync_repo_via_git(
     if let Some(git_ref) = git_ref.filter(|git_ref| !git_ref.trim().is_empty()) {
         clone_command.arg("--branch").arg(git_ref);
     }
-    clone_command.arg(repo_url).arg(&cloned_repo_path);
+    clone_command.arg(repo_url).arg(cloned_repo_path);
 
     let clone_context = format!("git clone {label}");
     let clone_output = run_git_command_with_timeout(
@@ -301,15 +305,15 @@ fn sync_repo_via_git(
     )?;
     ensure_git_success(&clone_output, &clone_context)?;
 
-    let cloned_sha = git_head_sha(&cloned_repo_path, git_binary)?;
+    let cloned_sha = git_head_sha(cloned_repo_path, git_binary)?;
     if cloned_sha != remote_sha {
         return Err(format!(
             "{label} clone HEAD mismatch: expected {remote_sha}, got {cloned_sha}"
         ));
     }
 
-    ensure_marketplace_manifest_exists(&cloned_repo_path)?;
-    activate_repo(repo_path, &cloned_repo_path, label)?;
+    ensure_marketplace_manifest_exists(cloned_repo_path)?;
+    activate_repo(repo_path, cloned_repo_path, label)?;
     write_repo_sha(sha_path, &remote_sha, label)?;
     Ok(remote_sha)
 }
@@ -720,5 +724,37 @@ mod tests {
                 .is_file()
         );
         assert!(read_curated_plugins_sha(code_home.path()).is_some());
+    }
+
+    #[test]
+    fn failed_marketplace_sync_removes_staging_clone() {
+        let (repo, git_ref) = init_marketplace_repo();
+        fs::remove_file(repo.path().join(".agents/plugins/marketplace.json"))
+            .expect("remove marketplace manifest");
+        run_git(repo.path(), ["add", "-A"]);
+        run_git(repo.path(), ["commit", "-m", "remove manifest"]);
+
+        let code_home = TempDir::new().expect("code home");
+        let marketplace_repo = PluginMarketplaceRepoToml {
+            url: repo.path().to_string_lossy().into_owned(),
+            git_ref: Some(git_ref),
+        };
+
+        let error = sync_git_marketplace_repo(code_home.path(), &marketplace_repo)
+            .expect_err("sync without a marketplace manifest must fail");
+        assert!(error.contains("missing marketplace manifest"));
+
+        let staging_parent = code_home.path().join(MARKETPLACE_REPOS_RELATIVE_DIR);
+        let staging_clones = fs::read_dir(staging_parent)
+            .expect("read marketplace staging parent")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("plugins-clone-")
+            })
+            .count();
+        assert_eq!(staging_clones, 0, "failed sync must not leak staging clones");
     }
 }

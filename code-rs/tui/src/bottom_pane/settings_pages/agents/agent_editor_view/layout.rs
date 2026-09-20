@@ -28,6 +28,9 @@ impl AgentEditorView {
     /// height; the viewport scroll offset handles overflow instead of squishing
     /// fields.
     pub(super) fn layout(&self, content_width: u16) -> AgentEditorLayout {
+        if self.simple_model_mode {
+            return self.simple_model_layout();
+        }
         let inner_width = content_width.saturating_sub(4);
         let instr_box_h = self.instr.desired_height(inner_width).min(8).saturating_add(2);
         let ro_box_h = self.params_ro.desired_height(inner_width).min(6).saturating_add(2);
@@ -214,5 +217,98 @@ impl AgentEditorView {
             command_height: command_box_h,
         }
     }
-}
 
+    fn simple_model_layout(&self) -> AgentEditorLayout {
+        let selected = |idx: usize| {
+            if self.field == idx {
+                Style::default()
+                    .bg(crate::colors::selection())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            }
+        };
+        let enabled_style = if self.enabled {
+            Style::default()
+                .fg(crate::colors::success())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            crate::colors::style_text_dim()
+        };
+        let disabled_style = if self.enabled {
+            crate::colors::style_text_dim()
+        } else {
+            crate::colors::style_error_bold()
+        };
+        let enabled_marker = if self.enabled {
+            crate::icons::checkbox_on()
+        } else {
+            crate::icons::checkbox_off()
+        };
+        let disabled_marker = if self.enabled {
+            crate::icons::checkbox_off()
+        } else {
+            crate::icons::checkbox_on()
+        };
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "Agents » Add Model Agent",
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+        ];
+        lines.extend((0..3).map(|_| Line::from("")));
+        lines.push(self.name_error.as_ref().map_or_else(
+            || Line::from(""),
+            |error| Line::from(Span::styled(error.clone(), crate::colors::style_error())),
+        ));
+        lines.extend((0..3).map(|_| Line::from("")));
+        lines.push(self.command_error.as_ref().map_or_else(
+            || Line::from(""),
+            |error| Line::from(Span::styled(error.clone(), crate::colors::style_error())),
+        ));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "Status:",
+                if self.field == FIELD_TOGGLE {
+                    crate::colors::style_primary_bold()
+                } else {
+                    crate::colors::style_text()
+                },
+            ),
+            Span::raw("  "),
+            Span::styled(format!("{enabled_marker} Enabled"), enabled_style),
+            Span::raw("  "),
+            Span::styled(format!("{disabled_marker} Disabled"), disabled_style),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Code generates the command automatically. Press a for the advanced executable editor.",
+            crate::colors::style_text_dim(),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("[ Save ]", selected(FIELD_SAVE).fg(crate::colors::success())),
+            Span::raw("  "),
+            Span::styled("[ Cancel ]", selected(FIELD_CANCEL).fg(crate::colors::text())),
+        ]));
+
+        AgentEditorLayout {
+            lines,
+            name_offset: 2,
+            command_offset: 6,
+            toggle_offset: 10,
+            ro_offset: 14,
+            wr_offset: 14,
+            desc_offset: 14,
+            instr_offset: 14,
+            buttons_offset: 14,
+            ro_height: 0,
+            wr_height: 0,
+            desc_height: 0,
+            instr_height: 0,
+            name_height: 3,
+            command_height: 3,
+        }
+    }
+}

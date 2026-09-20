@@ -146,7 +146,7 @@ impl Runner<'_> {
                     agent_completion_wake_messages(&payload, &mut state.agent_completion_wake_batches)
                 };
                 if !wake_messages.is_empty() {
-                    enqueue_agent_completion_wake(&sess_for_agents, wake_messages).await;
+                    enqueue_agent_completion_wake(&sess_for_agents, wake_messages);
                 }
                 let status_event = sess_for_agents.make_event(
                     "agent_status",

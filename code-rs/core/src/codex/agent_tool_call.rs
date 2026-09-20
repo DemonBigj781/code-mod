@@ -2,8 +2,6 @@ use std::fmt::Write as _;
 
 use super::*;
 use super::fs_utils::{ensure_agent_dir, write_agent_file};
-use super::streaming::AgentTask;
-use crate::protocol::TaskOriginKind;
 use super::truncation::truncate_middle_bytes;
 use crate::tools::events::execute_custom_tool;
 use code_protocol::models::FunctionCallOutputBody;
@@ -147,10 +145,54 @@ fn resolve_agent_read_only(
     config.is_some_and(|c| c.read_only)
 }
 
+fn configured_agent_for_requested_model<'a>(
+    agents: &'a [crate::config_types::AgentConfig],
+    requested_model: &str,
+) -> Option<&'a crate::config_types::AgentConfig> {
+    crate::agent_defaults::agent_config_for_model(agents, requested_model).or_else(|| {
+        agents
+            .iter()
+            .find(|agent| agent.command.eq_ignore_ascii_case(requested_model))
+    })
+}
+
+fn validate_agent_file_paths(
+    cwd: &std::path::Path,
+    files: &[String],
+) -> Result<(), String> {
+    for value in files {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err("Agent attachments must name explicit files only; empty paths are not allowed.".to_owned());
+        }
+
+        let path = std::path::PathBuf::from(trimmed);
+        let resolved = if path.is_absolute() { path } else { cwd.join(path) };
+        match std::fs::metadata(&resolved) {
+            Ok(metadata) if metadata.is_dir() => {
+                return Err(format!(
+                    "Agent attachments accept explicit files only; directory paths are not allowed: {}",
+                    resolved.display(),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                return Err(format!(
+                    "Agent attachment is not an accessible file: {} ({error})",
+                    resolved.display(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod resolve_read_only_tests {
     use super::*;
     use crate::config_types::AgentConfig;
+    use tempfile::tempdir;
 
     fn make_config(read_only: bool) -> AgentConfig {
         AgentConfig {
@@ -159,6 +201,9 @@ mod resolve_read_only_tests {
             args: Vec::new(),
             read_only,
             enabled: true,
+            session_enabled: true,
+            review_enabled: true,
+            auto_drive_enabled: true,
             description: None,
             env: None,
             args_read_only: None,
@@ -198,6 +243,89 @@ mod resolve_read_only_tests {
     #[test]
     fn defaults_to_false_without_config() {
         assert!(!resolve_agent_read_only(None, None, None));
+    }
+
+    #[test]
+    fn configured_agent_lookup_resolves_model_aliases() {
+        let mut cfg = make_config(false);
+        cfg.name = "code-gpt-5.4-mini".into();
+        cfg.command = "/opt/custom-code-agent".into();
+
+        let selected = configured_agent_for_requested_model(
+            std::slice::from_ref(&cfg),
+            "codex-mini",
+        )
+        .expect("alias should resolve to configured canonical model");
+
+        assert_eq!(selected.command, "/opt/custom-code-agent");
+    }
+
+    #[test]
+    fn agent_file_paths_reject_directories() {
+        let root = tempdir().expect("temporary directory");
+        let attached = vec![root.path().display().to_string()];
+
+        let error = validate_agent_file_paths(root.path(), &attached)
+            .expect_err("directory attachment must be rejected");
+
+        assert!(error.contains("explicit files only"));
+        assert!(error.contains(root.path().to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn agent_file_paths_accept_regular_files() {
+        let root = tempdir().expect("temporary directory");
+        let file_path = root.path().join("context.txt");
+        std::fs::write(&file_path, "bounded context").expect("write attachment");
+
+        validate_agent_file_paths(root.path(), &["context.txt".to_owned()])
+            .expect("regular file attachment should be accepted");
+    }
+
+    #[tokio::test]
+    async fn persisted_agent_alias_reloads_into_runtime_dispatch() {
+        let root = tempdir().expect("temporary directory");
+        let code_home = root.path().join("code-home");
+        let cwd = root.path().join("workspace");
+        let persisted_args = vec!["--persisted".to_owned()];
+        std::fs::create_dir_all(&cwd).expect("create workspace");
+
+        crate::config_edit::upsert_agent_config(
+            &code_home,
+            crate::config_edit::AgentConfigPatch {
+                name: "codex-mini",
+                enabled: Some(true),
+                session_enabled: Some(false),
+                review_enabled: Some(true),
+                auto_drive_enabled: Some(false),
+                args: Some(&persisted_args),
+                args_read_only: None,
+                args_write: None,
+                instructions: Some("persisted instructions"),
+                description: Some("persisted description"),
+                command: Some("/opt/persisted-code-agent"),
+            },
+        )
+        .await
+        .expect("persist agent config");
+
+        let config = crate::config::ConfigBuilder::new()
+            .with_code_home(code_home)
+            .with_overrides(crate::config::ConfigOverrides {
+                cwd: Some(cwd),
+                ..Default::default()
+            })
+            .load()
+            .expect("reload persisted config");
+        let selected = configured_agent_for_requested_model(&config.agents, "code-gpt-5.4-mini")
+            .expect("reloaded alias should be selected for canonical request");
+
+        assert_eq!(selected.command, "/opt/persisted-code-agent");
+        assert_eq!(selected.args, vec!["--persisted"]);
+        assert!(!selected.session_enabled);
+        assert!(selected.review_enabled);
+        assert!(!selected.auto_drive_enabled);
+        assert_eq!(selected.instructions.as_deref(), Some("persisted instructions"));
     }
 }
 
@@ -645,6 +773,23 @@ pub(crate) async fn handle_run_agent(
                 };
             }
 
+            if let Some(files) = params.files.as_deref()
+                && let Err(message) = validate_agent_file_paths(&sess.cwd, files)
+            {
+                let response = serde_json::json!({
+                    "status": "blocked",
+                    "reason": "invalid_file_attachment",
+                    "message": message,
+                });
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        body: FunctionCallOutputBody::Text(response.to_string()),
+                        success: Some(false),
+                    },
+                };
+            }
+
             let current_depth = crate::agent_tool::current_agent_spawn_depth();
             if current_depth >= sess.subagent_max_depth {
                 let guidance = format!(
@@ -737,12 +882,8 @@ pub(crate) async fn handle_run_agent(
             let mut agent_labels: Vec<(String, String)> = Vec::new();
             let mut skipped: Vec<String> = Vec::new();
             for model in models {
-                let model_key = model.to_lowercase();
                 // Check if this model is configured and enabled
-                let agent_config = sess.agents.iter().find(|a| {
-                    a.name.to_lowercase() == model_key
-                        || a.command.to_lowercase() == model_key
-                });
+                let agent_config = configured_agent_for_requested_model(&sess.agents, &model);
 
                 if let Some(config) = agent_config {
                     if !config.enabled {
@@ -1070,9 +1211,12 @@ async fn handle_check_agent_status(
 
                 let mut progress_file: Option<String> = None;
                 if total_progress > max_progress_lines {
-                    let cwd = sess.get_cwd().to_path_buf();
                     drop(manager);
-                    let dir = match ensure_agent_dir(&cwd, &agent.id) {
+                    let dir = match ensure_agent_dir(
+                        sess.client.code_home(),
+                        sess.id,
+                        &agent.id,
+                    ) {
                         Ok(d) => d,
                         Err(e) => {
                             return ResponseInputItem::FunctionCallOutput {
@@ -1185,8 +1329,11 @@ async fn handle_get_agent_result(
                         };
                     }
                 }
-                let cwd = sess.get_cwd().to_path_buf();
-                let dir = match ensure_agent_dir(&cwd, &params.agent_id) {
+                let dir = match ensure_agent_dir(
+                    sess.client.code_home(),
+                    sess.id,
+                    &params.agent_id,
+                ) {
                     Ok(d) => d,
                     Err(e) => {
                         return ResponseInputItem::FunctionCallOutput {
@@ -1421,8 +1568,11 @@ async fn handle_wait_for_agent(
                             // Include output/error preview and file path
                             // Avoid holding manager lock during filesystem I/O
                             drop(manager);
-                            let cwd = sess.get_cwd().to_path_buf();
-                            let dir = match ensure_agent_dir(&cwd, &agent.id) {
+                            let dir = match ensure_agent_dir(
+                                sess.client.code_home(),
+                                sess.id,
+                                &agent.id,
+                            ) {
                                 Ok(d) => d,
                                 Err(e) => {
                                     return ResponseInputItem::FunctionCallOutput {
@@ -1494,10 +1644,13 @@ async fn handle_wait_for_agent(
                             // Enriched response: include per-agent previews and file paths
                             // Avoid holding manager lock during filesystem I/O
                             drop(manager);
-                            let cwd = sess.get_cwd().to_path_buf();
                             let mut summaries: Vec<serde_json::Value> = Vec::new();
                             for a in &completed_agents {
-                                let dir = match ensure_agent_dir(&cwd, &a.id) {
+                                let dir = match ensure_agent_dir(
+                                    sess.client.code_home(),
+                                    sess.id,
+                                    &a.id,
+                                ) {
                                     Ok(d) => d,
                                     Err(e) => {
                                         return ResponseInputItem::FunctionCallOutput {
@@ -1592,8 +1745,11 @@ async fn handle_wait_for_agent(
                             // Include output/error preview for the unseen completed agent
                             // Avoid holding manager lock during filesystem I/O
                             drop(manager);
-                            let cwd = sess.get_cwd().to_path_buf();
-                            let dir = match ensure_agent_dir(&cwd, &unseen.id) {
+                            let dir = match ensure_agent_dir(
+                                sess.client.code_home(),
+                                sess.id,
+                                &unseen.id,
+                            ) {
                                 Ok(d) => d,
                                 Err(e) => {
                                     return ResponseInputItem::FunctionCallOutput {
@@ -1988,30 +2144,11 @@ pub(super) fn agent_completion_wake_messages(
     messages
 }
 
-pub(super) async fn enqueue_agent_completion_wake(
-    sess: &Arc<Session>,
-    messages: Vec<ResponseInputItem>,
-) {
-    if messages.is_empty() {
-        return;
-    }
-
-    let mut should_start_turn = false;
+pub(super) fn enqueue_agent_completion_wake(sess: &Session, messages: Vec<ResponseInputItem>) {
     for message in messages {
-        if sess.enqueue_out_of_turn_item(message) {
-            should_start_turn = true;
+        if !sess.enqueue_out_of_turn_item_while_running(message) {
+            tracing::debug!("discarding agent completion wake after final response");
         }
-    }
-
-    if should_start_turn {
-        sess.cleanup_old_status_items();
-        let turn_context = sess.make_turn_context();
-        let sub_id = sess.next_internal_sub_id();
-        let sentinel_input = vec![InputItem::Text {
-            text: PENDING_ONLY_SENTINEL.to_owned(),
-        }];
-        let agent = AgentTask::spawn(Arc::clone(sess), turn_context, sub_id, sentinel_input, TaskOriginKind::PendingInput, false);
-        sess.set_task(agent);
     }
 }
 

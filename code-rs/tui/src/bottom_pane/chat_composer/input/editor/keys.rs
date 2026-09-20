@@ -172,6 +172,16 @@ pub(super) fn handle_key_event_without_popup(
         }
         KeyEvent {
             code: KeyCode::Enter,
+            modifiers: KeyModifiers::SHIFT,
+            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+            ..
+        } => {
+            view.insert_str("\n");
+            view.history.reset_navigation();
+            (InputResult::None, true)
+        }
+        KeyEvent {
+            code: KeyCode::Enter,
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Press | KeyEventKind::Repeat,
             ..
@@ -224,4 +234,3 @@ pub(super) fn handle_key_event_without_popup(
         input => view.handle_input_basic(input),
     }
 }
-

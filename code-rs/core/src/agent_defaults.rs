@@ -4,7 +4,7 @@
 //! (to assemble argv when the user has not overridden a model) and by the TUI
 //! (to surface the available sub-agent options).
 
-use crate::config_types::AgentConfig;
+use crate::config_types::{AgentConfig, ModelRole};
 use code_app_server_protocol::AuthMode;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -367,13 +367,7 @@ fn dynamic_code_agent_specs() -> Vec<AgentModelSpec> {
 
 fn dynamic_code_agent_spec(model: ManifestModel) -> Option<AgentModelSpec> {
     let track = code_agent_track(&model.slug)?;
-    if static_agent_model_spec(&model.slug).is_some() {
-        return None;
-    }
-
-    let candidate_version = parse_model_version_components(&model.slug)?;
-    let highest_static_version = highest_static_code_track_version(track)?;
-    if candidate_version <= highest_static_version {
+    if static_model_binding_exists(&model.slug) {
         return None;
     }
 
@@ -394,11 +388,19 @@ fn dynamic_code_agent_spec(model: ManifestModel) -> Option<AgentModelSpec> {
         write_args: CODE_GPT5_WRITE,
         model_args,
         description,
-        enabled_by_default: true,
+        enabled_by_default: false,
         aliases,
         gating_env: None,
         is_frontline,
         pro_only,
+    })
+}
+
+fn static_model_binding_exists(model: &str) -> bool {
+    AGENT_MODEL_SPECS.iter().any(|spec| {
+        spec.model_args
+            .windows(2)
+            .any(|args| args[0] == "--model" && args[1].eq_ignore_ascii_case(model))
     })
 }
 
@@ -427,79 +429,12 @@ fn code_agent_track(model: &str) -> Option<CodeAgentTrack> {
     }
 }
 
-fn canonical_code_agent_track(model: &str) -> Option<CodeAgentTrack> {
-    let canonical = model.strip_prefix("code-").unwrap_or(model);
-    let version_and_suffix = canonical.strip_prefix("gpt-")?;
-    let suffix = version_and_suffix
-        .find('-')
-        .map(|index| &version_and_suffix[index..]);
-
-    match suffix {
-        None => Some(CodeAgentTrack::Base),
-        Some("-mini") => Some(CodeAgentTrack::Mini),
-        Some("-codex") => Some(CodeAgentTrack::Codex),
-        Some("-codex-spark") => Some(CodeAgentTrack::CodexSpark),
-        _ => None,
-    }
-}
-
-fn highest_static_code_track_version(track: CodeAgentTrack) -> Option<Vec<u32>> {
-    AGENT_MODEL_SPECS
-        .iter()
-        .filter(|spec| spec.family == "code")
-        .filter(|spec| canonical_code_agent_track(spec.slug) == Some(track))
-        .filter_map(|spec| parse_model_version_components(spec.slug))
-        .max()
-}
-
-fn parse_model_version_components(model: &str) -> Option<Vec<u32>> {
-    let canonical = model
-        .strip_prefix("code-")
-        .unwrap_or(model)
-        .rsplit('/')
-        .next()
-        .unwrap_or(model);
-    let mut components = Vec::new();
-
-    for segment in canonical.split('-') {
-        let first = segment.chars().next()?;
-        if !first.is_ascii_digit() {
-            continue;
-        }
-
-        for part in segment.split('.') {
-            if part.is_empty() || !part.chars().all(|ch| ch.is_ascii_digit()) {
-                return None;
-            }
-            components.push(part.parse().ok()?);
-        }
-
-        return (!components.is_empty()).then_some(components);
-    }
-
-    None
-}
-
 fn leak_str(value: String) -> &'static str {
     Box::leak(value.into_boxed_str())
 }
 
 fn leak_str_slice(values: Vec<&'static str>) -> &'static [&'static str] {
     Box::leak(values.into_boxed_slice())
-}
-
-fn static_agent_model_spec(identifier: &str) -> Option<&'static AgentModelSpec> {
-    let lower = identifier.to_ascii_lowercase();
-    AGENT_MODEL_SPECS
-        .iter()
-        .find(|spec| spec.slug.eq_ignore_ascii_case(&lower))
-        .or_else(|| {
-            AGENT_MODEL_SPECS.iter().find(|spec| {
-                spec.aliases
-                    .iter()
-                    .any(|alias| alias.eq_ignore_ascii_case(&lower))
-            })
-        })
 }
 
 pub fn agent_model_specs() -> &'static [AgentModelSpec] {
@@ -549,6 +484,28 @@ pub fn filter_agent_model_names_for_auth(
         .collect()
 }
 
+pub fn subagent_model_names_for_auth(
+    configured_agents: &[AgentConfig],
+    auth_mode: Option<AuthMode>,
+    supports_pro_only_models: bool,
+) -> Vec<String> {
+    let model_names = if configured_agents.is_empty() {
+        default_agent_configs()
+            .into_iter()
+            .filter(|config| config.enabled)
+            .map(|config| config.name)
+            .collect()
+    } else {
+        configured_agents
+            .iter()
+            .filter(|config| config.enabled)
+            .map(|config| config.name.clone())
+            .collect()
+    };
+
+    filter_agent_model_names_for_auth(model_names, auth_mode, supports_pro_only_models)
+}
+
 pub fn agent_model_spec(identifier: &str) -> Option<&'static AgentModelSpec> {
     let lower = identifier.to_ascii_lowercase();
     agent_model_specs()
@@ -561,6 +518,36 @@ pub fn agent_model_spec(identifier: &str) -> Option<&'static AgentModelSpec> {
                     .any(|alias| alias.eq_ignore_ascii_case(&lower))
             })
         })
+}
+
+pub fn agent_config_for_model<'a>(
+    configured_agents: &'a [AgentConfig],
+    identifier: &str,
+) -> Option<&'a AgentConfig> {
+    let canonical = agent_model_spec(identifier).map(|spec| spec.slug);
+    configured_agents.iter().find(|agent| {
+        if let Some(canonical) = canonical {
+            agent_model_spec(&agent.name)
+                .is_some_and(|spec| spec.slug.eq_ignore_ascii_case(canonical))
+        } else {
+            agent.name.eq_ignore_ascii_case(identifier)
+        }
+    })
+}
+
+pub fn model_role_enabled(
+    configured_agents: &[AgentConfig],
+    identifier: &str,
+    role: ModelRole,
+) -> bool {
+    if let Some(agent) = agent_config_for_model(configured_agents, identifier) {
+        return agent.role_enabled(role);
+    }
+
+    match role {
+        ModelRole::Subagent => agent_model_spec(identifier).is_some_and(AgentModelSpec::is_enabled),
+        ModelRole::Session | ModelRole::Review | ModelRole::AutoDrive => true,
+    }
 }
 
 fn model_guide_intro(active_agents: &[String]) -> String {
@@ -672,8 +659,8 @@ pub fn model_guide_markdown_with_custom(configured_agents: &[AgentConfig]) -> Op
 }
 
 pub fn default_agent_configs() -> Vec<AgentConfig> {
-    enabled_agent_model_specs()
-        .into_iter()
+    agent_model_specs()
+        .iter()
         .map(agent_config_from_spec)
         .collect()
 }
@@ -685,6 +672,9 @@ pub fn agent_config_from_spec(spec: &AgentModelSpec) -> AgentConfig {
         args: Vec::new(),
         read_only: false,
         enabled: spec.is_enabled(),
+        session_enabled: true,
+        review_enabled: true,
+        auto_drive_enabled: true,
         description: None,
         env: None,
         args_read_only: some_args(spec.read_only_args),
@@ -762,8 +752,8 @@ mod tests {
         let mid = agent_model_spec("gpt-5.1").expect("mid alias present");
         assert_eq!(mid.slug, "code-gpt-5.4");
 
-        let mid_upgrade = agent_model_spec("code-gpt-5.2").expect("mid upgrade alias present");
-        assert_eq!(mid_upgrade.slug, "code-gpt-5.4");
+        let mid_exact = agent_model_spec("code-gpt-5.2").expect("exact model binding present");
+        assert_eq!(mid_exact.slug, "code-gpt-5.2");
     }
 
     #[test]
@@ -822,6 +812,16 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_agent_specs_include_gpt_6_astra() {
+        let spec = agent_model_spec("gpt-6-astra").expect("GPT-6-Astra spec should be present");
+
+        assert_eq!(spec.slug, "code-gpt-6-astra");
+        assert_eq!(spec.cli, "coder");
+        assert_eq!(spec.model_args, &["--model", "gpt-6-astra"]);
+        assert!(!spec.enabled_by_default);
+    }
+
+    #[test]
     fn gpt_5_6_variants_are_builtin_agents() {
         for (model, slug) in [
             ("gpt-5.6-sol", "code-gpt-5.6-sol"),
@@ -838,12 +838,71 @@ mod tests {
 
     #[test]
     fn dynamic_agent_specs_skip_older_manifest_models() {
-        let gpt_5_2 = agent_model_spec("gpt-5.2").expect("gpt-5.2 should resolve via upgrade alias");
-        assert_eq!(gpt_5_2.slug, "code-gpt-5.4");
+        let gpt_5_2 = agent_model_spec("code-gpt-5.2")
+            .expect("every listed manifest model should have its own agent binding");
+        assert_eq!(gpt_5_2.model_args, &["--model", "gpt-5.2"]);
+        assert!(!gpt_5_2.enabled_by_default);
         assert!(
-            enabled_agent_model_specs()
+            agent_model_specs()
                 .iter()
-                .all(|spec| spec.slug != "code-gpt-5.2")
+                .any(|spec| spec.slug == "code-gpt-5.2")
+        );
+    }
+
+    #[test]
+    fn default_configs_include_disabled_discovered_models() {
+        let configs = default_agent_configs();
+        let generated = configs
+            .iter()
+            .find(|config| config.name == "code-gpt-5.2")
+            .expect("generated model agent should be configurable");
+        assert!(!generated.enabled);
+        assert_eq!(configs.len(), agent_model_specs().len());
+    }
+
+    #[test]
+    fn model_roles_resolve_aliases_to_the_configured_agent() {
+        let mut config = agent_config_from_spec(
+            agent_model_spec("code-gpt-5.3-codex").expect("built-in model"),
+        );
+        config.review_enabled = false;
+
+        assert!(!model_role_enabled(
+            &[config],
+            "gpt-5.2-codex",
+            ModelRole::Review,
+        ));
+    }
+
+    #[test]
+    fn model_roles_are_independent() {
+        let mut config = agent_config_from_spec(
+            agent_model_spec("code-gpt-5.3-codex").expect("built-in model"),
+        );
+        config.enabled = false;
+        config.review_enabled = true;
+
+        assert!(!model_role_enabled(
+            &[config.clone()],
+            "code-gpt-5.3-codex",
+            ModelRole::Subagent,
+        ));
+        assert!(model_role_enabled(
+            &[config],
+            "code-gpt-5.3-codex",
+            ModelRole::Review,
+        ));
+    }
+
+    #[test]
+    fn configured_subagent_roles_can_disable_every_model() {
+        let mut configs = default_agent_configs();
+        for config in &mut configs {
+            config.enabled = false;
+        }
+
+        assert!(
+            subagent_model_names_for_auth(&configs, Some(AuthMode::Chatgpt), true).is_empty()
         );
     }
 }

@@ -75,6 +75,7 @@ mod mcp_tool_call;
 mod memories;
 mod model_provider_info;
 mod openrouter_free_router;
+mod operator_input_compression;
 mod stablehorde;
 #[cfg(test)]
 mod openrouter_free_router_tests;
@@ -100,6 +101,8 @@ mod user_instructions;
 pub mod plugins;
 pub mod skills;
 pub use model_provider_info::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+pub use model_provider_info::COLIBRI_API_BASE_URL;
+pub use model_provider_info::COLIBRI_PROVIDER_ID;
 pub use model_provider_info::ModelProviderInfo;
 pub use model_provider_info::OpenRouterConfig;
 pub use model_provider_info::OpenRouterProviderConfig;

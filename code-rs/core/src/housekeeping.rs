@@ -13,6 +13,7 @@ use tracing::{debug, info, warn};
 
 const DEFAULT_SESSION_RETENTION_DAYS: i64 = 7;
 const DEFAULT_WORKTREE_RETENTION_DAYS: i64 = 3;
+const DEFAULT_AGENT_ARTIFACT_RETENTION_DAYS: i64 = 7;
 const DEFAULT_MIN_INTERVAL_HOURS: i64 = 6;
 const LOCK_FILE_NAME: &str = "cleanup.lock";
 const STATE_FILE_NAME: &str = "cleanup-state.json";
@@ -26,6 +27,9 @@ pub struct CleanupOutcome {
     pub worktree_files_removed: usize,
     pub worktree_bytes_reclaimed: u64,
     pub worktrees_skipped_active: usize,
+    pub agent_artifact_sessions_removed: usize,
+    pub agent_artifact_files_removed: usize,
+    pub agent_artifact_bytes_reclaimed: u64,
     pub errors: usize,
 }
 
@@ -33,6 +37,7 @@ pub struct CleanupOutcome {
 struct HousekeepingConfig {
     session_retention_days: Option<i64>,
     worktree_retention_days: Option<i64>,
+    agent_artifact_retention_days: Option<i64>,
     min_interval_hours: i64,
     disabled: bool,
 }
@@ -50,6 +55,10 @@ impl HousekeepingConfig {
             "CODE_CLEANUP_WORKTREE_RETENTION_DAYS",
             DEFAULT_WORKTREE_RETENTION_DAYS,
         );
+        let agent_artifact_retention_days = parse_days_env(
+            "CODE_CLEANUP_AGENT_ARTIFACT_RETENTION_DAYS",
+            DEFAULT_AGENT_ARTIFACT_RETENTION_DAYS,
+        );
         let min_interval_hours = parse_positive_i64_env(
             "CODE_CLEANUP_MIN_INTERVAL_HOURS",
             DEFAULT_MIN_INTERVAL_HOURS,
@@ -58,6 +67,7 @@ impl HousekeepingConfig {
         Self {
             session_retention_days,
             worktree_retention_days,
+            agent_artifact_retention_days,
             min_interval_hours,
             disabled,
         }
@@ -128,13 +138,18 @@ pub fn run_housekeeping_if_due(code_home: &Path) -> io::Result<Option<CleanupOut
         );
     }
 
-    if outcome.session_days_removed > 0 || outcome.worktrees_removed > 0 {
+    if outcome.session_days_removed > 0
+        || outcome.worktrees_removed > 0
+        || outcome.agent_artifact_sessions_removed > 0
+    {
         info!(
             sessions_pruned = outcome.session_days_removed,
             session_bytes_reclaimed = outcome.session_bytes_reclaimed,
             worktrees_pruned = outcome.worktrees_removed,
             worktree_bytes_reclaimed = outcome.worktree_bytes_reclaimed,
             skipped_active_worktrees = outcome.worktrees_skipped_active,
+            agent_artifact_sessions_pruned = outcome.agent_artifact_sessions_removed,
+            agent_artifact_bytes_reclaimed = outcome.agent_artifact_bytes_reclaimed,
             "code home housekeeping pruned stale artifacts"
         );
     } else {
@@ -168,7 +183,106 @@ fn perform_housekeeping(
             outcome.errors += stats.errors;
         }
 
+    if let Some(days) = config.agent_artifact_retention_days
+        && let Some(stats) = cleanup_agent_artifacts(code_home, now, days)? {
+            outcome.agent_artifact_sessions_removed = stats.removed_sessions;
+            outcome.agent_artifact_files_removed = stats.removed_files;
+            outcome.agent_artifact_bytes_reclaimed = stats.reclaimed_bytes;
+            outcome.errors += stats.errors;
+        }
+
     Ok(outcome)
+}
+
+#[derive(Default)]
+struct AgentArtifactCleanupStats {
+    removed_sessions: usize,
+    removed_files: usize,
+    reclaimed_bytes: u64,
+    errors: usize,
+}
+
+#[derive(Deserialize)]
+struct ArtifactOwnerMarker {
+    created_unix: i64,
+}
+
+fn cleanup_agent_artifacts(
+    code_home: &Path,
+    now: OffsetDateTime,
+    retention_days: i64,
+) -> io::Result<Option<AgentArtifactCleanupStats>> {
+    let artifacts_root = code_home.join(crate::codex::fs_utils::AGENT_ARTIFACTS_SUBDIR);
+    if !artifacts_root.exists() {
+        return Ok(None);
+    }
+
+    let retention = time::Duration::days(retention_days.max(0));
+    let mut stats = AgentArtifactCleanupStats::default();
+    for entry in list_dir_sorted(&artifacts_root) {
+        if !entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+            continue;
+        }
+
+        let session_path = entry.path();
+        let marker_path = session_path.join(crate::codex::fs_utils::ARTIFACT_OWNER_MARKER);
+        let marker = match fs::read(&marker_path) {
+            Ok(bytes) => match serde_json::from_slice::<ArtifactOwnerMarker>(&bytes) {
+                Ok(marker) => marker,
+                Err(error) => {
+                    debug!(
+                        "skipping agent artifact directory with invalid ownership marker {:?}: {error}",
+                        session_path
+                    );
+                    continue;
+                }
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                stats.errors += 1;
+                warn!(
+                    "failed to read agent artifact ownership marker {:?}: {error}",
+                    marker_path
+                );
+                continue;
+            }
+        };
+        let Ok(created_at) = OffsetDateTime::from_unix_timestamp(marker.created_unix) else {
+            debug!(
+                "skipping agent artifact directory with invalid creation time {:?}",
+                session_path
+            );
+            continue;
+        };
+        let age = now - created_at;
+        if age.is_negative() || (!retention.is_zero() && age < retention) {
+            continue;
+        }
+
+        let dir_stats = directory_stats(&session_path);
+        match fs::remove_dir_all(&session_path) {
+            Ok(()) => {
+                stats.removed_sessions += 1;
+                stats.removed_files += dir_stats.files;
+                stats.reclaimed_bytes += dir_stats.bytes;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                stats.errors += 1;
+                warn!("failed to remove agent artifact directory {:?}: {error}", session_path);
+            }
+        }
+    }
+
+    if dir_is_empty(&artifacts_root) {
+        let _ = fs::remove_dir(&artifacts_root);
+        if let Some(parent) = artifacts_root.parent()
+            && dir_is_empty(parent) {
+                let _ = fs::remove_dir(parent);
+            }
+    }
+
+    Ok(Some(stats))
 }
 
 fn cleanup_sessions(
@@ -791,6 +905,7 @@ mod tests {
         let config = HousekeepingConfig {
             session_retention_days: Some(7),
             worktree_retention_days: None,
+            agent_artifact_retention_days: None,
             min_interval_hours: 1,
             disabled: false,
         };
@@ -816,6 +931,7 @@ mod tests {
         let config = HousekeepingConfig {
             session_retention_days: None,
             worktree_retention_days: Some(0),
+            agent_artifact_retention_days: None,
             min_interval_hours: 1,
             disabled: false,
         };
@@ -844,6 +960,7 @@ mod tests {
         let config = HousekeepingConfig {
             session_retention_days: None,
             worktree_retention_days: Some(0),
+            agent_artifact_retention_days: None,
             min_interval_hours: 1,
             disabled: false,
         };
@@ -891,6 +1008,7 @@ mod tests {
         let config = HousekeepingConfig {
             session_retention_days: None,
             worktree_retention_days: Some(0),
+            agent_artifact_retention_days: None,
             min_interval_hours: 1,
             disabled: false,
         };
@@ -901,6 +1019,47 @@ mod tests {
         assert_eq!(outcome.worktrees_removed, 1);
         assert!(!worktree_path.exists());
         assert!(!branch_exists(&repo_dir, "code-branch-test"));
+    }
+
+    #[test]
+    fn removes_only_marked_agent_artifact_sessions_outside_retention_window() {
+        let temp = TempDir::new().unwrap();
+        let code_home = temp.path();
+        let artifacts_root = code_home.join("artifacts/agents");
+        let old_owned = artifacts_root.join("old-owned");
+        let recent_owned = artifacts_root.join("recent-owned");
+        let old_unowned = artifacts_root.join("old-unowned");
+
+        for path in [&old_owned, &recent_owned, &old_unowned] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join("result.txt"), b"artifact").unwrap();
+        }
+        fs::write(
+            old_owned.join(".code-owned.json"),
+            br#"{"created_unix":1759276800}"#,
+        )
+        .unwrap();
+        fs::write(
+            recent_owned.join(".code-owned.json"),
+            br#"{"created_unix":1760050800}"#,
+        )
+        .unwrap();
+
+        let config = HousekeepingConfig {
+            session_retention_days: None,
+            worktree_retention_days: None,
+            agent_artifact_retention_days: Some(7),
+            min_interval_hours: 1,
+            disabled: false,
+        };
+
+        let now = datetime!(2025-10-10 12:00:00 UTC);
+        let outcome = perform_housekeeping(code_home, now, &config).unwrap();
+
+        assert_eq!(outcome.agent_artifact_sessions_removed, 1);
+        assert!(!old_owned.exists());
+        assert!(recent_owned.exists());
+        assert!(old_unowned.exists(), "unmarked operator data must not be removed");
     }
 
     fn run_git(repo_root: &Path, args: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>) -> io::Result<()> {

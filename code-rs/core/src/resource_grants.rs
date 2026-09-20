@@ -19,6 +19,7 @@ impl ResourceGrantState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn current(
         &self,
         configured: &ResourceRequestProfile,

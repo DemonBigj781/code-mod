@@ -100,9 +100,8 @@ impl ChatWidget<'_> {
             return Ok(changed);
         }
 
-        let direct_provider_changed = self.restore_provider_before_direct()?;
-
         if model.eq_ignore_ascii_case(OPENROUTER_FREE_MAX_MODEL) {
+            let direct_provider_changed = self.restore_provider_before_direct()?;
             let Some(openrouter) = self
                 .config
                 .model_providers
@@ -134,14 +133,13 @@ impl ChatWidget<'_> {
             return Ok(changed);
         }
 
-        if self.config.model_provider_id != OPENROUTER_PROVIDER_ID {
-            return Ok(direct_provider_changed);
+        let restoring_openrouter_free = self.config.model_provider_id == OPENROUTER_PROVIDER_ID
+            && (self.config.active_profile.as_deref() == Some(OPENROUTER_FREE_PROFILE)
+                || self.model_provider_before_openrouter.is_some());
+        if !restoring_openrouter_free {
+            return self.restore_provider_before_direct();
         }
 
-        // A previous session may have persisted the OpenRouter provider without
-        // the temporary profile marker. Normal model presets are OpenAI presets,
-        // so selecting one must heal that stranded provider state as well as the
-        // in-memory OpenRouter Free profile transition.
         let (provider_id, provider, profile) = self
             .model_provider_before_openrouter
             .take()
@@ -153,8 +151,7 @@ impl ChatWidget<'_> {
                     .map(|provider| ("openai".to_owned(), provider, None))
             })
             .expect("built-in OpenAI provider must be available");
-        let changed = direct_provider_changed
-            || self.config.model_provider_id != provider_id
+        let changed = self.config.model_provider_id != provider_id
             || self.config.model_provider != provider
             || self.config.active_profile != profile;
         self.config.model_provider_id = provider_id;
@@ -176,7 +173,8 @@ impl ChatWidget<'_> {
                 ReasoningEffort::High => 3,
                 ReasoningEffort::XHigh => 4,
                 ReasoningEffort::Max => 5,
-                ReasoningEffort::None => 6,
+                ReasoningEffort::Ultra => 6,
+                ReasoningEffort::None => 7,
             }
         }
 

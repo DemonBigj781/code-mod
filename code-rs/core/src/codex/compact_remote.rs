@@ -30,10 +30,17 @@ const MAX_REMOTE_COMPACT_CONTEXT_OVERFLOW_TRIMS: usize = 32;
 const MAX_REMOTE_COMPACT_USAGE_LIMIT_RETRIES: usize = 2;
 
 fn should_fallback_to_local_compaction(err: &CodexErr) -> bool {
-    matches!(
-        err,
-        CodexErr::UnexpectedStatus(response) if response.status == StatusCode::NOT_FOUND
-    )
+    match err {
+        CodexErr::UnexpectedStatus(response) => response.status != StatusCode::TOO_MANY_REQUESTS,
+        CodexErr::Stream(..)
+        | CodexErr::ServerError(_)
+        | CodexErr::ServerOverloaded
+        | CodexErr::Reqwest(_)
+        | CodexErr::Json(_)
+        | CodexErr::Io(_) => true,
+        CodexErr::RetryLimit(retry) => retry.retryable,
+        _ => false,
+    }
 }
 
 pub(super) async fn run_inline_remote_auto_compact_task(
@@ -262,10 +269,11 @@ mod tests {
     use super::should_fallback_to_local_compaction;
     use crate::error::CodexErr;
     use crate::error::UnexpectedResponseError;
+    use crate::error::UsageLimitReachedError;
     use reqwest::StatusCode;
 
     #[test]
-    fn missing_remote_compact_endpoint_is_eligible_for_local_fallback() {
+    fn remote_service_failures_fall_back_locally_but_account_failures_do_not() {
         let not_found = CodexErr::UnexpectedStatus(UnexpectedResponseError {
             status: StatusCode::NOT_FOUND,
             body: r#"{"detail":"Not Found"}"#.to_string(),
@@ -276,8 +284,24 @@ mod tests {
             body: "temporary failure".to_string(),
             request_id: None,
         });
+        let rate_limited = CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            body: "rate limited".to_string(),
+            request_id: None,
+        });
+        let stream_error = CodexErr::Stream("connection reset".to_owned(), None, None);
+        let usage_limit = CodexErr::UsageLimitReached(UsageLimitReachedError {
+            plan_type: None,
+            resets_in_seconds: None,
+        });
+        let expired_auth = CodexErr::AuthRefreshPermanent("expired".to_owned());
 
         assert!(should_fallback_to_local_compaction(&not_found));
-        assert!(!should_fallback_to_local_compaction(&server_error));
+        assert!(should_fallback_to_local_compaction(&server_error));
+        assert!(should_fallback_to_local_compaction(&stream_error));
+        assert!(!should_fallback_to_local_compaction(&rate_limited));
+        assert!(!should_fallback_to_local_compaction(&usage_limit));
+        assert!(!should_fallback_to_local_compaction(&expired_auth));
+        assert!(!should_fallback_to_local_compaction(&CodexErr::Interrupted));
     }
 }

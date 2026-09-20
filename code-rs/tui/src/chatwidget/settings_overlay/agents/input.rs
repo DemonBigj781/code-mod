@@ -3,7 +3,9 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 
-use super::model::{AgentsOverviewState, AgentsSettingsContent};
+use super::model::{
+    AgentsOverviewState, AgentsSettingsContent, next_model_role, previous_model_role,
+};
 
 impl AgentsSettingsContent {
     pub(super) fn handle_overview_key(
@@ -37,6 +39,44 @@ impl AgentsSettingsContent {
                 });
                 true
             }
+            KeyCode::Left | KeyCode::Char('h') => {
+                if state.selected < state.rows.len() {
+                    state.selected_role = previous_model_role(state.selected_role);
+                }
+                true
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                if state.selected < state.rows.len() {
+                    state.selected_role = next_model_role(state.selected_role);
+                }
+                true
+            }
+            KeyCode::Char(' ') => {
+                if let Some(row) = state.rows.get(state.selected) {
+                    let role = state.selected_role;
+                    app_event_tx.send(AppEvent::UpdateModelRole {
+                        name: row.name.clone(),
+                        role,
+                        enabled: !row.role_enabled(role),
+                        description: row.description.clone(),
+                        command: row.command.clone(),
+                    });
+                }
+                true
+            }
+            KeyCode::Char('i' | 'I') => {
+                let Some(row) = state.rows.get(state.selected) else {
+                    return false;
+                };
+                if row.installed {
+                    return false;
+                }
+                app_event_tx.send(AppEvent::RequestAgentInstall {
+                    name: row.name.clone(),
+                    selected_index: state.selected,
+                });
+                true
+            }
             KeyCode::Enter => {
                 let idx = state.selected;
                 let add_agent_idx = state.rows.len();
@@ -44,16 +84,9 @@ impl AgentsSettingsContent {
                     app_event_tx.send(AppEvent::ShowAgentEditorNew);
                 } else if idx < add_agent_idx {
                     let row = &state.rows[idx];
-                    if row.installed {
-                        app_event_tx.send(AppEvent::ShowAgentEditor {
-                            name: row.name.clone(),
-                        });
-                    } else {
-                        app_event_tx.send(AppEvent::RequestAgentInstall {
-                            name: row.name.clone(),
-                            selected_index: idx,
-                        });
-                    }
+                    app_event_tx.send(AppEvent::ShowAgentEditor {
+                        name: row.name.clone(),
+                    });
                 } else {
                     let cmd_idx = idx.saturating_sub(state.rows.len() + 1);
                     if cmd_idx < state.commands.len() {
@@ -72,4 +105,3 @@ impl AgentsSettingsContent {
         }
     }
 }
-

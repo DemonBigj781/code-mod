@@ -227,6 +227,10 @@ impl Prompt {
         // Limit screenshots to maximum 5 (keep first and last 4)
         limit_screenshots_in_input(&mut input_with_instructions);
 
+        // Persisted history and tool outputs can bypass local attachment loading.
+        // Normalize their embedded images before the first provider request.
+        normalize_image_data_urls_in_input(&mut input_with_instructions);
+
         input_with_instructions
     }
 
@@ -410,6 +414,46 @@ fn limit_screenshots_in_input(input: &mut [ResponseItem]) {
     );
 }
 
+fn normalize_image_data_urls_in_input(input: &mut [ResponseItem]) {
+    for item in input.iter_mut() {
+        match item {
+            ResponseItem::Message { content, .. } => {
+                for content_item in content.iter_mut() {
+                    if let ContentItem::InputImage { image_url } = content_item {
+                        normalize_image_data_url(image_url);
+                    }
+                }
+            }
+            ResponseItem::FunctionCallOutput { output, .. } => {
+                if let Some(content_items) = output.content_items_mut() {
+                    for content_item in content_items.iter_mut() {
+                        if let FunctionCallOutputContentItem::InputImage { image_url, .. } =
+                            content_item
+                        {
+                            normalize_image_data_url(image_url);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn normalize_image_data_url(image_url: &mut String) {
+    if !image_url.starts_with("data:image/") {
+        return;
+    }
+
+    match code_utils_image::load_data_url_and_resize_to_fit(image_url) {
+        Ok(image) => *image_url = image.into_data_url(),
+        Err(error) => tracing::warn!(
+            %error,
+            "failed to normalize embedded image before provider request; preserving original payload"
+        ),
+    }
+}
+
 const SPARK_IMAGE_PLACEHOLDER: &str =
     "[image omitted: selected -spark model does not support image inputs]";
 
@@ -455,11 +499,12 @@ pub(crate) fn rewrite_image_generation_calls_for_input(input: &mut Vec<ResponseI
         .into_iter()
         .map(|item| match item {
             ResponseItem::ImageGenerationCall { result, .. } => {
-                let image_url = if result.starts_with("data:") {
+                let mut image_url = if result.starts_with("data:") {
                     result
                 } else {
                     format!("data:image/png;base64,{result}")
                 };
+                normalize_image_data_url(&mut image_url);
 
                 ResponseItem::Message {
                     id: None,
@@ -544,7 +589,13 @@ impl Stream for ResponseStream {
 #[cfg(test)]
 mod tests {
     use crate::model_family::find_family_for_model;
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use code_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
+    use image::ColorType;
+    use image::GenericImageView;
+    use image::ImageEncoder;
+    use image::codecs::png::PngEncoder;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -621,6 +672,146 @@ mod tests {
     }
 
     #[test]
+    fn formatted_input_resizes_oversized_data_urls_before_first_send() {
+        let source = image::GrayImage::from_pixel(8000, 4000, image::Luma([96u8]));
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(source.as_raw(), 8000, 4000, ColorType::L8.into())
+            .expect("encode oversized fixture");
+        let original_url = format!(
+            "data:image/png;base64,{}",
+            BASE64_STANDARD.encode(png)
+        );
+        let prompt = Prompt {
+            input: vec![ResponseItem::Message {
+                id: None,
+                role: "user".to_owned(),
+                content: vec![ContentItem::InputImage {
+                    image_url: original_url.clone(),
+                }],
+                end_turn: None,
+                phase: None,
+            }],
+            include_additional_instructions: false,
+            ..Default::default()
+        };
+
+        let formatted = prompt.get_formatted_input();
+        let resized_url = formatted
+            .iter()
+            .find_map(|item| match item {
+                ResponseItem::Message { content, .. } => content.iter().find_map(|item| match item {
+                    ContentItem::InputImage { image_url } => Some(image_url),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .expect("formatted image");
+        let (_, payload) = resized_url.split_once(',').expect("data URL payload");
+        let bytes = BASE64_STANDARD.decode(payload).expect("decode resized image");
+        let decoded = image::load_from_memory(&bytes).expect("load resized image");
+        let (width, height) = decoded.dimensions();
+        let patches = u64::from(width).div_ceil(32) * u64::from(height).div_ceil(32);
+
+        assert_ne!(resized_url, &original_url);
+        assert!(patches < 30_000);
+    }
+
+    #[test]
+    fn formatted_input_resizes_function_output_data_urls_before_first_send() {
+        let source = image::GrayImage::from_pixel(8000, 4000, image::Luma([112u8]));
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(source.as_raw(), 8000, 4000, ColorType::L8.into())
+            .expect("encode oversized fixture");
+        let original_url = format!(
+            "data:image/png;base64,{}",
+            BASE64_STANDARD.encode(png)
+        );
+        let prompt = Prompt {
+            input: vec![ResponseItem::FunctionCallOutput {
+                call_id: "call_image".to_owned(),
+                output: code_protocol::models::FunctionCallOutputPayload::from_content_items(vec![
+                    FunctionCallOutputContentItem::InputImage {
+                        image_url: original_url.clone(),
+                        detail: None,
+                    },
+                ]),
+            }],
+            include_additional_instructions: false,
+            ..Default::default()
+        };
+
+        let formatted = prompt.get_formatted_input();
+        let resized_url = formatted
+            .iter()
+            .find_map(|item| match item {
+                ResponseItem::FunctionCallOutput { output, .. } => output
+                    .content_items()
+                    .and_then(|items| items.first())
+                    .and_then(|item| match item {
+                        FunctionCallOutputContentItem::InputImage { image_url, .. } => {
+                            Some(image_url)
+                        }
+                        _ => None,
+                    }),
+                _ => None,
+            })
+            .expect("formatted function output image");
+        let (_, payload) = resized_url.split_once(',').expect("data URL payload");
+        let bytes = BASE64_STANDARD.decode(payload).expect("decode resized image");
+        let decoded = image::load_from_memory(&bytes).expect("load resized image");
+        let (width, height) = decoded.dimensions();
+        let patches = u64::from(width).div_ceil(32) * u64::from(height).div_ceil(32);
+
+        assert_ne!(resized_url, &original_url);
+        assert!(patches < 30_000);
+    }
+
+    #[test]
+    fn formatted_input_preserves_remote_and_invalid_image_urls() {
+        let remote_url = "https://example.com/image.png".to_owned();
+        let invalid_data_url = "data:image/png;base64,not-valid-base64".to_owned();
+        let prompt = Prompt {
+            input: vec![ResponseItem::Message {
+                id: None,
+                role: "user".to_owned(),
+                content: vec![
+                    ContentItem::InputImage {
+                        image_url: remote_url.clone(),
+                    },
+                    ContentItem::InputImage {
+                        image_url: invalid_data_url.clone(),
+                    },
+                ],
+                end_turn: None,
+                phase: None,
+            }],
+            include_additional_instructions: false,
+            ..Default::default()
+        };
+
+        let formatted = prompt.get_formatted_input();
+        let image_urls = formatted
+            .iter()
+            .find_map(|item| match item {
+                ResponseItem::Message { content, .. } => Some(
+                    content
+                        .iter()
+                        .filter_map(|item| match item {
+                            ContentItem::InputImage { image_url } => Some(image_url.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .expect("formatted image message");
+
+        assert_eq!(image_urls, vec![remote_url, invalid_data_url]);
+    }
+
+    #[test]
     fn rewrite_image_generation_calls_for_input_converts_to_user_image_message() {
         let mut input = vec![ResponseItem::ImageGenerationCall {
             id: "ig_1".to_string(),
@@ -642,6 +833,40 @@ mod tests {
                             if image_url == "data:image/png;base64,Zm9v"
                     )
         ));
+    }
+
+    #[test]
+    fn rewrite_image_generation_calls_resizes_oversized_replay_images() {
+        let source = image::GrayImage::from_pixel(8000, 4000, image::Luma([128u8]));
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(source.as_raw(), 8000, 4000, ColorType::L8.into())
+            .expect("encode oversized fixture");
+        let original_result = BASE64_STANDARD.encode(png);
+        let mut input = vec![ResponseItem::ImageGenerationCall {
+            id: "ig_oversized".to_owned(),
+            status: "completed".to_owned(),
+            revised_prompt: None,
+            result: original_result.clone(),
+        }];
+
+        rewrite_image_generation_calls_for_input(&mut input);
+
+        let image_url = match input.first() {
+            Some(ResponseItem::Message { content, .. }) => match content.first() {
+                Some(ContentItem::InputImage { image_url }) => image_url,
+                other => panic!("expected input image, got {other:?}"),
+            },
+            other => panic!("expected user image message, got {other:?}"),
+        };
+        let (_, payload) = image_url.split_once(',').expect("data URL payload");
+        let bytes = BASE64_STANDARD.decode(payload).expect("decode resized image");
+        let decoded = image::load_from_memory(&bytes).expect("load resized image");
+        let (width, height) = decoded.dimensions();
+        let patches = u64::from(width).div_ceil(32) * u64::from(height).div_ceil(32);
+
+        assert_ne!(payload, original_result);
+        assert!(patches < 30_000);
     }
 
     struct InstructionsTestCase {

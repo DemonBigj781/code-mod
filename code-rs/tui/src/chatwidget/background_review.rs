@@ -109,18 +109,33 @@ pub(super) async fn run_background_review_inner(
         // Allow the spawned agent to reuse the parent's review lock without blocking.
         let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         env.insert("CODE_REVIEW_LOCK_LEASE".to_owned(), "1".to_owned());
-        let agent_config = code_core::config_types::AgentConfig {
+        let mut agent_config = code_core::agent_defaults::agent_config_for_model(
+            &config.agents,
+            &review_model,
+        )
+        .cloned()
+        .unwrap_or_else(|| code_core::config_types::AgentConfig {
             name: review_model.clone(),
             command: String::new(),
             args: Vec::new(),
             read_only: false,
-            enabled: true,
+            enabled: false,
+            session_enabled: true,
+            review_enabled: true,
+            auto_drive_enabled: true,
             description: None,
-            env: Some(env),
+            env: None,
             args_read_only: None,
             args_write: None,
             instructions: None,
-        };
+        });
+        if !agent_config.review_enabled {
+            return Err(format!(
+                "auto review model '{}' is disabled for review",
+                config.auto_review_model
+            ));
+        }
+        agent_config.env.get_or_insert_with(Default::default).extend(env);
 
         // Use the /review entrypoint so upstream wiring (model defaults, review formatting) stays intact.
         let mut review_prompt = format!(

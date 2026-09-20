@@ -42,8 +42,39 @@ static IMAGE_CACHE: LazyLock<BlockingLruCache<[u8; 20], EncodedImage>> =
 
 pub fn load_and_resize_to_fit(path: &Path) -> Result<EncodedImage, ImageProcessingError> {
     let path_buf = path.to_path_buf();
-
     let file_bytes = read_file_bytes(path, &path_buf)?;
+
+    process_image_bytes(file_bytes, path_buf)
+}
+
+pub fn load_data_url_and_resize_to_fit(
+    data_url: &str,
+) -> Result<EncodedImage, ImageProcessingError> {
+    let Some((metadata, payload)) = data_url.split_once(',') else {
+        return Err(ImageProcessingError::InvalidDataUrl {
+            message: "missing payload separator".to_owned(),
+        });
+    };
+    if !metadata.starts_with("data:image/")
+        || !metadata
+            .split(';')
+            .any(|part| part.eq_ignore_ascii_case("base64"))
+    {
+        return Err(ImageProcessingError::InvalidDataUrl {
+            message: "expected a base64-encoded image data URL".to_owned(),
+        });
+    }
+
+    let file_bytes = BASE64_STANDARD
+        .decode(payload)
+        .map_err(|source| ImageProcessingError::DataUrlBase64 { source })?;
+    process_image_bytes(file_bytes, std::path::PathBuf::from("<data-url>"))
+}
+
+fn process_image_bytes(
+    file_bytes: Vec<u8>,
+    path_buf: std::path::PathBuf,
+) -> Result<EncodedImage, ImageProcessingError> {
 
     let key = sha1_digest(&file_bytes);
 
@@ -208,6 +239,30 @@ mod tests {
         let loaded =
             image::load_from_memory(&processed.bytes).expect("read resized bytes back into image");
         assert_eq!(loaded.dimensions(), (processed.width, processed.height));
+    }
+
+    #[test]
+    fn downscales_oversized_data_url_before_upload() {
+        let image = image::GrayImage::from_pixel(8000, 4000, image::Luma([160u8]));
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(image.as_raw(), 8000, 4000, ColorType::L8.into())
+            .expect("encode source image");
+        let data_url = format!(
+            "data:image/png;base64,{}",
+            BASE64_STANDARD.encode(png)
+        );
+        let source_patches = 8000_u64.div_ceil(32) * 4000_u64.div_ceil(32);
+        assert!(source_patches >= 30_000, "fixture must exceed provider limit");
+
+        let processed = load_data_url_and_resize_to_fit(&data_url)
+            .expect("process oversized data URL");
+        let processed_patches =
+            u64::from(processed.width).div_ceil(32) * u64::from(processed.height).div_ceil(32);
+
+        assert!(processed_patches < 30_000);
+        assert!(processed.width <= MAX_WIDTH);
+        assert!(processed.height <= MAX_HEIGHT);
     }
 
     #[tokio::test(flavor = "multi_thread")]

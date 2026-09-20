@@ -1,6 +1,6 @@
 use super::*;
 
-use super::super::turn::{ProcessedResponseItem, run_turn};
+use super::super::turn::{ProcessedResponseItem, TurnStop, run_turn};
 use super::review::{exit_review_mode, parse_review_output_event};
 
 // Intentionally omit upstream review thread spawning; our fork handles review flows differently.
@@ -58,19 +58,10 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
         // Convert input to ResponseInputItem
         let mut response_input = response_input_from_core_items(input.clone());
         sess.enforce_user_message_limits(&sub_id, &mut response_input);
-        let response_item: ResponseItem = response_input.into();
+        let mut response_item: ResponseItem = response_input.into();
+        assign_user_submission_id(&mut response_item, &sub_id);
 
-        let prompt = match &response_item {
-            ResponseItem::Message { role, content, .. } if role == "user" => content
-                .iter()
-                .filter_map(|item| match item {
-                    ContentItem::InputText { text } => Some(text.clone()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-            _ => String::new(),
-        };
+        let prompt = compressed_operator_prompt(&response_item, &sess.input_compression_config);
 
         let hook_request = code_hooks::UserPromptSubmitRequest {
             session_id: crate::codex::hook_runtime::thread_id_from_session_uuid(sess.as_ref()),
@@ -120,9 +111,6 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
     // many turns, from the perspective of the user, it is a single turn.
     let mut turn_diff_tracker = TurnDiffTracker::new();
 
-    // Track if this is the first iteration - if so, include the initial input
-    let mut first_iteration = true;
-
     // Track if we've done a proactive compaction in this iteration to prevent
     // infinite loops. As long as compaction works well in getting us way below
     // the token limit, we shouldn't need more than one compaction per iteration.
@@ -140,7 +128,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
         // review mode. They will be picked up after TaskComplete via
         // pop_next_queued_user_input.
         let pending_input = if is_review_mode {
-            sess.get_pending_input_filtered(false)
+            sess.drain_pending_input()
                 .into_iter()
                 .map(ResponseItem::from)
                 .collect::<Vec<ResponseItem>>()
@@ -154,18 +142,12 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                 let mut queued_items = Vec::new();
                 for queued in queued_user_inputs {
                     let submission_id = queued.submission_id;
-                    let response_item: ResponseItem = queued.response_item.into();
-                    let prompt = match &response_item {
-                        ResponseItem::Message { role, content, .. } if role == "user" => content
-                            .iter()
-                            .filter_map(|item| match item {
-                                ContentItem::InputText { text } => Some(text.clone()),
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                        _ => String::new(),
-                    };
+                    let mut response_item: ResponseItem = queued.response_item.into();
+                    assign_user_submission_id(&mut response_item, &submission_id);
+                    let prompt = compressed_operator_prompt(
+                        &response_item,
+                        &sess.input_compression_config,
+                    );
                     let hook_request = code_hooks::UserPromptSubmitRequest {
                         session_id: crate::codex::hook_runtime::thread_id_from_session_uuid(
                             sess.as_ref(),
@@ -206,12 +188,6 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
         if initial_response_item.is_none() {
             if let Some(first_pending) = pending_input_tail.first().cloned() {
                 pending_input_tail.remove(0);
-                if is_review_mode {
-                    review_history.push(first_pending.clone());
-                } else {
-                    sess.record_conversation_items(std::slice::from_ref(&first_pending))
-                        .await;
-                }
                 initial_response_item = Some(first_pending);
             } else {
                 tracing::warn!(
@@ -221,17 +197,16 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
             }
         }
 
-        let compact_snapshot = (auto_compact_pending && !is_review_mode)
-            .then(|| sess.turn_input_with_history(pending_input_tail.clone()));
-
-        // Do not duplicate the initial input in `pending_input`.
-        // It is already recorded to history above; ephemeral items are appended separately.
-        if first_iteration {
-            first_iteration = false;
-        } else {
-            // Only record pending input to history on subsequent iterations
+        if is_review_mode {
+            if !pending_input.is_empty() {
+                review_history.extend(pending_input.clone());
+            }
+        } else if !pending_input.is_empty() {
             sess.record_conversation_items(&pending_input).await;
         }
+
+        let compact_snapshot = (auto_compact_pending && !is_review_mode)
+            .then(|| sess.turn_input_with_history(Vec::new()));
 
         if auto_compact_pending && !is_review_mode {
             let compacted_history = if compact::should_use_remote_compact_task(&sess) {
@@ -274,17 +249,18 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
 
         // Construct the input that we will send to the model. When using the
         // Chat completions API (or ZDR clients), the model needs the full
-        // conversation history on each turn. The rollout file, however, should
-        // only record the new items that originated in this turn so that it
-        // represents an append-only log without duplicates.
+        // conversation history on each turn. New pending items were persisted
+        // exactly once above, so ordinary requests must not append them again as
+        // request-only extras.
         let turn_input: Vec<ResponseItem> = if is_review_mode {
-            if !pending_input_tail.is_empty() {
-                review_history.extend(pending_input_tail.clone());
-            }
             review_history.clone()
         } else {
-            sess.turn_input_with_history(pending_input_tail.clone())
+            sess.turn_input_with_history(Vec::new())
         };
+        let turn_input = crate::operator_input_compression::compress_operator_items(
+            turn_input,
+            &sess.input_compression_config,
+        );
 
         let turn_input_messages: Vec<String> = turn_input
             .iter()
@@ -303,7 +279,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                 })
             })
             .collect();
-        match run_turn(
+        let turn = run_turn(
             &sess,
             &turn_context,
             &mut turn_diff_tracker,
@@ -312,12 +288,11 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
             pending_input_tail,
             turn_input,
         )
-        .await
+        .await;
         {
-            Ok(turn_output) => {
                 let mut items_to_record_in_conversation_history = Vec::<ResponseItem>::new();
-                let mut responses = Vec::<ResponseInputItem>::new();
-                for processed_response_item in turn_output {
+                let mut has_tool_responses = false;
+                for processed_response_item in turn.output {
                     let ProcessedResponseItem { item, response } = processed_response_item;
                     match (&item, &response) {
                         (ResponseItem::Message { role, .. }, None) if role == "assistant" => {
@@ -407,8 +382,8 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                             warn!("Unexpected response item: {item:?} with response: {response:?}");
                         }
                     }
-                    if let Some(response) = response {
-                        responses.push(response);
+                    if response.is_some() {
+                        has_tool_responses = true;
                     }
                 }
 
@@ -423,6 +398,25 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                         sess.record_conversation_items(&items_to_record_in_conversation_history)
                             .await;
                     }
+                }
+
+                if let Err(e) = turn.stop {
+                    info!("Turn error: {e:#}");
+                    let event = sess.make_event(
+                        &sub_id,
+                        EventMsg::Error(ErrorEvent { message: e.to_string() }),
+                    );
+                    sess.tx_event.send(event).await.ok();
+                    if is_review_mode && !review_exit_emitted {
+                        exit_review_mode(sess.clone(), sub_id.clone(), None).await;
+                        review_exit_emitted = true;
+                    }
+                    break;
+                }
+                if matches!(turn.stop, Ok(TurnStop::Superseded))
+                    || (!is_review_mode && sess.has_pending_operator_input())
+                {
+                    continue;
                 }
 
                 // Check whether we should proactively compact before queuing follow-up work.
@@ -445,13 +439,11 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                 let token_limit_reached = most_recent_usage_tokens
                     .is_some_and(|tokens| tokens >= limit);
 
-                // If there are responses, add them to pending input for the next iteration
-                if !responses.is_empty() {
-                    if !is_review_mode {
-                        for response in &responses {
-                            sess.add_pending_input(response.clone());
-                        }
-                    }
+                // Tool call/output pairs were already recorded together above.
+                // Their presence only signals that the agent loop must issue the
+                // next provider request; requeueing the output would persist it a
+                // second time on the next iteration.
+                if has_tool_responses {
                     // Reset the proactive compact guard for the next iteration since we're
                     // about to process new tool calls and may need to compact again
                     did_proactive_compact_this_iteration = false;
@@ -471,7 +463,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                         )
                         .await;
 
-                    if responses.is_empty() {
+                    if !has_tool_responses {
                         did_proactive_compact_this_iteration = true;
                         // Choose between local and remote compact based on auth mode,
                         // matching upstream codex-rs behavior
@@ -500,7 +492,7 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                     }
                 }
 
-                if responses.is_empty() {
+                if !has_tool_responses {
                     debug!("Turn completed");
                     last_task_message = get_last_assistant_message_from_turn(
                         &items_to_record_in_conversation_history,
@@ -565,21 +557,6 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
                     });
                     break;
                 }
-            }
-            Err(e) => {
-                info!("Turn error: {e:#}");
-                let event = sess.make_event(
-                    &sub_id,
-                    EventMsg::Error(ErrorEvent { message: e.to_string() }),
-                );
-                sess.tx_event.send(event).await.ok();
-                if is_review_mode && !review_exit_emitted {
-                    exit_review_mode(sess.clone(), sub_id.clone(), None).await;
-                    review_exit_emitted = true;
-                }
-                // let the user continue the conversation
-                break;
-            }
         }
     }
     }
@@ -634,5 +611,60 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
             let agent = AgentTask::spawn(Arc::clone(&sess_clone), turn_context, submission_id, items, TaskOriginKind::QueuedUser, true);
             sess_clone.set_task(agent);
         });
+    }
+}
+
+fn assign_user_submission_id(item: &mut ResponseItem, submission_id: &str) {
+    if let ResponseItem::Message { id, role, .. } = item
+        && role == "user"
+    {
+        *id = Some(submission_id.to_owned());
+    }
+}
+
+fn compressed_operator_prompt(
+    item: &ResponseItem,
+    config: &crate::config_types::OperatorInputCompressionConfig,
+) -> String {
+    let compressed = crate::operator_input_compression::compress_operator_items(
+        vec![item.clone()],
+        config,
+    );
+    match compressed.first() {
+        Some(ResponseItem::Message { role, content, .. }) if role == "user" => content
+            .iter()
+            .filter_map(|item| match item {
+                ContentItem::InputText { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_hook_prompt_uses_the_compressed_model_bound_copy() {
+        let item = ResponseItem::Message {
+            id: Some("submission-1".to_owned()),
+            role: "user".to_owned(),
+            content: vec![ContentItem::InputText {
+                text: "Please update the documentation.\n\nPlease update the documentation."
+                    .to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        };
+        assert_eq!(
+            compressed_operator_prompt(
+                &item,
+                &crate::config_types::OperatorInputCompressionConfig::default(),
+            ),
+            "Update the documentation.",
+        );
     }
 }

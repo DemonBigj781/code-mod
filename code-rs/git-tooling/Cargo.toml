@@ -9,6 +9,7 @@ name = "code_git_tooling"
 path = "src/lib.rs"
 
 [dependencies]
+dirs = { workspace = true }
 tempfile = "3"
 thiserror = "2"
 walkdir = "2"

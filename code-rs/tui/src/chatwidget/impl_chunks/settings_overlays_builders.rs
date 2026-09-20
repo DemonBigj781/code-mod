@@ -184,7 +184,7 @@ impl ChatWidget<'_> {
         let model_routing_enabled = self.config.auto_drive.model_routing_enabled;
         let model_routing_entries = self.config.auto_drive.model_routing_entries.clone();
         let routing_model_options = self
-            .available_model_presets()
+            .available_model_presets_for_role(ModelRole::AutoDrive)
             .into_iter()
             .map(|preset| preset.model)
             .collect();

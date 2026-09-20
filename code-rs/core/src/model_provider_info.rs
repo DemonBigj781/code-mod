@@ -860,6 +860,8 @@ fn resolve_provider_auth_program(command: &str, cwd: &Path) -> io::Result<PathBu
 
 const DEFAULT_OLLAMA_PORT: u32 = 11434;
 
+pub const COLIBRI_PROVIDER_ID: &str = "colibri";
+pub const COLIBRI_API_BASE_URL: &str = "http://127.0.0.1:8000/v1";
 pub const BUILT_IN_OSS_MODEL_PROVIDER_ID: &str = "oss";
 
 /// Built-in default provider list.
@@ -940,7 +942,7 @@ pub fn built_in_model_providers(
                 ),
                 experimental_bearer_token: None,
                 auth: None,
-                wire_api: WireApi::Chat,
+                wire_api: WireApi::Responses,
                 query_params: None,
                 http_headers: None,
                 env_http_headers: Some(HashMap::from([
@@ -983,6 +985,15 @@ pub fn built_in_model_providers(
                 requires_openai_auth: false,
                 openrouter: None,
             },
+        ),
+        (
+            COLIBRI_PROVIDER_ID,
+            P::direct_openai_compatible(
+                "Colibri",
+                COLIBRI_API_BASE_URL,
+                None,
+                WireApi::Chat,
+            ),
         ),
         (BUILT_IN_OSS_MODEL_PROVIDER_ID, create_oss_provider()),
     ]
@@ -1325,6 +1336,23 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         assert_eq!(openrouter.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
         assert_eq!(openrouter.wire_api, WireApi::Responses);
         assert!(openrouter.openrouter.is_some());
+    }
+
+    #[test]
+    fn built_in_model_providers_include_colibri() {
+        let providers = built_in_model_providers(None);
+        let colibri = providers
+            .get(COLIBRI_PROVIDER_ID)
+            .expect("Colibri provider should exist");
+
+        assert_eq!(colibri.name, "Colibri");
+        assert_eq!(
+            colibri.base_url.as_deref(),
+            Some(COLIBRI_API_BASE_URL),
+        );
+        assert_eq!(colibri.wire_api, WireApi::Chat);
+        assert!(colibri.env_key.is_none());
+        assert!(!colibri.requires_openai_auth);
     }
 
     #[test]

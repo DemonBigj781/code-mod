@@ -4400,6 +4400,9 @@ fn map_core_reasoning_effort(
         code_core::protocol_config_types::ReasoningEffort::Max => {
             code_protocol::openai_models::ReasoningEffort::Max
         }
+        code_core::protocol_config_types::ReasoningEffort::Ultra => {
+            code_protocol::openai_models::ReasoningEffort::Ultra
+        }
     }
 }
 

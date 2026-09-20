@@ -9,7 +9,9 @@ pub(super) async fn try_run_turn(
     sub_id: &str,
     prompt: &Prompt,
     attempt_req: u64,
-) -> CodexResult<Vec<ProcessedResponseItem>> {
+    output: &mut Vec<ProcessedResponseItem>,
+    yield_to_operator: bool,
+) -> CodexResult<TurnStop> {
     // Ensure any pending tool calls from a previous interrupted attempt are paired with
     // an "aborted" output before we send a new request to the model.
     let missing_outputs = missing_tool_outputs_to_insert(&prompt.input);
@@ -32,7 +34,14 @@ pub(super) async fn try_run_turn(
         .supports_parallel_tool_calls;
 
     let mut turn_latency_guard = TurnLatencyGuard::new(sess, attempt_req, prompt.as_ref());
-    let mut stream = match sess.client.stream(&prompt).await {
+    let opened = tokio::select! {
+        biased;
+        () = sess.wait_for_operator_input(), if yield_to_operator => {
+            return Ok(TurnStop::Superseded);
+        }
+        result = sess.client.stream(&prompt) => result,
+    };
+    let mut stream = match opened {
         Ok(stream) => stream,
         Err(e) => {
             turn_latency_guard.mark_failed(Some(format!("stream_init_failed: {e}")));
@@ -46,13 +55,18 @@ pub(super) async fn try_run_turn(
         }
     };
 
-    let mut output = Vec::new();
     let mut pending_tool_calls: Vec<PendingToolCall> = Vec::new();
     loop {
         // Poll the next item from the model stream. We must inspect *both* Ok and Err
         // cases so that transient stream failures (e.g., dropped SSE connection before
         // `response.completed`) bubble up and trigger the caller's retry logic.
-        let event = stream.next().await;
+        let event = tokio::select! {
+            biased;
+            () = sess.wait_for_operator_input(), if yield_to_operator => {
+                return Ok(TurnStop::Superseded);
+            }
+            event = stream.next() => event,
+        };
         let Some(event) = event else {
             // Channel closed without yielding a final Completed event or explicit error.
             // Treat as a disconnected stream so the caller can retry.
@@ -85,6 +99,12 @@ pub(super) async fn try_run_turn(
                         | ResponseItem::LocalShellCall { .. }
                         | ResponseItem::CustomToolCall { .. }
                 );
+
+                if is_tool_call && output.iter().any(|previous| {
+                    previous.response.is_some() && same_tool_call(&previous.item, &item)
+                }) {
+                    continue;
+                }
 
                 if enable_parallel_tool_calls && is_tool_call {
                     let output_pos = output.len();
@@ -205,6 +225,7 @@ pub(super) async fn try_run_turn(
                         attempt_req,
                         &pending_tool_calls,
                         |pos| output.get(pos).map(|cell| &cell.item),
+                        yield_to_operator,
                     )
                     .await;
 
@@ -223,7 +244,11 @@ pub(super) async fn try_run_turn(
                 }
 
                 turn_latency_guard.mark_completed(output.len(), token_usage.as_ref());
-                return Ok(output);
+                return Ok(if yield_to_operator && sess.has_pending_operator_input() {
+                    TurnStop::Superseded
+                } else {
+                    TurnStop::Completed
+                });
             }
             ResponseEvent::OutputTextDelta { delta, item_id, sequence_number, output_index } => {
                 // Don't append to history during streaming - only send UI events.

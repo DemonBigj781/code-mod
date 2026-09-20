@@ -13,8 +13,28 @@ pub(super) async fn run_turn(
     sub_id: String,
     initial_user_item: Option<ResponseItem>,
     pending_input_tail: Vec<ResponseItem>,
+    input: Vec<ResponseItem>,
+) -> TurnOutcome {
+    let mut output = Vec::new();
+    let stop = run_turn_attempts(
+        sess, turn_context, turn_diff_tracker, sub_id, initial_user_item,
+        pending_input_tail, input, &mut output,
+    ).await;
+    cancel_unstarted_calls(&mut output);
+    sess.clear_scratchpad();
+    TurnOutcome { output, stop }
+}
+
+async fn run_turn_attempts(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    turn_diff_tracker: &mut TurnDiffTracker,
+    sub_id: String,
+    initial_user_item: Option<ResponseItem>,
+    pending_input_tail: Vec<ResponseItem>,
     mut input: Vec<ResponseItem>,
-) -> CodexResult<Vec<ProcessedResponseItem>> {
+    output: &mut Vec<ProcessedResponseItem>,
+) -> CodexResult<TurnStop> {
     // When browser-automation is compiled in, always expose the full action
     // list so the model can open and interact with the browser in the same
     // turn.  The handlers return clear errors when the browser isn't open.
@@ -105,8 +125,23 @@ pub(super) async fn run_turn(
         }
     }
 
-    let drain_scratchpad_into_attempt = |attempt_input: &mut Vec<ResponseItem>| {
-        if let Some(sp) = sess.take_scratchpad() {
+    let drain_scratchpad_into_attempt = |attempt_input: &mut Vec<ResponseItem>, output: &mut Vec<ProcessedResponseItem>| {
+        cancel_unstarted_calls(output);
+        for processed in output.iter() {
+            if !attempt_input.contains(&processed.item) {
+                attempt_input.push(processed.item.clone());
+            }
+            if let Some(response) = &processed.response {
+                let response = ResponseItem::from(response.clone());
+                if !attempt_input.contains(&response) {
+                    attempt_input.push(response);
+                }
+            }
+        }
+        if let Some(mut sp) = sess.take_scratchpad() {
+            // Finalized items belong to the turn journal, not the retry hint.
+            sp.items.clear();
+            sp.responses.clear();
             inject_scratchpad_into_attempt_input(attempt_input, sp);
         }
     };
@@ -116,6 +151,9 @@ pub(super) async fn run_turn(
     // include scratchpad recovery from a dropped attempt.
     let mut attempt_input: Vec<ResponseItem> = input.clone();
     loop {
+        if !tc.is_review_mode && sess.has_pending_operator_input() {
+            return Ok(TurnStop::Superseded);
+        }
         // Each loop iteration corresponds to a single provider HTTP request.
         // Increment the attempt ordinal first and capture its value so all
         // OrderMeta emitted during this attempt share the same `req`, even if
@@ -217,8 +255,8 @@ pub(super) async fn run_turn(
         // Start a new scratchpad for this HTTP attempt
         sess.begin_attempt_scratchpad();
 
-        match stream::try_run_turn(sess, turn_diff_tracker, &sub_id, &prompt, attempt_req).await {
-            Ok(output) => {
+        match stream::try_run_turn(sess, turn_diff_tracker, &sub_id, &prompt, attempt_req, output, !tc.is_review_mode).await {
+            Ok(stop) => {
                 // Record status items to conversation history after successful turn
                 // This ensures they persist for future requests in the right chronological order
                 if !prompt.status_items.is_empty() {
@@ -226,7 +264,7 @@ pub(super) async fn run_turn(
                 }
                 // Commit successful attempt – scratchpad is no longer needed.
                 sess.clear_scratchpad();
-                return Ok(output);
+                return Ok(stop);
             }
             Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
             Err(CodexErr::EnvVar(var)) => return Err(CodexErr::EnvVar(var)),
@@ -332,7 +370,7 @@ pub(super) async fn run_turn(
                     }
 
                 if switched {
-                    drain_scratchpad_into_attempt(&mut attempt_input);
+                    drain_scratchpad_into_attempt(&mut attempt_input, output);
                     retries = 0;
                     continue;
                 }
@@ -348,8 +386,10 @@ pub(super) async fn run_turn(
                 }
                 retry_message.push('…');
                 sess.notify_stream_error(&sub_id, retry_message).await;
-                drain_scratchpad_into_attempt(&mut attempt_input);
-                tokio::time::sleep(retry_after.delay).await;
+                drain_scratchpad_into_attempt(&mut attempt_input, output);
+                if wait_for_retry(sess, tc.is_review_mode, tokio::time::sleep(retry_after.delay)).await {
+                    return Ok(TurnStop::Superseded);
+                }
                 retries = 0;
             }
             Err(CodexErr::UsageNotIncluded) => return Err(CodexErr::UsageNotIncluded),
@@ -437,8 +477,10 @@ pub(super) async fn run_turn(
                         "Network unavailable; waiting to reconnect to {probe} ({e})"
                     );
                     sess.notify_stream_error(&sub_id, wait_message).await;
-                    drain_scratchpad_into_attempt(&mut attempt_input);
-                    wait_for_connectivity(&probe).await;
+                    drain_scratchpad_into_attempt(&mut attempt_input, output);
+                    if wait_for_retry(sess, tc.is_review_mode, wait_for_connectivity(&probe)).await {
+                        return Ok(TurnStop::Superseded);
+                    }
                     retries = 0;
                     continue;
                 }
@@ -471,9 +513,11 @@ pub(super) async fn run_turn(
                     // Pull any partial progress from this attempt and append to
                     // the next request's input so we do not lose tool progress
                     // or already-finalized items.
-                    drain_scratchpad_into_attempt(&mut attempt_input);
+                    drain_scratchpad_into_attempt(&mut attempt_input, output);
 
-                    tokio::time::sleep(delay).await;
+                    if wait_for_retry(sess, tc.is_review_mode, tokio::time::sleep(delay)).await {
+                        return Ok(TurnStop::Superseded);
+                    }
                 } else {
                     error!(
                         retries,
@@ -498,4 +542,47 @@ pub(super) async fn run_turn(
 pub(super) struct ProcessedResponseItem {
     pub(super) item: ResponseItem,
     pub(super) response: Option<ResponseInputItem>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum TurnStop {
+    Completed,
+    Superseded,
+}
+
+pub(super) struct TurnOutcome {
+    pub(super) output: Vec<ProcessedResponseItem>,
+    pub(super) stop: CodexResult<TurnStop>,
+}
+
+async fn wait_for_retry(
+    sess: &Session,
+    is_review_mode: bool,
+    wait: impl std::future::Future<Output = ()>,
+) -> bool {
+    tokio::select! {
+        biased;
+        () = sess.wait_for_operator_input(), if !is_review_mode => true,
+        () = wait => false,
+    }
+}
+
+fn cancel_unstarted_calls(output: &mut [ProcessedResponseItem]) {
+    for processed in output {
+        if processed.response.is_none() {
+            processed.response = crate::tools::scheduler::cancelled_tool_response(&processed.item);
+        }
+    }
+}
+
+fn same_tool_call(left: &ResponseItem, right: &ResponseItem) -> bool {
+    match (left, right) {
+        (ResponseItem::FunctionCall { call_id: left, .. }, ResponseItem::FunctionCall { call_id: right, .. })
+        | (ResponseItem::CustomToolCall { call_id: left, .. }, ResponseItem::CustomToolCall { call_id: right, .. }) => left == right,
+        (ResponseItem::LocalShellCall { call_id: left, id: left_id, .. }, ResponseItem::LocalShellCall { call_id: right, id: right_id, .. }) => {
+            let left = left.as_ref().or(left_id.as_ref());
+            left.is_some() && left == right.as_ref().or(right_id.as_ref())
+        }
+        _ => false,
+    }
 }

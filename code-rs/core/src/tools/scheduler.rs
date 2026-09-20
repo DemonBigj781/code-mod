@@ -99,6 +99,7 @@ pub(crate) async fn dispatch_pending_tool_calls<'a, F>(
     attempt_req: u64,
     pending_calls: &[PendingToolCall],
     item_for_pos: F,
+    yield_to_operator: bool,
 ) -> Vec<(usize, Option<ResponseInputItem>)>
 where
     F: Fn(usize) -> Option<&'a ResponseItem> + Copy,
@@ -123,6 +124,18 @@ where
 
     let mut results: Vec<(usize, Option<ResponseInputItem>)> = Vec::new();
     for batch in build_tool_call_batches(calls_with_parallelism) {
+        if yield_to_operator && sess.has_pending_operator_input() {
+            let calls = match batch {
+                ToolCallBatch::Parallel(calls) => calls,
+                ToolCallBatch::Exclusive(call) => vec![call],
+            };
+            for call in calls {
+                if let Some(item) = item_for_pos(call.output_pos) {
+                    results.push((call.output_pos, cancelled_tool_response(item)));
+                }
+            }
+            continue;
+        }
         match batch {
             ToolCallBatch::Parallel(calls) => {
                 let mut futures = Vec::with_capacity(calls.len());
@@ -177,6 +190,23 @@ where
 
     results.sort_by_key(|(pos, _)| *pos);
     results
+}
+
+pub(crate) fn cancelled_tool_response(item: &ResponseItem) -> Option<ResponseInputItem> {
+    let output = code_protocol::models::FunctionCallOutputPayload::from_text(
+        "Not executed: the previous model response was superseded before this tool started.".to_owned(),
+    );
+    match item {
+        ResponseItem::FunctionCall { call_id, .. } => Some(ResponseInputItem::FunctionCallOutput {
+            call_id: call_id.clone(), output,
+        }),
+        ResponseItem::CustomToolCall { call_id, .. } => Some(ResponseInputItem::CustomToolCallOutput {
+            call_id: call_id.clone(), name: None, output,
+        }),
+        ResponseItem::LocalShellCall { call_id, id, .. } => call_id.as_ref().or(id.as_ref())
+            .map(|call_id| ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output }),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
