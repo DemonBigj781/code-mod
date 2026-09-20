@@ -109,6 +109,8 @@ impl ChatWidget<'_> {
         };
 
         let cell_has_custom_render = cell.has_custom_render();
+        let cache_custom_height =
+            matches!(cell.kind(), crate::history_cell::HistoryCellType::Reasoning);
         let is_streaming = cell
             .as_any()
             .downcast_ref::<crate::history_cell::StreamingContentCell>()
@@ -116,7 +118,7 @@ impl ChatWidget<'_> {
 
         let mut use_cache = history_id != HistoryId::ZERO
             && has_record
-            && !cell_has_custom_render
+            && (!cell_has_custom_render || cache_custom_height)
             && !cell.is_animating()
             && !is_streaming;
 

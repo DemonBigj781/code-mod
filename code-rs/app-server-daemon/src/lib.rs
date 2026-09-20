@@ -283,7 +283,13 @@ impl Daemon {
         self.prepare_operation_lock().await?;
         let _operation_lock = self.acquire_operation_lock().await?;
         self.prepare_locked_state().await?;
+        DaemonSettings {
+            remote_control_enabled: true,
+        }
+        .save(&self.paths.settings_file)
+        .await?;
         let lifecycle = self.ensure_running_locked().await?;
+        self.control_client.enable(&self.paths.socket_path).await?;
         let pairing = self
             .control_client
             .start_pairing(&self.paths.socket_path)

@@ -3919,12 +3919,11 @@
     #[test]
     fn stale_reasoning_height_rebuilds_after_prefix_borrow_is_released() {
     let mut harness = ChatWidgetHarness::new();
-    let history_id = HistoryId(1636);
     let sentinel = "SENTINEL-RECOVERED-AFTER-PREFIX-BORROW";
     harness.push_user_prompt("Verify stale reasoning height recovery.");
     harness.push_reasoning_state(
         code_core::history::state::ReasoningState {
-            id: history_id,
+            id: HistoryId(1636),
             sections: vec![code_core::history::state::ReasoningSection {
                 heading: Some("Checking cached row offsets".to_string()),
                 summary: None,
@@ -3947,15 +3946,31 @@
     let initial = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 80, 18);
     assert!(initial.contains(sentinel));
 
-    let render_settings = harness.with_chat(|chat| {
+    let (history_id, render_settings) = harness.with_chat(|chat| {
+        let history_id = chat
+            .history_cells
+            .iter()
+            .find_map(|cell| {
+                cell.as_any()
+                    .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                    .map(|reasoning| reasoning.reasoning_state().id)
+            })
+            .expect("hydrated reasoning history id");
         let render_settings = chat.last_render_settings.get();
         chat.history_render
             .update_cached_height(history_id, render_settings, 36);
         assert!(chat.history_render.prefix_valid.get());
-        render_settings
+        (history_id, render_settings)
     });
 
     let _ = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 80, 18);
+    harness.with_chat(|chat| {
+        assert_ne!(
+            chat.history_render.cached_height(history_id, render_settings),
+            Some(36),
+            "the repair frame must replace the stale reasoning height"
+        );
+    });
     let recovered = crate::test_helpers::render_chat_widget_to_vt100(&mut harness, 80, 18);
 
     assert!(

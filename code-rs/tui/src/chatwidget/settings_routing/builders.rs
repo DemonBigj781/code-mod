@@ -484,10 +484,10 @@ impl ChatWidget<'_> {
                     || spec_cli.is_some_and(command_exists);
                 agent_rows.push(AgentOverviewRow {
                     name: name.clone(),
-                    session_enabled: cfg.session_enabled,
-                    subagent_enabled: cfg.enabled,
-                    review_enabled: cfg.review_enabled,
-                    auto_drive_enabled: cfg.auto_drive_enabled,
+                    session_enabled: cfg.session_enabled && installed,
+                    subagent_enabled: cfg.enabled && installed,
+                    review_enabled: cfg.review_enabled && installed,
+                    auto_drive_enabled: cfg.auto_drive_enabled && installed,
                     installed,
                     description: Self::agent_description_for(
                         &cfg.name,
@@ -507,10 +507,10 @@ impl ChatWidget<'_> {
                     || spec_cli.is_some_and(command_exists);
                 agent_rows.push(AgentOverviewRow {
                     name: name.clone(),
-                    session_enabled: cfg.session_enabled,
-                    subagent_enabled: cfg.enabled,
-                    review_enabled: cfg.review_enabled,
-                    auto_drive_enabled: cfg.auto_drive_enabled,
+                    session_enabled: cfg.session_enabled && installed,
+                    subagent_enabled: cfg.enabled && installed,
+                    review_enabled: cfg.review_enabled && installed,
+                    auto_drive_enabled: cfg.auto_drive_enabled && installed,
                     installed,
                     description: Self::agent_description_for(
                         &cfg.name,
@@ -527,10 +527,11 @@ impl ChatWidget<'_> {
                 let installed = builtin || spec_cli.is_some_and(command_exists) || command_exists(&cmd);
                 agent_rows.push(AgentOverviewRow {
                     name: name.clone(),
-                    session_enabled: true,
-                    subagent_enabled: agent_model_spec(name).is_some_and(|spec| spec.is_enabled()),
-                    review_enabled: true,
-                    auto_drive_enabled: true,
+                    session_enabled: installed,
+                    subagent_enabled: installed
+                        && agent_model_spec(name).is_some_and(|spec| spec.is_enabled()),
+                    review_enabled: installed,
+                    auto_drive_enabled: installed,
                     installed,
                     description: Self::agent_description_for(name, Some(&cmd), None),
                     command: cmd,
@@ -558,13 +559,17 @@ impl ChatWidget<'_> {
                     },
                     |agent| agent.command.clone(),
                 );
+                let installed = command_exists(&command_for_check(&command));
                 agent_rows.push(AgentOverviewRow {
                     name,
-                    session_enabled: configured.is_none_or(|agent| agent.session_enabled),
-                    subagent_enabled: configured.is_some_and(|agent| agent.enabled),
-                    review_enabled: configured.is_none_or(|agent| agent.review_enabled),
-                    auto_drive_enabled: configured.is_none_or(|agent| agent.auto_drive_enabled),
-                    installed: command_exists(&command_for_check(&command)),
+                    session_enabled: installed
+                        && configured.is_none_or(|agent| agent.session_enabled),
+                    subagent_enabled: installed && configured.is_some_and(|agent| agent.enabled),
+                    review_enabled: installed
+                        && configured.is_none_or(|agent| agent.review_enabled),
+                    auto_drive_enabled: installed
+                        && configured.is_none_or(|agent| agent.auto_drive_enabled),
+                    installed,
                     description: Some(preset.description),
                     command,
                 });

@@ -120,7 +120,12 @@ impl ChatWidget<'_> {
         }
 
         if model.eq_ignore_ascii_case(OPENROUTER_FREE_MAX_MODEL) {
-            let direct_provider_changed = self.restore_provider_before_direct()?;
+            let direct_provider_changed =
+                if self.config.model_provider_id == OPENROUTER_PROVIDER_ID {
+                    false
+                } else {
+                    self.restore_provider_before_direct()?
+                };
             let Some(openrouter) = self
                 .config
                 .model_providers

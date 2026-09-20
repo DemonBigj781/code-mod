@@ -2593,6 +2593,11 @@
           },
           "type": "array"
         },
+        "enabled": {
+          "default": null,
+          "description": "Master switch for model-invoked read agents. When false, the agent tool has no runnable models regardless of per-model role settings.",
+          "type": "boolean"
+        },
         "max-depth": {
           "default": null,
           "description": "Maximum nesting depth for agent-spawned agent runs. `1` allows root sessions to spawn agents, but blocks further nesting.",
@@ -3510,6 +3515,7 @@
   "description": "Base config deserialized from ~/.code/config.toml (legacy ~/.codex/config.toml is still read).",
   "properties": {
     "agents": {
+      "default": [],
       "description": "Configuration for available agent models",
       "items": {
         "$ref": "#/definitions/AgentConfig"

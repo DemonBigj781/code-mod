@@ -10,6 +10,7 @@ fn shift_enter_inserts_newline_without_submitting() {
     let app_tx = AppEventSender::new(tx);
     let mut composer = ChatComposer::new(true, app_tx, true);
     composer.textarea.set_text("first line");
+    composer.textarea.set_cursor(composer.textarea.text().len());
 
     let (result, handled) =
         composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
