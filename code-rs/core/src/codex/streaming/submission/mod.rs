@@ -16,6 +16,8 @@ pub(in crate::codex) async fn submission_loop(
     let (task_idle_tx, task_idle_rx) = async_channel::unbounded::<()>();
     let mut deferred_configure: Option<Submission> = None;
     let mut task_idle_wait_armed = false;
+    let mut applied_configure: Option<crate::protocol::ConfigureSessionOp> = None;
+    let mut bridge_listener: Option<tokio::task::JoinHandle<()>> = None;
 
     let file_watcher = crate::file_watcher::FileWatcher::new(config.code_home.clone())
         .unwrap_or_else(|err| {
@@ -114,6 +116,24 @@ pub(in crate::codex) async fn submission_loop(
                 }
             }
             op @ Op::ConfigureSession { .. } => {
+                let configure_params = match &op {
+                    Op::ConfigureSession { params } => params.as_ref().clone(),
+                    _ => unreachable!("matched ConfigureSession above"),
+                };
+                if applied_configure.as_ref() == Some(&configure_params) {
+                    if let Some(active_session) = sess.as_ref() {
+                        acknowledge_unchanged_session(
+                            active_session,
+                            config.as_ref(),
+                            session_id,
+                            &sub.id,
+                        )
+                        .await;
+                    } else {
+                        send_no_session_event(sub.id).await;
+                    }
+                    continue;
+                }
                 let configure_submission = Submission {
                     id: sub.id,
                     op,
@@ -144,6 +164,7 @@ pub(in crate::codex) async fn submission_loop(
                     config,
                     sess,
                     agent_manager_initialized,
+                    bridge_listener,
                 };
 
                 let (state, control) = configure_session::handle_configure_session(
@@ -160,8 +181,17 @@ pub(in crate::codex) async fn submission_loop(
                 config = state.config;
                 sess = state.sess;
                 agent_manager_initialized = state.agent_manager_initialized;
+                bridge_listener = state.bridge_listener;
 
-                if matches!(control, configure_session::ConfigureSessionControl::Exit) {
+                let should_exit =
+                    matches!(control, configure_session::ConfigureSessionControl::Exit);
+                if !should_exit {
+                    applied_configure = Some(configure_params);
+                }
+                if should_exit {
+                    if let Some(listener) = bridge_listener.take() {
+                        listener.abort();
+                    }
                     return;
                 }
             }
@@ -724,6 +754,23 @@ pub(in crate::codex) async fn submission_loop(
                     continue;
                 };
 
+                let configure_params = match &configure_submission.op {
+                    Op::ConfigureSession { params } => params.as_ref().clone(),
+                    _ => unreachable!("deferred operation must configure the session"),
+                };
+                if applied_configure.as_ref() == Some(&configure_params) {
+                    if let Some(active_session) = sess.as_ref() {
+                        acknowledge_unchanged_session(
+                            active_session,
+                            config.as_ref(),
+                            session_id,
+                            &configure_submission.id,
+                        )
+                        .await;
+                    }
+                    continue;
+                }
+
                 if let Some(active_session) = sess.as_ref()
                     && active_session.has_running_task()
                 {
@@ -743,6 +790,7 @@ pub(in crate::codex) async fn submission_loop(
                     config,
                     sess,
                     agent_manager_initialized,
+                    bridge_listener,
                 };
                 let (state, control) = configure_session::handle_configure_session(
                     state,
@@ -757,7 +805,16 @@ pub(in crate::codex) async fn submission_loop(
                 config = state.config;
                 sess = state.sess;
                 agent_manager_initialized = state.agent_manager_initialized;
-                if matches!(control, configure_session::ConfigureSessionControl::Exit) {
+                bridge_listener = state.bridge_listener;
+                let should_exit =
+                    matches!(control, configure_session::ConfigureSessionControl::Exit);
+                if !should_exit {
+                    applied_configure = Some(configure_params);
+                }
+                if should_exit {
+                    if let Some(listener) = bridge_listener.take() {
+                        listener.abort();
+                    }
                     return;
                 }
             }
@@ -803,7 +860,30 @@ pub(in crate::codex) async fn submission_loop(
             }
         }
     }
+    if let Some(listener) = bridge_listener {
+        listener.abort();
+    }
     debug!("Agent loop exited");
+}
+
+async fn acknowledge_unchanged_session(
+    session: &Arc<Session>,
+    config: &Config,
+    session_id: Uuid,
+    submission_id: &str,
+) {
+    let (history_log_id, history_entry_count) =
+        code_message_history::history_metadata(&config.code_home).await;
+    let event = session.make_event(
+        submission_id,
+        EventMsg::SessionConfigured(SessionConfiguredEvent {
+            session_id,
+            model: config.model.clone(),
+            history_log_id,
+            history_entry_count,
+        }),
+    );
+    session.send_event(event).await;
 }
 
 async fn send_mcp_tools_snapshot(sess: &Session, tx_event: &Sender<Event>, sub_id: &str) {

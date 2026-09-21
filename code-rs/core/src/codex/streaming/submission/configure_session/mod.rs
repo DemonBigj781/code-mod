@@ -25,6 +25,7 @@ pub(super) struct ConfigureSessionState {
     pub(super) config: Arc<Config>,
     pub(super) sess: Option<Arc<Session>>,
     pub(super) agent_manager_initialized: bool,
+    pub(super) bridge_listener: Option<tokio::task::JoinHandle<()>>,
 }
 
 pub(super) enum ConfigureSessionControl {
@@ -45,6 +46,7 @@ pub(super) async fn handle_configure_session(
         config,
         sess,
         agent_manager_initialized,
+        bridge_listener,
     } = state;
 
     let Op::ConfigureSession { params } = op else {
@@ -126,6 +128,7 @@ pub(super) async fn handle_configure_session(
         config,
         sess,
         agent_manager_initialized,
+        bridge_listener,
         auth_manager,
         tx_event,
         file_watcher,
@@ -220,6 +223,7 @@ struct Runner<'a> {
     config: Arc<Config>,
     sess: Option<Arc<Session>>,
     agent_manager_initialized: bool,
+    bridge_listener: Option<tokio::task::JoinHandle<()>>,
     auth_manager: Option<Arc<AuthManager>>,
     tx_event: &'a Sender<Event>,
     file_watcher: &'a crate::file_watcher::FileWatcher,
@@ -232,6 +236,7 @@ impl Runner<'_> {
             config: self.config,
             sess: self.sess,
             agent_manager_initialized: self.agent_manager_initialized,
+            bridge_listener: self.bridge_listener,
         }
     }
 

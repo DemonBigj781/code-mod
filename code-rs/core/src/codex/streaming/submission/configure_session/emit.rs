@@ -93,7 +93,10 @@ impl Runner<'_> {
             }
         }
 
-        spawn_bridge_listener(Arc::clone(sess_arc));
+        if let Some(previous_listener) = self.bridge_listener.take() {
+            previous_listener.abort();
+        }
+        self.bridge_listener = Some(spawn_bridge_listener(Arc::clone(sess_arc)));
 
         let session_start_source =
             if restored_items.is_some()
@@ -126,11 +129,9 @@ impl Runner<'_> {
 
         sess_arc.run_session_hooks(ProjectHookEvent::SessionStart).await;
 
-        // Initialize agent manager after SessionConfigured is sent
-        if self.agent_manager_initialized {
-            return;
-        }
-
+        // Point agent status forwarding at the replacement session. Replacing
+        // the manager sender closes the previous forwarding task so it cannot
+        // retain or mutate a stale Session after reconfiguration.
         let mut manager = AGENT_MANAGER.write().await;
         let (agent_tx, mut agent_rx) =
             tokio::sync::mpsc::unbounded_channel::<AgentStatusUpdatePayload>();

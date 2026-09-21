@@ -523,7 +523,14 @@ impl Runner<'_> {
         self.config = Arc::clone(&new_config);
         self.file_watcher.register_config(self.config.as_ref());
 
-        let rollout_recorder = match rollout_recorder {
+        // A runtime configuration change still belongs to the same logical
+        // conversation. Reuse its recorder instead of creating another rollout
+        // file with the same session id and splitting the history stream.
+        let existing_rollout_recorder = self
+            .sess
+            .as_ref()
+            .and_then(|session| session.clone_rollout_recorder());
+        let rollout_recorder = match rollout_recorder.or(existing_rollout_recorder) {
             Some(rec) => Some(rec),
             None => {
                 match RolloutRecorder::new(

@@ -326,7 +326,9 @@ pub(crate) fn send_bridge_control(action: &str, args: serde_json::Value) {
 
 /// Spawn a background task that watches `.code/code-bridge.json` and
 /// connects as a consumer to the external bridge host when available.
-pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
+pub(crate) fn spawn_bridge_listener(
+    session: std::sync::Arc<Session>,
+) -> tokio::task::JoinHandle<()> {
     let cwd = session.get_cwd().to_path_buf();
     tokio::spawn(async move {
         let mut last_notice: Option<&str> = None;
@@ -406,7 +408,7 @@ pub(crate) fn spawn_bridge_listener(session: std::sync::Arc<Session>) {
             }
             sleep(Duration::from_secs(5)).await;
         }
-    });
+    })
 }
 
 fn read_meta(path: &Path) -> Result<BridgeMeta> {

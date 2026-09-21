@@ -289,6 +289,108 @@ async fn session_reconfiguration_waits_for_the_active_turn_and_preserves_its_out
 
     conversation.submit(Op::Shutdown).await.unwrap();
     wait_for_event(&conversation, |event| matches!(event, EventMsg::ShutdownComplete)).await;
+
+    assert_eq!(
+        rollout_files_under(code_home.path()).len(),
+        1,
+        "a real settings replacement must retain the conversation's rollout"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn repeated_session_configuration_keeps_one_rollout_and_delivers_the_prompt() {
+    let code_home = TempDir::new().unwrap();
+    let project_dir = TempDir::new().unwrap();
+    let server = MockServer::start().await;
+    let completed = load_sse_fixture_with_id(
+        "tests/fixtures/completed_template.json",
+        "after-configure-burst",
+    );
+
+    Mock::given(method("POST"))
+        .and(path_regex(".*/responses$"))
+        .respond_with(sse_response(completed))
+        .mount(&server)
+        .await;
+
+    let mut config = load_default_config_for_test(&code_home);
+    config.cwd = project_dir.path().to_path_buf();
+    config.approval_policy = AskForApproval::Never;
+    config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+    config.input_compression.enabled = false;
+    config.model_provider = ModelProviderInfo {
+        base_url: Some(format!("{}/v1", server.uri())),
+        ..built_in_model_providers(None)["openai"].clone()
+    };
+    config.model = "gpt-5.1-codex".to_owned();
+    let configure_op = configure_session_op(&config);
+
+    let conversation = ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"))
+        .new_conversation(config)
+        .await
+        .expect("create conversation")
+        .conversation;
+
+    for _ in 0..8 {
+        conversation.submit(configure_op.clone()).await.unwrap();
+    }
+    conversation
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: "deliver this prompt after the settings burst".into(),
+            }],
+            final_output_json_schema: None,
+        })
+        .await
+        .unwrap();
+
+    timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let event = conversation.next_event().await.expect("event stream");
+            if matches!(event.msg, EventMsg::TaskComplete(_)) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("configuration traffic must not starve operator input");
+
+    conversation.submit(Op::Shutdown).await.unwrap();
+    wait_for_event(&conversation, |event| matches!(event, EventMsg::ShutdownComplete)).await;
+
+    let requests = server.received_requests().await.unwrap();
+    let response_bodies = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .map(|request| request.body_json::<serde_json::Value>().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(response_bodies.len(), 1);
+    assert_eq!(
+        input_texts(&response_bodies[0])
+            .iter()
+            .filter(|text| **text == "deliver this prompt after the settings burst")
+            .count(),
+        1,
+    );
+
+    assert_eq!(
+        rollout_files_under(code_home.path()).len(),
+        1,
+        "runtime configuration belongs to the existing conversation history"
+    );
+}
+
+fn rollout_files_under(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    text_files_under(path)
+        .into_iter()
+        .filter(|path| {
+            path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("rollout-"))
+        })
+        .collect()
 }
 
 fn text_files_under(path: &std::path::Path) -> Vec<std::path::PathBuf> {

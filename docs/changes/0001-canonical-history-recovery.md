@@ -288,11 +288,26 @@ were both included in the archive.
     nonblocking, preserving prompt saturated-queue shutdown. The reconnect and
     saturation regressions pass in both directions, all 108 app-server library
     tests pass, and the final full gate is green.
+  - On 2026-09-20, the operator's failed prompt transmission exposed a second
+    incomplete part of the pipeline repair. One logical session produced 289
+    rollout files with the same session ID while identical `ConfigureSession`
+    requests repeatedly rebuilt the session, queued ahead of the prompt, and
+    left bridge and agent-status tasks retaining replaced sessions. Duplicate
+    configuration is now idempotent, real settings replacement reuses the
+    existing rollout recorder, and replacement retires the superseded bridge
+    listener and agent-status sender. The burst regression failed before the
+    repair and now proves one prompt request and one rollout; the changed-model
+    regression independently verifies the same history identity. The guarded
+    one-thread workspace gate passed all 3,049 tests with 9 skipped.
 - [x] Verify the deployed executable separately from compilation and tests.
   - `/var/home/jack/bin/code` matches the built candidate SHA-256
-    `376fb247eab5b476dad73a061c26cce482db54bc80df52dd51c08d84d108a863`;
+    `a449c5ba5192200c885c3896cc2eb59fe8e3ce1e243b89f2b658867e8031b6bd`;
     `--version`, generated Bash completion syntax, and `doctor` pass.
   - The immediately replaced binary is preserved at
+    `/var/home/jack/backups/code-installed-predeploy-20260921T005905Z/code`
+    with SHA-256
+    `376fb247eab5b476dad73a061c26cce482db54bc80df52dd51c08d84d108a863`.
+  - The next older binary is preserved at
     `/var/home/jack/backups/code-installed-predeploy-20260920T163525Z/code`
     with SHA-256
     `632a678f472b6868baaa94f69f3701447cd25ca9098e6265c34c715343fcbe49`.
