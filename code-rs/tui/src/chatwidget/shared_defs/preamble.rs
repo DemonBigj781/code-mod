@@ -716,6 +716,7 @@ enum AppsDirectoryCacheState {
 pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     code_op_tx: UnboundedSender<Op>,
+    _conversation_shutdown: agent::ConversationShutdown,
     bottom_pane: BottomPane<'a>,
     auth_manager: Arc<AuthManager>,
     login_view_state: Option<Weak<RefCell<LoginAccountsState>>>,

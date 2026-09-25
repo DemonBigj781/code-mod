@@ -194,8 +194,11 @@ pub fn create_client(originator: &str) -> reqwest::Client {
     headers.insert("originator", originator_value);
     let ua = get_code_user_agent(Some(originator.value.as_str()));
 
-    let mut builder = crate::http_client::apply_extra_root_certificates(
-        crate::http_client::with_chatgpt_cloudflare_cookie_store(reqwest::Client::builder()),
+    let mut builder = crate::http_client::with_tcp_user_timeout(
+        crate::http_client::apply_extra_root_certificates(
+            crate::http_client::with_chatgpt_cloudflare_cookie_store(reqwest::Client::builder()),
+        ),
+        crate::http_client::DEFAULT_TCP_USER_TIMEOUT,
     )
         // Set UA via dedicated helper to avoid header validation pitfalls
         .user_agent(ua)

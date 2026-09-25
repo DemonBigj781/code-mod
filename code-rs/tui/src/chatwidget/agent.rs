@@ -9,10 +9,27 @@ use code_core::protocol::Op;
 use code_login::AuthManager;
 use code_protocol::protocol::SessionSource;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
+
+pub(crate) struct ConversationShutdown {
+    code_op_tx: UnboundedSender<Op>,
+}
+
+impl ConversationShutdown {
+    pub(crate) fn new(code_op_tx: UnboundedSender<Op>) -> Self {
+        Self { code_op_tx }
+    }
+}
+
+impl Drop for ConversationShutdown {
+    fn drop(&mut self) {
+        let _ = self.code_op_tx.send(Op::Shutdown);
+    }
+}
 
 /// Spawn bootstrap + forwarding loops for a brand-new conversation session.
 pub(crate) fn spawn_new_conversation_runtime(
@@ -117,4 +134,18 @@ pub(crate) fn spawn_existing_conversation_runtime(
             app_event_tx_clone.send(AppEvent::codex_event(event));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_conversation_owner_requests_shutdown() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        drop(ConversationShutdown::new(tx));
+
+        assert!(matches!(rx.try_recv(), Ok(Op::Shutdown)));
+    }
 }

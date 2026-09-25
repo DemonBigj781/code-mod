@@ -74,6 +74,7 @@ impl AppEventSender {
                 | AppEvent::SetTerminalTitle { .. }
                 | AppEvent::EmitTuiNotification { .. }
                 | AppEvent::AutoCoordinatorCountdown { .. }
+                | AppEvent::StartCommitAnimation
                 | AppEvent::StopCommitAnimation
         );
 
@@ -215,5 +216,32 @@ mod tests {
             bulk_rx.try_recv(),
             Ok(AppEvent::AutoCoordinatorAction { .. })
         ));
+    }
+
+    #[test]
+    fn commit_animation_start_and_stop_preserve_order() {
+        let (high_tx, high_rx) = channel();
+        let (bulk_tx, bulk_rx) = channel();
+        let sender = AppEventSender::new_dual(high_tx, bulk_tx);
+
+        sender.send(AppEvent::AutoCoordinatorAction {
+            message: "bulk".to_owned(),
+        });
+        sender.send(AppEvent::StartCommitAnimation);
+        sender.send(AppEvent::StopCommitAnimation);
+
+        assert!(matches!(
+            high_rx.try_recv(),
+            Ok(AppEvent::StartCommitAnimation)
+        ));
+        assert!(matches!(
+            high_rx.try_recv(),
+            Ok(AppEvent::StopCommitAnimation)
+        ));
+        assert!(matches!(
+            bulk_rx.try_recv(),
+            Ok(AppEvent::AutoCoordinatorAction { .. })
+        ));
+        assert!(bulk_rx.try_recv().is_err());
     }
 }

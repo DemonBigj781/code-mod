@@ -45,6 +45,7 @@ impl ChatWidget<'_> {
 
         let mut w = Self {
             app_event_tx,
+            _conversation_shutdown: agent::ConversationShutdown::new(code_op_tx.clone()),
             code_op_tx,
             bottom_pane,
             auth_manager,

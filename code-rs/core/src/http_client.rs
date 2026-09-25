@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use reqwest::cookie::CookieStore;
 use reqwest::cookie::Jar;
@@ -9,6 +10,8 @@ use reqwest::header::HeaderValue;
 
 static SHARED_CHATGPT_CLOUDFLARE_COOKIE_STORE: LazyLock<Arc<ChatGptCloudflareCookieStore>> =
     LazyLock::new(|| Arc::new(ChatGptCloudflareCookieStore::default()));
+
+pub(crate) const DEFAULT_TCP_USER_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Default)]
 struct ChatGptCloudflareCookieStore {
@@ -53,6 +56,21 @@ pub fn with_chatgpt_cloudflare_cookie_store(
     builder: reqwest::ClientBuilder,
 ) -> reqwest::ClientBuilder {
     builder.cookie_provider(Arc::clone(&SHARED_CHATGPT_CLOUDFLARE_COOKIE_STORE))
+}
+
+pub(crate) fn with_tcp_user_timeout(
+    builder: reqwest::ClientBuilder,
+    timeout: Duration,
+) -> reqwest::ClientBuilder {
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    {
+        builder.tcp_user_timeout(timeout)
+    }
+    #[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+    {
+        let _ = timeout;
+        builder
+    }
 }
 
 fn is_chatgpt_cookie_url(url: &reqwest::Url) -> bool {
@@ -167,9 +185,49 @@ pub fn apply_extra_root_certificates(
 /// `SSL_CERT_FILE`, and other ecosystem-standard CA bundle variables continue
 /// to work as fallbacks.
 pub fn build_http_client() -> reqwest::Client {
-    apply_extra_root_certificates(with_chatgpt_cloudflare_cookie_store(
-        reqwest::Client::builder(),
-    ))
+    with_tcp_user_timeout(
+        apply_extra_root_certificates(with_chatgpt_cloudflare_cookie_store(
+            reqwest::Client::builder(),
+        )),
+        DEFAULT_TCP_USER_TIMEOUT,
+    )
     .build()
     .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn stalled_upload_obeys_tcp_user_timeout() {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind stalled HTTP server");
+        let addr = listener.local_addr().expect("read server address");
+        let server = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.expect("accept HTTP client");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let client = with_tcp_user_timeout(
+            reqwest::Client::builder().http1_only(),
+            Duration::from_millis(100),
+        )
+        .build()
+        .expect("build HTTP client");
+        let request = client
+            .post(format!("http://{addr}/responses"))
+            .body(vec![0_u8; 64 * 1024 * 1024])
+            .send();
+
+        let result = tokio::time::timeout(Duration::from_secs(2), request).await;
+        server.abort();
+
+        assert!(
+            matches!(result, Ok(Err(_))),
+            "stalled upload should fail before the outer test deadline: {result:?}"
+        );
+    }
 }
