@@ -676,7 +676,7 @@ mod tests {
                 &item,
                 &crate::config_types::OperatorInputCompressionConfig::default(),
             ),
-            "Update the documentation.",
+            "Please update the documentation.\n\n[repeat paragraph 1]",
         );
     }
 }

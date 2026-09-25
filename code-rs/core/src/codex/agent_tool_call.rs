@@ -5,6 +5,7 @@ use super::fs_utils::{ensure_agent_dir, write_agent_file};
 use super::truncation::truncate_middle_bytes;
 use crate::tools::events::execute_custom_tool;
 use code_protocol::models::FunctionCallOutputBody;
+use rand::seq::IndexedRandom;
 
 const AGENT_PREVIEW_MAX_BYTES: usize = 32 * 1024; // 32 KiB
 const AGENT_HANDOFF_MAX_BYTES: usize = 64 * 1024; // 64 KiB
@@ -107,6 +108,16 @@ fn build_agent_handoff_context(sess: &Session) -> String {
     )
 }
 
+fn select_agent_models_for_batch<R: rand::Rng + ?Sized>(
+    selected: Vec<String>,
+    rng: &mut R,
+) -> Vec<String> {
+    if selected.len() <= 5 {
+        return selected;
+    }
+    selected.choose_multiple(rng, 5).cloned().collect()
+}
+
 #[cfg(test)]
 mod agent_handoff_tests {
     use super::*;
@@ -183,6 +194,62 @@ mod agent_handoff_tests {
         assert!(handoff.contains("LATEST_MESSAGE"));
         assert!(!handoff.contains("OLDER_0"));
         assert!(handoff.ends_with(AGENT_HANDOFF_END));
+    }
+}
+
+#[cfg(test)]
+mod agent_selection_limit_tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use std::collections::HashSet;
+
+    fn models(count: usize) -> Vec<String> {
+        (0..count).map(|index| format!("agent-{index:02}")).collect()
+    }
+
+    #[test]
+    fn five_or_fewer_selected_agents_are_unchanged() {
+        let selected = models(5);
+        let mut rng = StdRng::seed_from_u64(1);
+
+        assert_eq!(
+            select_agent_models_for_batch(selected.clone(), &mut rng),
+            selected
+        );
+    }
+
+    #[test]
+    fn thirty_selected_agents_are_limited_to_five_distinct_choices() {
+        let selected = models(30);
+        let allowed = selected.iter().cloned().collect::<HashSet<_>>();
+        let mut rng = StdRng::seed_from_u64(2);
+
+        let limited = select_agent_models_for_batch(selected, &mut rng);
+        let distinct = limited.iter().cloned().collect::<HashSet<_>>();
+
+        assert_eq!(limited.len(), 5);
+        assert_eq!(distinct.len(), 5);
+        assert!(distinct.is_subset(&allowed));
+    }
+
+    #[test]
+    fn oversized_agent_selection_varies_across_batches() {
+        let selected = models(30);
+        let choices = (0..32)
+            .map(|seed| {
+                let mut rng = StdRng::seed_from_u64(seed);
+                let mut limited =
+                    select_agent_models_for_batch(selected.clone(), &mut rng);
+                limited.sort();
+                limited
+            })
+            .collect::<HashSet<_>>();
+
+        assert!(
+            choices.len() > 1,
+            "oversized selections must not always use the same five agents"
+        );
     }
 }
 

@@ -674,7 +674,10 @@ async fn one_operator_submission_reaches_the_model_once_in_compressed_form() {
     let body: serde_json::Value = request.body_json().unwrap();
     let texts = input_texts(&body);
     assert_eq!(
-        texts.iter().filter(|text| **text == "Update the documentation.").count(),
+        texts
+            .iter()
+            .filter(|text| **text == "Please update the documentation.\n\n[repeat paragraph 1]")
+            .count(),
         1,
     );
     assert!(!texts.contains(&original));

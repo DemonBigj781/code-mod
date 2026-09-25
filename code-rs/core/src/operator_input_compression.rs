@@ -1,6 +1,6 @@
 use crate::config_types::OperatorInputCompressionConfig;
 use code_protocol::models::{ContentItem, ResponseItem};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 const MAX_CACHE_SUBMISSIONS: usize = 16_384;
 const MAX_CACHE_BYTES: usize = 32 * 1024 * 1024;
@@ -161,44 +161,30 @@ fn compress_operator_text_if_changed(
     input: &str,
     config: &OperatorInputCompressionConfig,
 ) -> Option<String> {
-    if !config.enabled || input.trim().chars().count() < 24 || input.contains("```") {
+    if !config.enabled || input.trim().chars().count() < 24 {
         return None;
     }
 
-    let mut seen = HashSet::new();
+    // Keep every unique paragraph byte-for-byte. The only compaction permitted
+    // here is an explicit back-reference to an earlier identical paragraph;
+    // the model can resolve it without any lossy rewriting or user action.
+    let mut first_seen = HashMap::new();
     let mut output = Vec::new();
-    for paragraph in input.split("\n\n") {
-        let trimmed = paragraph.trim();
-        if trimmed.is_empty() {
-            continue;
+    let mut changed = false;
+    for (index, paragraph) in input.split("\n\n").enumerate() {
+        let reference = first_seen.entry(paragraph.to_owned()).or_insert(index);
+        if *reference != index {
+            let marker = format!("[repeat paragraph {}]", *reference + 1);
+            if marker.len() < paragraph.len() {
+                output.push(marker);
+                changed = true;
+                continue;
+            }
         }
-        if is_protected(trimmed) {
-            output.push(trimmed.to_owned());
-            continue;
-        }
-
-        let mut compressed = normalize_whitespace(trimmed);
-        compressed = strip_filler_prefixes(compressed);
-        if config.aggressive {
-            compressed = aggressive_rewrite(compressed);
-        }
-        compressed = capitalize_first(compressed.trim());
-        if compressed.is_empty() {
-            continue;
-        }
-
-        let identity = compressed.to_ascii_lowercase();
-        if seen.insert(identity) {
-            output.push(compressed);
-        }
+        output.push(paragraph.to_owned());
     }
 
-    let compressed = if output.is_empty() {
-        return None;
-    } else {
-        output.join("\n\n")
-    };
-    (compressed != input).then_some(compressed)
+    changed.then(|| output.join("\n\n"))
 }
 
 pub(crate) fn compress_operator_items(
@@ -315,113 +301,6 @@ pub(crate) fn compress_operator_items_cached_with_stats(
     (items, stats)
 }
 
-fn normalize_whitespace(input: &str) -> String {
-    input.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn strip_filler_prefixes(mut text: String) -> String {
-    const PREFIXES: &[&str] = &[
-        "actually, ",
-        "basically, ",
-        "please ",
-        "could you ",
-        "would you ",
-        "can you ",
-        "i would like you to ",
-        "i want you to ",
-        "just ",
-    ];
-
-    loop {
-        let lower = text.to_ascii_lowercase();
-        let Some(prefix) = PREFIXES.iter().find(|prefix| lower.starts_with(**prefix)) else {
-            return text;
-        };
-        text = text[prefix.len()..].trim_start().to_owned();
-    }
-}
-
-fn aggressive_rewrite(text: String) -> String {
-    let mut rewritten = text
-        .replace(", and then you should ", "; ")
-        .replace(", then you should ", "; ")
-        .replace(" and then you should ", "; ");
-    rewritten = strip_filler_prefixes(rewritten);
-
-    let mut clauses = Vec::new();
-    for (index, clause) in rewritten.split(';').enumerate() {
-        let clause = clause.trim();
-        let lower = clause.to_ascii_lowercase();
-        let clause = lower
-            .strip_prefix("you should ")
-            .map_or(clause, |_| &clause["you should ".len()..]);
-        let clause = if index == 0 {
-            capitalize_first(clause.trim())
-        } else {
-            clause.trim().to_owned()
-        };
-        clauses.push(clause);
-    }
-    clauses.join("; ")
-}
-
-fn capitalize_first(input: &str) -> String {
-    let mut chars = input.chars();
-    let Some(first) = chars.next() else {
-        return String::new();
-    };
-    first.to_uppercase().chain(chars).collect()
-}
-
-fn is_protected(input: &str) -> bool {
-    if input.contains('`')
-        || input.contains('"')
-        || input.matches('\'').count() >= 2
-        || input.contains("http://")
-        || input.contains("https://")
-        || input.split_whitespace().any(|token| token.contains('/'))
-        || input.contains('\\')
-        || input.chars().any(|ch| ch.is_ascii_digit())
-        || input.contains('{')
-        || input.contains('}')
-        || input.contains('[')
-        || input.contains(']')
-        || input.contains('<')
-        || input.contains('>')
-        || input.contains('@')
-        || input.lines().any(is_list_line)
-    {
-        return true;
-    }
-
-    let lower = input.to_ascii_lowercase();
-    [
-        " must ",
-        " never ",
-        " do not ",
-        " don't ",
-        " required ",
-        " exactly ",
-        " only ",
-        " preserve ",
-        " shall ",
-    ]
-    .iter()
-    .any(|keyword| format!(" {lower} ").contains(keyword))
-}
-
-fn is_list_line(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    trimmed.starts_with("- ")
-        || trimmed.starts_with("* ")
-        || trimmed.starts_with("+ ")
-        || trimmed
-            .split_once('.')
-            .is_some_and(|(prefix, rest)| {
-                !rest.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit())
-            })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,16 +313,16 @@ mod tests {
     }
 
     #[test]
-    fn standard_compression_removes_redundant_prose() {
-        let input = "Please   update the documentation.\n\nPlease update the documentation.\n\nActually, please run the tests.";
+    fn compression_preserves_unique_text_and_references_exact_repeats() {
+        let input = "Please update the documentation.\n\nPlease update the documentation.\n\nActually, please run the tests.";
         assert_eq!(
             compress_operator_text(input, &standard()),
-            "Update the documentation.\n\nRun the tests."
+            "Please update the documentation.\n\n[repeat paragraph 1]\n\nActually, please run the tests."
         );
     }
 
     #[test]
-    fn aggressive_compression_is_additive_and_disabled_by_default() {
+    fn aggressive_mode_does_not_change_lossless_compaction() {
         let mut config = standard();
         config.aggressive = true;
         assert_eq!(
@@ -451,7 +330,7 @@ mod tests {
                 "I would like you to review the code, and then you should fix the bug.",
                 &config,
             ),
-            "Review the code; fix the bug."
+            "I would like you to review the code, and then you should fix the bug."
         );
     }
 
@@ -484,7 +363,7 @@ mod tests {
 
     #[test]
     fn item_compression_only_changes_identified_operator_messages() {
-        let original = "Please   update the documentation.\n\nPlease update the documentation.";
+        let original = "Please update the documentation.\n\nPlease update the documentation.";
         let items = vec![
             ResponseItem::Message {
                 id: Some("submission-1".to_owned()),
@@ -518,7 +397,13 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(texts, vec!["Update the documentation.", original]);
+        assert_eq!(
+            texts,
+            vec![
+                "Please update the documentation.\n\n[repeat paragraph 1]",
+                original,
+            ]
+        );
     }
 
     #[test]
@@ -551,7 +436,7 @@ mod tests {
 
     #[test]
     fn cached_item_compression_reports_transform_and_cache_statistics() {
-        let original = "Please   update the documentation.\n\nPlease update the documentation.";
+        let original = "Please update the documentation.\n\nPlease update the documentation.";
         let item = ResponseItem::Message {
             id: Some("submission-telemetry".to_owned()),
             role: "user".to_owned(),
@@ -604,7 +489,7 @@ mod tests {
         let aggressive_items =
             compress_operator_items_cached(vec![item], &aggressive, &mut cache);
 
-        assert_ne!(standard_items, aggressive_items);
+        assert_eq!(standard_items, aggressive_items);
         assert_eq!(cache.test_counts(), (0, 2));
     }
 }
