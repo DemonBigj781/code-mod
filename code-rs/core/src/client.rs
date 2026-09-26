@@ -1999,8 +1999,19 @@ impl ModelClient {
                         retry_after_delay = try_parse_retry_after(error, now);
                     }
 
-                    let delay = retry_after_delay
-                        .as_ref().map_or_else(|| backoff(attempt), |info| info.delay);
+                    // Rate limits without a Retry-After header need a slower
+                    // floor than transport retries; otherwise provider 429s
+                    // can create a rapid retry storm during model switches.
+                    let delay = retry_after_delay.as_ref().map_or_else(
+                        || {
+                            if status == StatusCode::TOO_MANY_REQUESTS {
+                                backoff(attempt).max(std::time::Duration::from_secs(2))
+                            } else {
+                                backoff(attempt)
+                            }
+                        },
+                        |info| info.delay,
+                    );
                     tokio::time::sleep(delay).await;
                 }
                 Err(e) => {
