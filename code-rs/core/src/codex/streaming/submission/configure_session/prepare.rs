@@ -82,7 +82,13 @@ impl Runner<'_> {
         updated_config.service_tier = service_tier;
         updated_config.context_mode = context_mode;
         updated_config.user_instructions = provided_user_instructions;
-        let base_instructions = provided_base_instructions.or_else(|| {
+        let bootstrap_override = std::fs::read_to_string(updated_config.code_home.join("BOOTSTRAP.md"))
+            .ok()
+            .filter(|text| !text.trim().is_empty());
+        if bootstrap_override.is_some() {
+            debug!("using BOOTSTRAP.md from configured code home as base instructions");
+        }
+        let base_instructions = bootstrap_override.or(provided_base_instructions).or_else(|| {
             crate::model_family::base_instructions_override_for_personality(
                 &model,
                 updated_config.model_personality,
