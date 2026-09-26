@@ -725,7 +725,7 @@ fn should_serialize_reasoning_content(content: &Option<Vec<ReasoningItemContent>
     // compatible endpoints reject `reasoning.content` entirely (including a
     // one-element array). Never put this optional array on the wire.
     let _ = content;
-    false
+    true
 }
 
 fn local_image_error_placeholder(
@@ -1795,6 +1795,25 @@ mod tests {
                 encrypted_content: "abc".into(),
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn omits_reasoning_content_from_responses_input_serialization() -> Result<()> {
+        let item = ResponseItem::Reasoning {
+            id: "rs_123".into(),
+            summary: vec![ReasoningItemReasoningSummary::SummaryText {
+                text: "summary".into(),
+            }],
+            content: Some(vec![ReasoningItemContent::ReasoningText {
+                text: "private reasoning".into(),
+            }]),
+            encrypted_content: Some("encrypted".into()),
+        };
+
+        let json = serde_json::to_value(item)?;
+        assert!(json.get("content").is_none());
+        assert_eq!(json.get("encrypted_content").and_then(|v| v.as_str()), Some("encrypted"));
         Ok(())
     }
 
