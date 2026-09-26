@@ -720,12 +720,12 @@ impl From<SandboxMode> for DeveloperInstructions {
 
 #[allow(clippy::ref_option)]
 fn should_serialize_reasoning_content(content: &Option<Vec<ReasoningItemContent>>) -> bool {
-    match content {
-        Some(content) => !content
-            .iter()
-            .any(|c| matches!(c, ReasoningItemContent::ReasoningText { .. })),
-        None => false,
-    }
+    // Reasoning content is a client-side display/replay detail. Responses API
+    // providers accept the summary and encrypted content fields, but some
+    // compatible endpoints reject `reasoning.content` entirely (including a
+    // one-element array). Never put this optional array on the wire.
+    let _ = content;
+    false
 }
 
 fn local_image_error_placeholder(
