@@ -134,6 +134,9 @@ impl ChatWidget<'_> {
         // inserting a new cell. Recompute explore headers after every task
         // completion so earlier explore groups do not remain visually active.
         self.refresh_explore_trailing_flags();
+        if self.active_task_ids.is_empty() {
+            self.collapse_completed_explore_groups();
+        }
         // Now that streaming is complete, flush any queued interrupts.
         self.flush_interrupt_queue();
 

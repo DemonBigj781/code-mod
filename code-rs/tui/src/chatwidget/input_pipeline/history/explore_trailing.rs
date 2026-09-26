@@ -73,6 +73,24 @@ impl ChatWidget<'_> {
         updated
     }
 
+    pub(in crate::chatwidget) fn collapse_completed_explore_groups(&mut self) -> bool {
+        let mut updated = false;
+        for cell in &mut self.history_cells {
+            if let Some(explore_cell) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::ExploreAggregationCell>()
+                && explore_cell.set_force_exploring_header(false)
+            {
+                updated = true;
+            }
+        }
+        if updated {
+            self.invalidate_height_cache();
+            self.request_redraw();
+        }
+        updated
+    }
+
     pub(in crate::chatwidget) fn rendered_explore_should_hold(&self, idx: usize) -> bool {
         if idx >= self.history_cells.len() {
             return true;
