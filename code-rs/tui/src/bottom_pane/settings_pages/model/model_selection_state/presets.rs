@@ -27,15 +27,20 @@ pub(crate) fn openrouter_section(
     provider_id: Option<&str>,
     model: &str,
 ) -> Option<OpenRouterSection> {
-    provider_id
-        .is_some_and(|provider| provider.eq_ignore_ascii_case("openrouter"))
-        .then(|| {
-            if model.to_ascii_lowercase().ends_with(":free") {
-                OpenRouterSection::Free
-            } else {
-                OpenRouterSection::Paid
-            }
-        })
+    let normalized_model = model.to_ascii_lowercase();
+    let is_free = normalized_model.ends_with(":free")
+        || normalized_model == "openrouter/free-max"
+        || normalized_model.ends_with("/free-max");
+    let is_openrouter_provider = provider_id.is_some_and(|provider| {
+        provider.to_ascii_lowercase().contains("openrouter")
+    });
+    if is_free {
+        Some(OpenRouterSection::Free)
+    } else if is_openrouter_provider {
+        Some(OpenRouterSection::Paid)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -52,7 +57,22 @@ mod tests {
             openrouter_section(Some("openrouter"), "vendor/model"),
             Some(OpenRouterSection::Paid),
         );
-        assert_eq!(openrouter_section(Some("openai"), "vendor/model:free"), None);
+        assert_eq!(
+            openrouter_section(Some("openai"), "vendor/model:free"),
+            Some(OpenRouterSection::Free),
+        );
+        assert_eq!(
+            openrouter_section(Some("direct-openrouter-123"), "vendor/model"),
+            Some(OpenRouterSection::Paid),
+        );
+        assert_eq!(
+            openrouter_section(Some("custom-provider"), "vendor/model:FREE"),
+            Some(OpenRouterSection::Free),
+        );
+        assert_eq!(
+            openrouter_section(Some("direct-openrouter"), "openrouter/free-max"),
+            Some(OpenRouterSection::Free),
+        );
         assert!(OpenRouterSection::Free < OpenRouterSection::Paid);
     }
 }

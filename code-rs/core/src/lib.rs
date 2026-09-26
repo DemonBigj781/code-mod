@@ -40,6 +40,7 @@ mod conversation_history;
 pub mod acp;
 pub mod custom_prompts;
 pub mod debug_logger;
+pub mod markdown_logs;
 pub mod review_coord;
 pub mod env;
 mod environment_context;

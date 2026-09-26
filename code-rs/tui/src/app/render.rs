@@ -167,6 +167,22 @@ impl App<'_> {
         }
 
         let completed_frame = completed_frame?;
+        if let AppState::Chat { widget } = &self.app_state {
+            let area = completed_frame.buffer.area;
+            let _ = code_core::markdown_logs::append(
+                &widget.config_ref().code_home,
+                code_core::markdown_logs::MarkdownLogKind::TuiDraw,
+                "frame drawn",
+                &format!(
+                    "area={}x{}+{}+{}\nbuffer_cells={}",
+                    area.width,
+                    area.height,
+                    area.x,
+                    area.y,
+                    completed_frame.buffer.content.len()
+                ),
+            );
+        }
         self.buffer_diff_profiler.record(&completed_frame);
         Ok(())
     }

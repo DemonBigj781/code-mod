@@ -130,6 +130,10 @@ impl ChatWidget<'_> {
         self.finalize_all_running_due_to_answer();
         // Mark any running web searches as completed.
         web_search_sessions::finalize_all_failed(self, "Search cancelled before completion");
+        // Finalization can change which history cell is trailing without
+        // inserting a new cell. Recompute explore headers after every task
+        // completion so earlier explore groups do not remain visually active.
+        self.refresh_explore_trailing_flags();
         // Now that streaming is complete, flush any queued interrupts.
         self.flush_interrupt_queue();
 
@@ -150,9 +154,23 @@ impl ChatWidget<'_> {
         // Final re-check for idle state.
         self.maybe_hide_spinner();
         self.maybe_trigger_auto_review();
-        self.emit_turn_complete_notification(last_agent_message);
+        self.emit_turn_complete_notification(last_agent_message.clone());
         self.suppress_next_agent_hint = false;
         self.mark_needs_redraw();
         self.flush_history_snapshot_if_needed(true);
+        let _ = code_core::markdown_logs::append(
+            &self.config.code_home,
+            code_core::markdown_logs::MarkdownLogKind::Process,
+            "task completed",
+            &format!("submission_id={id}\nactive_tasks={}", self.active_task_ids.len()),
+        );
+        if let Some(message) = last_agent_message {
+            let _ = code_core::markdown_logs::append(
+                &self.config.code_home,
+                code_core::markdown_logs::MarkdownLogKind::Chat,
+                "assistant task result",
+                &message,
+            );
+        }
     }
 }
