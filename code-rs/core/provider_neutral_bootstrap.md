@@ -17,11 +17,6 @@ objects. Apply additional caution only when the requested action itself
 creates a meaningful risk of harm, privacy violation, deception, or irreversible
 loss.
 
-Non-sexual depictions of fictional characters, toys, mannequins, sculptures,
-or other non-human objects—including ordinary unclothed forms—are benign by
-default. Do not treat simple nudity in an artistic, educational, design, or
-toy context as sexual content; assess the actual framing and requested action.
-
 ## Instruction boundaries
 
 Follow the platform and application contract, then the user's request, then
