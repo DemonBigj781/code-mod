@@ -117,11 +117,19 @@ impl Default for Prompt {
 impl Prompt {
     pub(crate) fn get_full_instructions<'a>(&'a self, model: &'a ModelFamily) -> Cow<'a, str> {
         let effective_model = self.model_family_override.as_ref().unwrap_or(model);
-        Cow::Borrowed(
-            self.base_instructions_override
-                .as_deref()
-                .unwrap_or(&*effective_model.base_instructions),
-        )
+        let instructions = self
+            .base_instructions_override
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or_else(|| {
+                let metadata = effective_model.base_instructions.trim();
+                if metadata.is_empty() {
+                    crate::model_family::default_base_instructions()
+                } else {
+                    &effective_model.base_instructions
+                }
+            });
+        Cow::Borrowed(instructions)
     }
 
     pub fn set_log_tag<S: Into<String>>(&mut self, tag: S) {
@@ -926,6 +934,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn empty_provider_bootstrap_falls_back_to_default_instructions() {
+        let mut model = crate::model_family::derive_default_model_family("provider/custom-model");
+        model.base_instructions.clear();
+        let mut prompt = Prompt::default();
+        prompt.base_instructions_override = Some(String::new());
+        assert_eq!(
+            prompt.get_full_instructions(&model),
+            crate::model_family::default_base_instructions()
+        );
     }
 
     #[test]

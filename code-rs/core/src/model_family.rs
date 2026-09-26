@@ -17,6 +17,8 @@ use once_cell::sync::Lazy;
 /// The `instructions` field in the payload sent to a model should always start
 /// with this content.
 const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
+const PROVIDER_NEUTRAL_BOOTSTRAP: &str =
+    include_str!("../provider_neutral_bootstrap.md");
 const BASE_INSTRUCTIONS_WITH_APPLY_PATCH: &str =
     include_str!("../prompt_with_apply_patch_instructions.md");
 const GPT_5_CODEX_INSTRUCTIONS: &str = include_str!("../gpt_5_codex_prompt.md");
@@ -24,6 +26,10 @@ const GPT_5_1_INSTRUCTIONS: &str = include_str!("../gpt_5_1_prompt.md");
 const GPT_5_2_INSTRUCTIONS: &str = include_str!("../gpt_5_2_prompt.md");
 const GPT_5_1_CODEX_MAX_INSTRUCTIONS: &str = include_str!("../gpt-5.1-codex-max_prompt.md");
 const GPT_5_2_CODEX_INSTRUCTIONS: &str = include_str!("../gpt-5.2-codex_prompt.md");
+
+pub(crate) fn default_base_instructions() -> &'static str {
+    PROVIDER_NEUTRAL_BOOTSTRAP
+}
 
 const GPT_5_2_CODEX_INSTRUCTIONS_TEMPLATE: &str = include_str!(
     "../templates/model_instructions/gpt-5.2-codex_instructions_template.md",
