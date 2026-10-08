@@ -18,7 +18,7 @@ pub(crate) fn set_test_force_no_clipboard(enabled: bool) {
 }
 
 pub(crate) fn supports_native_picker() -> bool {
-    if cfg!(target_os = "android") {
+    if cfg!(target_os = "android") || cfg!(feature = "cosmopolitan-ape") {
         return false;
     }
     #[cfg(test)]
@@ -32,7 +32,7 @@ pub(crate) fn supports_native_picker() -> bool {
 }
 
 pub(crate) fn supports_reveal_in_file_manager() -> bool {
-    if cfg!(target_os = "android") {
+    if cfg!(target_os = "android") || cfg!(feature = "cosmopolitan-ape") {
         return false;
     }
     #[cfg(test)]
@@ -46,7 +46,7 @@ pub(crate) fn supports_reveal_in_file_manager() -> bool {
 }
 
 pub(crate) fn supports_clipboard_image_paste() -> bool {
-    if cfg!(target_os = "android") {
+    if cfg!(target_os = "android") || cfg!(feature = "cosmopolitan-ape") {
         return false;
     }
     #[cfg(test)]
@@ -114,5 +114,20 @@ mod tests {
         set_test_force_no_clipboard(true);
         assert!(!supports_clipboard_image_paste());
         set_test_force_no_clipboard(false);
+    }
+
+    #[test]
+    fn cosmopolitan_ape_disables_host_native_dialogs() {
+        if !cfg!(feature = "cosmopolitan-ape") {
+            return;
+        }
+        let _lock = TEST_LOCK.lock().expect("lock");
+        set_test_force_no_picker(false);
+        set_test_force_no_clipboard(false);
+        assert!(std::env::var_os("CODEX_TUI_FORCE_NO_PICKER").is_none());
+        assert!(std::env::var_os("CODEX_TUI_FORCE_NO_CLIPBOARD").is_none());
+        assert!(!supports_native_picker());
+        assert!(!supports_reveal_in_file_manager());
+        assert!(!supports_clipboard_image_paste());
     }
 }

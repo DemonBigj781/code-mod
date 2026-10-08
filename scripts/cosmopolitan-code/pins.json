@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "cosmopolitan_commit": "c2a7b3f8c871e44ae1e3fc8db36759c7b1829326",
+  "cosmopolitan_repository": "https://github.com/DemonBigj781/cosmopolitan.git",
+  "rust_ape_commit": "0e2d0a89f4c089c7f21377a9c7ce51a6e82c2791",
+  "target_architectures": ["x86_64"],
+  "artifact_name": "code.com",
+  "build_profile": "release",
+  "release_lto": "off",
+  "release_codegen_units": 1
+}

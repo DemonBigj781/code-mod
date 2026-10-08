@@ -15,7 +15,7 @@
 **Files:**
 - Read: `third_party/rust_ape/run.sh` from Cosmopolitan commit `c2a7b3f8c871e44ae1e3fc8db36759c7b1829326`
 - Read: `third_party/rust_ape/README.cosmo` and its pinned Rust-APE SDK commit
-- Output only: `o/cosmopolitan-source/`, `o/rust-ape/`, and `o/cosmo-target/`
+- Output only: `o/cosmopolitan-source/`, `o/rust-ape/`, and the disposable workspace `o/cosmo-code-rs/`
 
 - [ ] Fetch only the pinned Rust-APE SDK directory from the reference commit into the ignored `o/cosmopolitan-source/` area; do not add generated toolchains or compiled outputs to Git.
 - [ ] From the repository root, run SDK setup with one Cargo job and its default x86-64 target:
@@ -24,13 +24,23 @@
 CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$PWD/o/rust-ape" bash o/cosmopolitan-source/third_party/rust_ape/run.sh setup
 ```
 
-- [ ] From `code-rs/`, run the direct baseline command:
+- [ ] From `code-rs/`, run the direct baseline command against the native lockfile and capture the initial result:
 
 ```sh
-CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$PWD/../o/rust-ape" CARGO_TARGET_DIR="$PWD/../o/cosmo-target" bash ../o/cosmopolitan-source/third_party/rust_ape/run.sh cargo check --manifest-path Cargo.toml --locked -j1 -p code-cli --bin code
+CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$PWD/../o/rust-ape" bash ../o/cosmopolitan-source/third_party/rust_ape/run.sh cargo check --manifest-path Cargo.toml --locked -j1 -p code-cli --bin code
 ```
 
-- [ ] Record the complete first failure or successful check, including unsupported C build scripts, crates, target cfgs, and native link requirements. Do not modify application code during this task.
+- [ ] If Cargo rejects the pinned `libc` patch because the native lockfile selects another version, preserve the tracked native `code-rs/Cargo.lock`, copy `code-rs/` to `o/cosmo-code-rs/`, and update only that disposable copy:
+
+```sh
+export CARGO_BUILD_JOBS=1
+export CARGO_HOME="$PWD/o/rust-ape/toolchain/cargo"
+export RUSTUP_HOME="$PWD/o/rust-ape/toolchain/rustup"
+export RUSTUP_TOOLCHAIN=nightly-2026-07-28
+"$CARGO_HOME/bin/cargo" --config "$PWD/o/rust-ape/sdk/generated/cargo.cosmo.toml" update --manifest-path "$PWD/o/cosmo-code-rs/Cargo.toml" -p libc --precise 0.2.189
+```
+
+- [ ] Re-run the one-job `cargo check --locked` from `o/cosmo-code-rs/` and record the first compiler/linker blocker. Do not modify application source during this task.
 
 ## Task 2: Establish a failing CLI portability smoke test
 

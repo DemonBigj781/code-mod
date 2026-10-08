@@ -40,6 +40,19 @@ agent_instructions = "Preamble added to each spawned agent"
 
 The orchestrator fans out agents, waits for results, and merges reasoning according to your `hide_agent_reasoning` / `show_raw_agent_reasoning` settings.
 
+## Shared process limit
+
+One process-wide worker pool limits subagent execution to **four running workers
+at once across the application**, regardless of which session requested them.
+Additional workers wait for a slot. Canceling a queued worker prevents it from
+starting; canceling a running worker terminates its child process and releases
+the slot.
+
+The Cosmopolitan APE build currently reports external process tools as
+unsupported. Host-specific sandboxing and PTY behavior have not been validated
+for that runtime; native Linux and Windows builds keep their existing execution
+paths.
+
 ## TUI controls
 - `/agents` opens the settings overlay to the Agents section: toggle enabled/read-only, view defaults, and open editors.
 - Agent editor: create or edit a single agent (enable/disable, read-only, instructions). Args/env come from `config.toml`.

@@ -69,7 +69,7 @@ impl ShellSelectionView {
         self.native_picker_notice = None;
         if !crate::platform_caps::supports_native_picker() {
             self.native_picker_notice =
-                Some("Not supported on Android; type the path.".to_owned());
+                Some("Native picker is not available on this target; type the path.".to_owned());
             return true;
         }
         match pick_path(NativePickerKind::File, "Select shell binary") {
@@ -89,7 +89,7 @@ impl ShellSelectionView {
         self.native_picker_notice = None;
         if !crate::platform_caps::supports_reveal_in_file_manager() {
             self.native_picker_notice =
-                Some("Not supported on Android; copy the path manually.".to_owned());
+                Some("File manager integration is not available on this target; copy the path manually.".to_owned());
             return true;
         }
         let (path, _args) = split_command_and_args(self.custom_field.text());

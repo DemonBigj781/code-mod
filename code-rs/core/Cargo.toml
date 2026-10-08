@@ -13,6 +13,7 @@ workspace = true
 
 [features]
 browser-automation = ["dep:code-browser"]
+cosmopolitan-ape = ["dep:zstd", "zstd/no_asm"]
 managed-network-proxy = ["dep:code-network-proxy"]
 
 [dependencies]
@@ -117,6 +118,8 @@ url = "2"
 which = { workspace = true }
 wildmatch = { workspace = true }
 zip = { workspace = true }
+# Enable zstd-sys's portable C implementation for the Cosmopolitan APE target.
+zstd = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.9"

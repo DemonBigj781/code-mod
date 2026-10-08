@@ -15,6 +15,10 @@ pub(super) struct SpawnAgentProcessRequest<'a> {
 pub(super) async fn run_agent_process(
     request: SpawnAgentProcessRequest<'_>,
 ) -> Result<(std::process::ExitStatus, String, String), String> {
+    if let Some(message) = crate::process_execution::unsupported_process_tool_message() {
+        return Err(message.to_owned());
+    }
+
     let SpawnAgentProcessRequest {
         agent_id,
         model,
@@ -94,5 +98,41 @@ pub(super) async fn run_agent_process(
                 Err(format!("Failed to spawn sandboxed agent: {err}"))
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "cosmopolitan-ape", target_os = "linux"))]
+mod cosmopolitan_tests {
+    use super::{SpawnAgentProcessRequest, run_agent_process};
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn cosmopolitan_build_does_not_start_an_unsandboxed_agent_process() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("agent-started");
+        let args = vec![
+            "-c".to_owned(),
+            "printf started > \"$APE_MARKER\"".to_owned(),
+        ];
+        let env = HashMap::from([(
+            "APE_MARKER".to_owned(),
+            marker.to_string_lossy().into_owned(),
+        )]);
+
+        let result = run_agent_process(SpawnAgentProcessRequest {
+            agent_id: "cosmopolitan-process-guard",
+            model: "fixture",
+            read_only: true,
+            working_dir: Some(directory.path().to_path_buf()),
+            use_current_exe: false,
+            command: "/bin/sh",
+            command_for_spawn: "/bin/sh",
+            final_args: &args,
+            env: &env,
+        })
+        .await;
+
+        assert!(result.is_err(), "APE unexpectedly launched the external process");
+        assert!(!marker.exists(), "external command ran without a validated sandbox");
     }
 }

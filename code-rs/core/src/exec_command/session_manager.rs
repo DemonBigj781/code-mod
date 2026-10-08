@@ -301,6 +301,10 @@ impl SessionManager {
         enforce_managed_network: bool,
         exec_limits: crate::cgroup::ExecCgroupLimits,
     ) -> Result<ExecCommandOutput, String> {
+        if let Some(message) = crate::process_execution::unsupported_process_tool_message() {
+            return Err(message.to_owned());
+        }
+
         if let Some(sandbox_permissions) = params.sandbox_permissions
             && sandbox_permissions.requires_escalated_permissions()
             && params

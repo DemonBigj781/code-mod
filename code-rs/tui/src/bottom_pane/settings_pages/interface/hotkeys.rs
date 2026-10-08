@@ -524,7 +524,7 @@ impl InterfaceSettingsView {
     fn show_path_result(path: &std::path::Path, label: &str) -> (String, bool) {
         if !crate::platform_caps::supports_reveal_in_file_manager() {
             return (
-                "Not supported on Android; copy the path manually.".to_owned(),
+                "File manager integration is not available on this target; copy the path manually.".to_owned(),
                 true,
             );
         }

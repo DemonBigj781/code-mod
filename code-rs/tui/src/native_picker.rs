@@ -227,14 +227,17 @@ fn pick_linux_bsd(kind: NativePickerKind, title: &str) -> Result<Option<PathBuf>
     pick_rfd(kind, &title)
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "windows",
-    target_os = "linux",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "netbsd",
-    target_os = "openbsd",
+#[cfg(all(
+    feature = "native-picker",
+    any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    )
 ))]
 fn pick_rfd(kind: NativePickerKind, title: &str) -> Result<Option<PathBuf>> {
     #[cfg(test)]
@@ -253,14 +256,17 @@ fn pick_rfd(kind: NativePickerKind, title: &str) -> Result<Option<PathBuf>> {
     })
 }
 
-#[cfg(not(any(
-    target_os = "macos",
-    target_os = "windows",
-    target_os = "linux",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "netbsd",
-    target_os = "openbsd",
+#[cfg(not(all(
+    feature = "native-picker",
+    any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    )
 )))]
 fn pick_rfd(_kind: NativePickerKind, _title: &str) -> Result<Option<PathBuf>> {
     Err(anyhow::anyhow!(

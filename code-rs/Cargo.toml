@@ -129,7 +129,7 @@ code-responses-api-proxy = { path = "responses-api-proxy" }
 code-rmcp-client = { path = "rmcp-client" }
 code-otel = { path = "otel" }
 code-terminal-detection = { path = "terminal-detection", package = "codex-terminal-detection" }
-code-tui = { path = "tui" }
+code-tui = { path = "tui", default-features = false }
 code-utils-readiness = { path = "utils/readiness" }
 code-auto-drive-core = { path = "code-auto-drive-core" }
 code-utils-rustls-provider = { path = "utils/rustls-provider", package = "codex-utils-rustls-provider" }
@@ -277,6 +277,7 @@ webbrowser = "1.0"
 which = "6"
 wildmatch = "2.5.0"
 wiremock = "0.6"
+zstd = { version = "0.13.3", default-features = false }
 zip = "2.4.2"
 zeroize = "1.8.1"
 

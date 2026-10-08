@@ -1,0 +1,59 @@
+name: Cosmopolitan Code APE
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cosmopolitan-code-ape.yml"
+      - "scripts/build-cosmopolitan-code.sh"
+      - "scripts/cosmopolitan-code/**"
+      - "code-rs/**"
+      - "codex-rs/models-manager/models.json"
+      - "announcement_tip.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: DemonBigj781/cosmopolitan
+          ref: c2a7b3f8c871e44ae1e3fc8db36759c7b1829326
+          path: o/cosmopolitan-source
+          sparse-checkout: third_party/rust_ape
+      - name: Build and smoke-test the x86-64 APE on Linux
+        run: sh scripts/build-cosmopolitan-code.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cosmopolitan-code-ape
+          path: o/cosmopolitan-code/*
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-smoke:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cosmopolitan-code-ape
+          path: o/cosmopolitan-code
+      - name: Verify the manifest and run the same APE on Windows
+        shell: pwsh
+        run: |
+          $artifact = (Resolve-Path 'o/cosmopolitan-code/code.com').Path
+          $manifest = (Resolve-Path 'o/cosmopolitan-code/code.com.json').Path
+          python scripts/cosmopolitan-code/artifact_contract.py $artifact $manifest --source-commit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $artifact --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $artifact --help > $null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

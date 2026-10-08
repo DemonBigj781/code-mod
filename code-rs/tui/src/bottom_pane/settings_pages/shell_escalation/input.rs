@@ -208,7 +208,7 @@ impl ShellEscalationSettingsView {
             KeyEvent { code: KeyCode::Char('p'), modifiers: KeyModifiers::NONE, .. } => {
                 self.editor_notice = None;
                 if !crate::platform_caps::supports_native_picker() {
-                    self.editor_notice = Some("Not supported on Android; type the path.".to_owned());
+                    self.editor_notice = Some("Native picker is not available on this target; type the path.".to_owned());
                     return true;
                 }
                 let title = match target {

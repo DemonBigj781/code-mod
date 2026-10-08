@@ -12,12 +12,14 @@ name = "code_tui"
 path = "src/lib.rs"
 
 [features]
-default = ["code-fork"]
+default = ["code-fork", "native-picker"]
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
 dev-faults = ["code-auto-drive-core/dev-faults"]
 # Fork-specific extensions layered on top of upstream history rendering.
 code-fork = []
+cosmopolitan-ape = []
+native-picker = ["dep:rfd"]
 test-helpers = ["code-auto-drive-core/test-helpers"]
 browser-automation = ["dep:code-browser"]
 managed-network-proxy = []
@@ -126,13 +128,13 @@ signal-hook = "0.3"
 
 # Native file/folder picker (platform-specific backends).
 [target.'cfg(target_os = "macos")'.dependencies]
-rfd = { version = "0.15.4", default-features = false }
+rfd = { version = "0.15.4", default-features = false, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-rfd = { version = "0.15.4", default-features = false }
+rfd = { version = "0.15.4", default-features = false, optional = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "dragonfly", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
-rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "tokio"] }
+rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "tokio"], optional = true }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 webbrowser = { workspace = true }

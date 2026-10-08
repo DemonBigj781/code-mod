@@ -6,6 +6,8 @@ Rust-specific `rust-ci*.yml` workflows are intentionally removed in this fork.
 
 - `bazel.yml` is the primary Rust verification path for pull requests and for `main`.
 - `release.yml` remains the post-merge release pipeline for `main`.
+- `cosmopolitan-code-ape.yml` builds one pinned x86-64 APE on Linux and validates
+  the same artifact on Linux and Windows; it runs only on `main`.
 
 ## Upstream Merge Guardrail
 

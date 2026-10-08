@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_RUNNING_SUBAGENTS: usize = 4;
+
 // Agent status enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -52,6 +54,8 @@ lazy_static::lazy_static! {
 pub struct AgentManager {
     agents: HashMap<String, Agent>,
     handles: HashMap<String, JoinHandle<()>>,
+    // The process-wide AGENT_MANAGER shares these slots across all session tabs.
+    worker_slots: Arc<tokio::sync::Semaphore>,
     event_sender: Option<mpsc::UnboundedSender<AgentStatusUpdatePayload>>,
     debug_log_root: Option<PathBuf>,
     watchdog_handle: Option<JoinHandle<()>>,
@@ -93,6 +97,7 @@ impl AgentManager {
         Self {
             agents: HashMap::new(),
             handles: HashMap::new(),
+            worker_slots: Arc::new(tokio::sync::Semaphore::new(MAX_RUNNING_SUBAGENTS)),
             event_sender: None,
             debug_log_root: None,
             watchdog_handle: None,
@@ -124,7 +129,8 @@ impl AgentManager {
                 let timeout_ids: Vec<String> = mgr
                     .agents
                     .iter()
-                    .filter(|(_, agent)| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+                    // Time queued for a process slot is not worker inactivity.
+                    .filter(|(_, agent)| agent.status == AgentStatus::Running)
                     .filter(|(_, agent)| now - agent.last_activity > timeout)
                     .map(|(id, _)| id.clone())
                     .collect();
@@ -341,13 +347,22 @@ impl AgentManager {
 
         self.agents.insert(agent_id.clone(), agent);
 
+        if let Some(message) = crate::process_execution::unsupported_process_tool_message() {
+            self.update_agent_result(&agent_id, Err(message.to_owned())).await;
+            return agent_id;
+        }
+
         // Send initial status update
         self.send_agent_status_update();
 
         // Spawn async agent
         let agent_id_clone = agent_id.clone();
+        let worker_slots = Arc::clone(&self.worker_slots);
         let handle = tokio::spawn(async move {
-            execute_agent(agent_id_clone, config).await;
+            run_with_process_slot(worker_slots, async move {
+                execute_agent(agent_id_clone, config).await;
+            })
+            .await;
         });
 
         self.handles.insert(agent_id.clone(), handle);
@@ -399,12 +414,18 @@ impl AgentManager {
     }
 
     pub fn cancel_agent(&mut self, agent_id: &str) -> bool {
+        if !self.agents.get(agent_id).is_some_and(|agent| {
+            matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)
+        }) {
+            return false;
+        }
         if let Some(handle) = self.handles.remove(agent_id) {
             handle.abort();
             if let Some(agent) = self.agents.get_mut(agent_id) {
                 agent.status = AgentStatus::Cancelled;
                 agent.completed_at = Some(Utc::now());
             }
+            self.send_agent_status_update();
             true
         } else {
             false
@@ -521,6 +542,70 @@ impl AgentManager {
         if let Some(agent) = self.agents.get_mut(agent_id) {
             agent.worktree_path = Some(worktree_path);
             agent.branch_name = Some(branch_name);
+        }
+    }
+}
+
+async fn run_with_process_slot<F>(worker_slots: Arc<tokio::sync::Semaphore>, process: F)
+where
+    F: std::future::Future<Output = ()> + Send,
+{
+    let Ok(_permit) = worker_slots.acquire_owned().await else {
+        return;
+    };
+    process.await;
+}
+
+#[cfg(test)]
+mod process_slot_tests {
+    use super::{MAX_RUNNING_SUBAGENTS, run_with_process_slot};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::Semaphore;
+    use tokio::sync::mpsc;
+    use tokio::time::timeout;
+
+    #[tokio::test]
+    async fn four_process_slots_are_shared_and_cancellation_releases_one() {
+        let slots = Arc::new(Semaphore::new(MAX_RUNNING_SUBAGENTS));
+        let (started_tx, mut started_rx) = mpsc::unbounded_channel();
+        let mut workers = Vec::new();
+
+        for index in 0..=MAX_RUNNING_SUBAGENTS {
+            let slots = Arc::clone(&slots);
+            let started_tx = started_tx.clone();
+            workers.push(tokio::spawn(run_with_process_slot(slots, async move {
+                started_tx.send(index).expect("test receiver remains open");
+                std::future::pending::<()>().await;
+            })));
+        }
+        drop(started_tx);
+
+        let mut running = Vec::new();
+        for _ in 0..MAX_RUNNING_SUBAGENTS {
+            running.push(
+                timeout(Duration::from_secs(2), started_rx.recv())
+                    .await
+                    .expect("worker should start")
+                    .expect("worker channel remains open"),
+            );
+        }
+        assert!(
+            timeout(Duration::from_millis(50), started_rx.recv())
+                .await
+                .is_err()
+        );
+
+        workers[running[0]].abort();
+        let next = timeout(Duration::from_secs(2), started_rx.recv())
+            .await
+            .expect("queued worker should start when a running worker is canceled")
+            .expect("worker channel remains open");
+        assert!(!running.contains(&next));
+
+        for worker in workers {
+            worker.abort();
+            let _ = worker.await;
         }
     }
 }

@@ -66,6 +66,7 @@ code-rs/bin/
 
 # Release and CI scratch
 /.code-bin/
+/o/
 /artifacts/
 /release-assets/
 /npm-binaries/

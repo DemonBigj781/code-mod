@@ -116,7 +116,7 @@ impl ReplSettingsView {
         if !crate::platform_caps::supports_native_picker() {
             self.app_event_tx.send_background_event_with_ticket(
                 &self.ticket,
-                "Native picker not supported on Android; type the path.".to_owned(),
+                "Native picker is not available on this target; type the path.".to_owned(),
             );
             return;
         }
@@ -145,7 +145,7 @@ impl ReplSettingsView {
         if !crate::platform_caps::supports_native_picker() {
             self.app_event_tx.send_background_event_with_ticket(
                 &self.ticket,
-                "Native picker not supported on Android; type the path.".to_owned(),
+                "Native picker is not available on this target; type the path.".to_owned(),
             );
             return;
         }

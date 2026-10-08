@@ -183,7 +183,7 @@ impl ShellProfilesSettingsView {
             ListTarget::SkillRoots => NativePickerKind::Folder,
         };
         if !crate::platform_caps::supports_native_picker() {
-            self.status = Some("Not supported on Android; type the path.".to_owned());
+            self.status = Some("Native picker is not available on this target; type the path.".to_owned());
             return;
         }
         let title = match target {
@@ -216,7 +216,7 @@ impl ShellProfilesSettingsView {
 
     pub(super) fn editor_show_last_path(&mut self, target: ListTarget) {
         if !crate::platform_caps::supports_reveal_in_file_manager() {
-            self.status = Some("Not supported on Android; copy the path manually.".to_owned());
+            self.status = Some("File manager integration is not available on this target; copy the path manually.".to_owned());
             return;
         }
         let text = self.editor_field_mut(target).text().to_owned();

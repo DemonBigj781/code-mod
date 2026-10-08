@@ -270,7 +270,7 @@ impl MemoriesSettingsView {
     fn open_memories_directory(&mut self) {
         if !crate::platform_caps::supports_reveal_in_file_manager() {
             self.set_status(
-                "Not supported on Android; copy the path manually.".to_owned(),
+                "File manager integration is not available on this target; copy the path manually.".to_owned(),
                 true,
             );
             return;

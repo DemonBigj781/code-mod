@@ -189,6 +189,10 @@ impl UnifiedExecSessionManager {
         request: UnifiedExecRequest<'_>,
         exec_limits: crate::cgroup::ExecCgroupLimits,
     ) -> Result<UnifiedExecResult, UnifiedExecError> {
+        if let Some(message) = crate::process_execution::unsupported_process_tool_message() {
+            return Err(UnifiedExecError::create_session(anyhow::anyhow!(message)));
+        }
+
         let (timeout_ms, timeout_warning) = match request.timeout_ms {
             Some(requested) if requested > MAX_TIMEOUT_MS => (
                 MAX_TIMEOUT_MS,

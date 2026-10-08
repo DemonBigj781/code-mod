@@ -1,0 +1,10 @@
+--- a/core/Cargo.toml
++++ b/core/Cargo.toml
+@@ -138,7 +138,0 @@
+-# Build OpenSSL from source for musl builds.
+-[target.x86_64-unknown-linux-musl.dependencies]
+-openssl-sys = { version = "*", features = ["vendored"] }
+-
+-# Build OpenSSL from source for musl builds.
+-[target.aarch64-unknown-linux-musl.dependencies]
+-openssl-sys = { version = "*", features = ["vendored"] }
