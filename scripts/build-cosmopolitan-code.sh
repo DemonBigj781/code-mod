@@ -88,12 +88,11 @@ tar -xf "$tmp_dir/source.tar" -C "$workspace"
 
 patch --batch -d "$workspace/code-rs" -p1 \
     < "$support_dir/overrides/cosmopolitan-musl.patch"
+cp "$support_dir/Cargo.lock" "$workspace/code-rs/Cargo.lock"
 
 patch_config="patch.crates-io.rama-tls-rustls.path=\"$workspace/code-rs/vendor/rama-tls-rustls-cosmo\""
 (
     cd "$workspace/code-rs"
-    bash "$run_script" cargo --config "$patch_config" update \
-        --manifest-path "$PWD/Cargo.toml" -p libc --precise 0.2.189
     sh "$support_dir/check-tls-backends.sh" "$PWD"
     bash "$run_script" cargo --config "$patch_config" build \
         --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-cli --bin code \

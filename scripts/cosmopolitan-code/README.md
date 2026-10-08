@@ -13,7 +13,8 @@ sh scripts/build-cosmopolitan-code.sh
 
 The script verifies the pinned Cosmopolitan and Rust-APE source revisions,
 creates a disposable copy of the committed Rust workspace, applies only the
-APE-specific dependency adjustments, and builds with one Cargo job. The Rust
+APE-specific dependency adjustments and the APE-specific lockfile, then builds
+with one Cargo job. The native `code-rs/Cargo.lock` remains unchanged. The Rust
 toolchain and Cosmocc SDK stay under the ignored `o/` directory; the system
 toolchain is not changed. The release build disables fat LTO and keeps one
 codegen unit so it stays within the configured local build budget.
