@@ -32,8 +32,11 @@ name supplied by the user; the implementation backend is the CJK OCR project.
   values before being accepted. Weights are not bundled in the repository or
   executable.
 - The CJK model files are from the Apache-2.0 model repository. The English
-  model page identifies the weights as CC-BY-SA-4.0; the tool must preserve
-  attribution and must not redistribute those weights.
+  model-weight repository has no formal `LICENSE` file. Its maintainer says he
+  considers the weights CC-BY-SA-4.0 based on training data and calls that a
+  "safe view." The implementation will treat the weights conservatively as
+  CC-BY-SA-4.0, preserve attribution, and not redistribute them; the license
+  ambiguity remains an explicit risk.
 - Images are read and processed locally. Network access is used only to fetch
   a missing model file; image bytes and recognized text are not uploaded by
   the OCR implementation.
@@ -101,4 +104,5 @@ large model weights or depend on network access.
 - `kent-tokyo/ocrs-cjk` README and Cargo manifests.
 - `robertknight/ocrs` README and Cargo manifests.
 - `marsena/paddleocr-onnx-models` model card and file metadata.
-- `robertknight/ocrs` model-card metadata and its model-license discussion.
+- `robertknight/ocrs-models` license discussion (issue 34) and maintainer
+  comment.
