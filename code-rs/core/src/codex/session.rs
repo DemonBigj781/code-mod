@@ -368,8 +368,9 @@ pub(super) fn is_connectivity_error(err: &CodexErr) -> bool {
         CodexErr::Reqwest(e) => e.is_connect() || e.is_timeout() || e.is_request(),
         CodexErr::Stream(msg, _, _) => {
             let lower = msg.to_ascii_lowercase();
-            (msg.starts_with("[transport]")
-                || lower.contains("transport")
+            // A transport wrapper can also contain an upstream processing error; the wrapper
+            // alone is not evidence that this client has lost network connectivity.
+            (msg.starts_with("[network]")
                 || lower.contains("network")
                 || lower.contains("connection")
                 || lower.contains("connectivity")
@@ -419,6 +420,17 @@ mod tests {
         );
 
         assert!(is_connectivity_error(&err));
+    }
+
+    #[test]
+    fn server_processing_stream_error_is_not_connectivity() {
+        let err = CodexErr::Stream(
+            "[transport] Transport error: stream disconnected before completion: An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID <request-id> in your message.".to_string(),
+            None,
+            Some("request-id".to_string()),
+        );
+
+        assert!(!is_connectivity_error(&err));
     }
 
     #[test]
