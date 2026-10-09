@@ -6,6 +6,7 @@
   "target_architectures": ["x86_64"],
   "artifact_name": "code.com",
   "build_profile": "release",
+  "release_opt_level": 2,
   "release_lto": "off",
   "release_codegen_units": 1
 }

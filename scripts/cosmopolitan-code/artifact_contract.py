@@ -76,6 +76,8 @@ def validate_artifact(
         raise ArtifactContractError("target_architectures does not match the pinned build target")
     if manifest.get("build_profile") != pins.get("build_profile"):
         raise ArtifactContractError("build_profile does not match the pinned profile")
+    if manifest.get("release_opt_level") != pins.get("release_opt_level"):
+        raise ArtifactContractError("release_opt_level does not match the pinned profile settings")
     if manifest.get("release_lto") != pins.get("release_lto"):
         raise ArtifactContractError("release_lto does not match the pinned profile settings")
     if manifest.get("release_codegen_units") != pins.get("release_codegen_units"):

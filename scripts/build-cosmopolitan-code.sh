@@ -70,6 +70,7 @@ export CARGO_BUILD_JOBS=1
 export CMAKE_BUILD_PARALLEL_LEVEL=1
 export MAKEFLAGS=-j1
 export CARGO_PROFILE_RELEASE_LTO=off
+export CARGO_PROFILE_RELEASE_OPT_LEVEL=2
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 export COSMO_RUST_BUILD_ROOT="$build_root"
 export COSMO_RUST_ARCH=x86_64
@@ -83,11 +84,11 @@ trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 workspace="$tmp_dir/source"
 mkdir -p "$workspace"
 git -C "$repo_root" archive --format=tar "$source_commit" \
-    code-rs codex-rs/models-manager/models.json announcement_tip.toml > "$tmp_dir/source.tar"
+    code-rs codex-rs/models-manager/models.json announcement_tip.toml >"$tmp_dir/source.tar"
 tar -xf "$tmp_dir/source.tar" -C "$workspace"
 
 patch --batch -d "$workspace/code-rs" -p1 \
-    < "$support_dir/overrides/cosmopolitan-musl.patch"
+    <"$support_dir/overrides/cosmopolitan-musl.patch"
 cp "$support_dir/Cargo.lock" "$workspace/code-rs/Cargo.lock"
 
 patch_config="patch.crates-io.rama-tls-rustls.path=\"$workspace/code-rs/vendor/rama-tls-rustls-cosmo\""
@@ -132,6 +133,7 @@ manifest = {
     "rust_ape_commit": pins["rust_ape_commit"],
     "target_architectures": pins["target_architectures"],
     "build_profile": pins["build_profile"],
+    "release_opt_level": pins["release_opt_level"],
     "release_lto": pins["release_lto"],
     "release_codegen_units": pins["release_codegen_units"],
     "artifact_name": pins["artifact_name"],

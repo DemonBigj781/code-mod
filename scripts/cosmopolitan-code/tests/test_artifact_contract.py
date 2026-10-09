@@ -34,6 +34,7 @@ class ArtifactContractTests(unittest.TestCase):
             "rust_ape_commit": PINS["rust_ape_commit"],
             "target_architectures": PINS["target_architectures"],
             "build_profile": PINS["build_profile"],
+            "release_opt_level": PINS["release_opt_level"],
             "release_lto": PINS["release_lto"],
             "release_codegen_units": PINS["release_codegen_units"],
             "artifact_name": PINS["artifact_name"],
@@ -52,6 +53,14 @@ class ArtifactContractTests(unittest.TestCase):
     def test_rejects_source_revision_mismatch(self):
         with self.assertRaisesRegex(ArtifactContractError, "source_commit does not match"):
             validate_artifact(self.artifact, self.manifest, expected_source_commit="b" * 40)
+
+    def test_rejects_optimization_level_mismatch(self):
+        pins = dict(PINS, release_opt_level=2)
+        pins_path = self.directory / "pins.json"
+        pins_path.write_text(json.dumps(pins), encoding="utf-8")
+        self.write_manifest(release_opt_level=3)
+        with self.assertRaisesRegex(ArtifactContractError, "release_opt_level"):
+            validate_artifact(self.artifact, self.manifest, pins_path=pins_path)
 
     def test_rejects_missing_artifact(self):
         with self.assertRaisesRegex(ArtifactContractError, "artifact is missing"):
