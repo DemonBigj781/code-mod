@@ -9,16 +9,16 @@ image without sending the image to a hosted OCR service.
 
 ## User-facing tools
 
-- `ocr.read.ckj` runs the CJK OCR engine requested by the user.
-- `ocr.read.eng` runs the English OCR engine requested by the user.
+- `ocr_read_cjk` runs the CJK OCR engine.
+- `ocr_read_eng` runs the English OCR engine.
 - Both functions accept a required `path` to a local image. Relative paths are
   resolved against the session working directory, following `image_view`.
 - Both return recognized text with line breaks. Invalid paths, unsupported or
   corrupt images, unavailable models, and download failures return actionable
   tool errors rather than panicking.
 
-The spelling `ckj` is intentional for the exposed tool name because it is the
-name supplied by the user; the implementation backend is the CJK OCR project.
+The tool names use underscores because the Responses API only accepts
+letters, digits, underscores, and hyphens in function names.
 
 ## Engine and model choices
 
@@ -79,7 +79,7 @@ set.
 ## Scenarios
 
 1. **First CJK read** — GIVEN a valid local image and a missing CJK cache, WHEN
-   `ocr.read.ckj` is called, THEN the pinned CJK models are fetched, verified,
+   `ocr_read_cjk` is called, THEN the pinned CJK models are fetched, verified,
    cached, and used locally to return recognized text.
 2. **Offline cached read** — GIVEN the requested engine's verified models are
    cached and the network is unavailable, WHEN its OCR tool is called, THEN
@@ -91,7 +91,7 @@ set.
    path, WHEN either OCR tool is called, THEN it returns an actionable error
    without starting model inference.
 5. **English read** — GIVEN a supported local image and the English model,
-   WHEN `ocr.read.eng` is called, THEN it returns recognized English text and
+   WHEN `ocr_read_eng` is called, THEN it returns recognized English text and
    does not invoke the CJK engine.
 
 ## Integration and verification

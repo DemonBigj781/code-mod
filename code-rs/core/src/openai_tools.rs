@@ -20,8 +20,8 @@ pub(crate) const SEARCH_TOOL_BM25_TOOL_NAME: &str = "search_tool_bm25";
 pub(crate) const READ_FILE_TOOL_NAME: &str = "read_file";
 pub(crate) const LIST_DIR_TOOL_NAME: &str = "list_dir";
 pub(crate) const GREP_FILES_TOOL_NAME: &str = "grep_files";
-pub(crate) const OCR_CJK_TOOL_NAME: &str = "ocr.read.ckj";
-pub(crate) const OCR_ENGLISH_TOOL_NAME: &str = "ocr.read.eng";
+pub(crate) const OCR_CJK_TOOL_NAME: &str = "ocr_read_cjk";
+pub(crate) const OCR_ENGLISH_TOOL_NAME: &str = "ocr_read_eng";
 pub(crate) const REPL_TOOL_NAME: &str = "repl";
 pub(crate) const REPL_RESET_TOOL_NAME: &str = "repl_reset";
 

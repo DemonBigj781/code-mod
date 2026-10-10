@@ -92,8 +92,8 @@
             &tools,
             &[
                 "local_shell",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
@@ -130,7 +130,7 @@
         });
 
         let tools = get_openai_tools(&config, None, false, false, &[]);
-        for name in ["ocr.read.ckj", "ocr.read.eng"] {
+        for name in ["ocr_read_cjk", "ocr_read_eng"] {
             let tool = function_tool_or_panic(&tools, name);
             let OpenAiTool::Function(spec) = tool else {
                 panic!("{name} should be a function tool");
@@ -163,8 +163,8 @@
             &[
                 "exec_command",
                 "write_stdin",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
@@ -393,8 +393,8 @@
             &tools,
             &[
                 "local_shell",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
@@ -436,8 +436,8 @@
             &tools,
             &[
                 "shell",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
@@ -518,8 +518,8 @@
             &tools,
             &[
                 "shell",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -653,8 +653,8 @@
             &[
                 "shell",
                 "image_view",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -790,8 +790,8 @@
             &[
                 "shell",
                 "image_view",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -876,8 +876,8 @@
             &tools,
             &[
                 "shell",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -960,8 +960,8 @@
             &tools,
             &[
                 "shell",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -1045,8 +1045,8 @@
             &tools,
             &[
                 "shell",
-                "ocr.read.ckj",
-                "ocr.read.eng",
+                "ocr_read_cjk",
+                "ocr_read_eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
