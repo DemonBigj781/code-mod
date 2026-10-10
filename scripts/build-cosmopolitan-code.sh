@@ -4,6 +4,9 @@ set -eu
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 support_dir="$script_dir/cosmopolitan-code"
+if [ "$#" -gt 0 ]; then
+    exec python3 "$support_dir/commands.py" "$@"
+fi
 pins="$support_dir/pins.json"
 cosmo_source="$repo_root/o/cosmopolitan-source"
 build_root="$repo_root/o/rust-ape"

@@ -1,15 +1,6 @@
 name: Cosmopolitan Code APE
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/cosmopolitan-code-ape.yml"
-      - "scripts/build-cosmopolitan-code.sh"
-      - "scripts/cosmopolitan-code/**"
-      - "code-rs/**"
-      - "codex-rs/models-manager/models.json"
-      - "announcement_tip.toml"
   workflow_dispatch:
 
 permissions:
@@ -17,7 +8,8 @@ permissions:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
+    name: Build APE on Linux
+    if: github.ref == 'refs/heads/Main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,6 +19,8 @@ jobs:
           ref: c2a7b3f8c871e44ae1e3fc8db36759c7b1829326
           path: o/cosmopolitan-source
           sparse-checkout: third_party/rust_ape
+      - name: Test artifact and command contracts
+        run: python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'
       - name: Build and smoke-test the x86-64 APE on Linux
         run: sh scripts/build-cosmopolitan-code.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -37,7 +31,8 @@ jobs:
           retention-days: 14
 
   windows-smoke:
-    if: github.ref == 'refs/heads/main'
+    name: Run same APE on Windows
+    if: github.ref == 'refs/heads/Main'
     needs: build
     runs-on: windows-latest
     steps:
