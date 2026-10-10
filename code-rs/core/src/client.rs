@@ -2636,6 +2636,19 @@ async fn emit_completed_event(
     }
 }
 
+struct RequestLogFinalizer {
+    debug_logger: Arc<Mutex<DebugLogger>>,
+    request_id: String,
+}
+
+impl Drop for RequestLogFinalizer {
+    fn drop(&mut self) {
+        if let Ok(logger) = self.debug_logger.lock() {
+            let _ = logger.end_request_log(&self.request_id);
+        }
+    }
+}
+
 async fn process_sse<S>(
     stream: S,
     tx_event: mpsc::Sender<Result<ResponseEvent>>,
@@ -2647,6 +2660,10 @@ async fn process_sse<S>(
 ) where
     S: Stream<Item = Result<Bytes>> + Unpin,
 {
+    let _request_log_finalizer = RequestLogFinalizer {
+        debug_logger: debug_logger.clone(),
+        request_id: request_id.clone(),
+    };
     let mut stream = stream.eventsource();
 
     // If the stream stays completely silent for an extended period treat it as disconnected.

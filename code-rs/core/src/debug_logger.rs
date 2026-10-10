@@ -47,6 +47,15 @@ impl DebugLogger {
         let mut log_dir = crate::config::find_code_home()?;
         log_dir.push("debug_logs");
 
+        Self::new_with_log_dir(log_dir)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(log_dir: PathBuf) -> Result<Self, std::io::Error> {
+        Self::new_with_log_dir(log_dir)
+    }
+
+    fn new_with_log_dir(log_dir: PathBuf) -> Result<Self, std::io::Error> {
         fs::create_dir_all(&log_dir)?;
 
         let mut usage_dir = log_dir.clone();
@@ -59,7 +68,7 @@ impl DebugLogger {
         fs::create_dir_all(&context_management_dir)?;
 
         Ok(Self {
-            enabled,
+            enabled: true,
             log_dir,
             active_streams: Mutex::new(HashMap::new()),
             usage_dir,

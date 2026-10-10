@@ -384,6 +384,77 @@ async fn collect_events(
     events
 }
 
+#[tokio::test]
+async fn sse_transport_error_flushes_partial_debug_log() {
+    let temp = tempfile::tempdir().expect("temporary debug log root");
+    let logger = Arc::new(Mutex::new(
+        DebugLogger::new_for_test(temp.path().join("debug_logs")).expect("enabled debug logger"),
+    ));
+    let request_id = logger
+        .lock()
+        .expect("debug logger lock")
+        .start_request_log("https://example.invalid/responses", &json!({}), None, None)
+        .expect("start request log");
+    let chunks = futures::stream::iter(vec![
+        Ok(Bytes::from_static(
+            b"data: {\"type\":\"response.in_progress\"}\n\n",
+        )),
+        Err(CodexErr::Io(std::io::Error::other(
+            "simulated SSE disconnect",
+        ))),
+    ]);
+    let (tx, mut rx) = mpsc::channel(16);
+    let provider = ModelProviderInfo {
+        name: "test".to_string(),
+        base_url: Some("https://example.invalid/v1".to_string()),
+        env_key: None,
+        env_key_instructions: None,
+        experimental_bearer_token: None,
+        auth: None,
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: Some(0),
+        stream_max_retries: None,
+        stream_idle_timeout_ms: Some(1000),
+        websocket_connect_timeout_ms: None,
+        requires_openai_auth: false,
+        openrouter: None,
+    };
+
+    super::process_sse(
+        chunks,
+        tx,
+        provider.stream_idle_timeout(),
+        logger,
+        request_id,
+        None,
+        Arc::new(RwLock::new(super::StreamCheckpoint::default())),
+    )
+    .await;
+
+    assert!(
+        matches!(rx.recv().await, Some(Err(CodexErr::Stream(message, _, _))) if message.contains("simulated SSE disconnect"))
+    );
+
+    let response_path = std::fs::read_dir(temp.path().join("debug_logs"))
+        .expect("debug log directory")
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.to_string_lossy().ends_with("_response.json"))
+        .expect("partial response log should be flushed on transport error");
+    let response: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(response_path).expect("read partial response log"))
+            .expect("valid response log JSON");
+    assert!(response["completed_at"].is_string());
+    assert!(
+        response["events"]
+            .as_array()
+            .is_some_and(|events| { events.iter().any(|event| event["type"] == "sse_event") })
+    );
+}
+
 /// Builds an in-memory SSE stream from JSON fixtures and returns only the
 /// successfully parsed events (panics on internal channel errors).
 async fn run_sse(
