@@ -94,6 +94,27 @@ pub(super) fn create_image_view_tool() -> OpenAiTool {
     })
 }
 
+pub(super) fn create_ocr_tool(name: &str, language: &str) -> OpenAiTool {
+    let properties = BTreeMap::from([(
+        "path".to_owned(),
+        JsonSchema::String {
+            description: Some("Local filesystem path to an image file.".to_owned()),
+            allowed_values: None,
+        },
+    )]);
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: name.to_owned(),
+        description: format!("Read text in a local image using the {language} OCR engine."),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["path".to_owned()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
 pub(super) fn create_request_user_input_tool() -> OpenAiTool {
     let mut option_props = BTreeMap::new();
     option_props.insert(

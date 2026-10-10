@@ -95,6 +95,7 @@ impl ToolRouter {
         let browser: Arc<dyn ToolHandler> = Arc::new(handlers::browser::BrowserToolHandler);
         let web_fetch: Arc<dyn ToolHandler> = Arc::new(handlers::web_fetch::WebFetchToolHandler);
         let image_view: Arc<dyn ToolHandler> = Arc::new(handlers::image_view::ImageViewToolHandler);
+        let ocr: Arc<dyn ToolHandler> = Arc::new(handlers::ocr::OcrToolHandler);
         let wait: Arc<dyn ToolHandler> = Arc::new(handlers::wait::WaitToolHandler);
         let kill: Arc<dyn ToolHandler> = Arc::new(handlers::kill::KillToolHandler);
         let gh_run_wait: Arc<dyn ToolHandler> = Arc::new(handlers::gh_run_wait::GhRunWaitToolHandler);
@@ -139,6 +140,8 @@ impl ToolRouter {
         handlers.insert("browser".into(), browser);
         handlers.insert("web_fetch".into(), web_fetch);
         handlers.insert("image_view".into(), image_view);
+        handlers.insert(crate::openai_tools::OCR_CJK_TOOL_NAME.into(), Arc::clone(&ocr));
+        handlers.insert(crate::openai_tools::OCR_ENGLISH_TOOL_NAME.into(), ocr);
         handlers.insert("wait".into(), wait);
         handlers.insert("kill".into(), kill);
         handlers.insert("gh_run_wait".into(), gh_run_wait);

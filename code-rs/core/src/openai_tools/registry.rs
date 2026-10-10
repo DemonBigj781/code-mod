@@ -48,6 +48,15 @@ pub fn get_openai_tools(
         tools.push(builtin_tools::create_image_view_tool());
     }
 
+    tools.push(builtin_tools::create_ocr_tool(
+        super::OCR_CJK_TOOL_NAME,
+        "CJK",
+    ));
+    tools.push(builtin_tools::create_ocr_tool(
+        super::OCR_ENGLISH_TOOL_NAME,
+        "English",
+    ));
+
     if let Some(apply_patch_tool_type) = &config.apply_patch_tool_type {
         let apply_patch_tool = match apply_patch_tool_type {
             ApplyPatchToolType::Function => create_apply_patch_json_tool(),

@@ -833,6 +833,10 @@ impl Session {
         &self.cwd
     }
 
+    pub(crate) fn code_home(&self) -> &Path {
+        self.client.code_home()
+    }
+
     pub(crate) fn search_tool_enabled(&self) -> bool {
         self.tools_config.search_tool
     }

@@ -60,6 +60,9 @@ encoding_rs = { workspace = true }
 eventsource-stream = { workspace = true }
 futures = { workspace = true }
 futures-util = "0.3"
+ocrs = { version = "=0.12.2", default-features = false, features = ["onnx"] }
+ocrs-cjk = { version = "=0.1.0", default-features = false, features = ["onnx"] }
+image = { workspace = true, features = ["png", "jpeg"] }
 indexmap = { workspace = true }
 lazy_static = { workspace = true }
 libc = { workspace = true }
@@ -76,6 +79,7 @@ portable-pty = { workspace = true }
 rand = { workspace = true }
 regex-lite = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream", "cookies"] }
+rten = { version = "=0.24.0", default-features = false, features = ["onnx_format"] }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_bytes = "0.11"
@@ -97,6 +101,8 @@ time = { workspace = true, features = [
     "macros",
 ] }
 tokio = { workspace = true, features = [
+    "fs",
+    "io-util",
     "io-std",
     "macros",
     "process",
@@ -160,7 +166,6 @@ wiremock = { workspace = true }
 code-git-tooling = { path = "../git-tooling" }
 walkdir = { workspace = true }
 keyring = { workspace = true }
-image = { workspace = true, features = ["png"] }
 
 [package.metadata.cargo-shear]
 ignored = ["openssl-sys"]

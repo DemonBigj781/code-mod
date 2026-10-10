@@ -92,6 +92,8 @@
             &tools,
             &[
                 "local_shell",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
@@ -111,6 +113,33 @@
                 "web_search",
             ],
         );
+    }
+
+    #[test]
+    fn ocr_tools_have_exact_names_and_require_a_local_path() {
+        let model_family = model_family_or_panic("codex-mini-latest");
+        let config = ToolsConfig::new(ToolsConfigParams {
+            model_family: &model_family,
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::ReadOnly,
+            include_plan_tool: false,
+            include_apply_patch_tool: false,
+            include_web_search_request: false,
+            use_streamable_shell_tool: false,
+            include_view_image_tool: false,
+        });
+
+        let tools = get_openai_tools(&config, None, false, false, &[]);
+        for name in ["ocr.read.ckj", "ocr.read.eng"] {
+            let tool = function_tool_or_panic(&tools, name);
+            let OpenAiTool::Function(spec) = tool else {
+                panic!("{name} should be a function tool");
+            };
+            let parameters = serde_json::to_value(&spec.parameters).expect("serialize schema");
+            assert_eq!(parameters["required"], serde_json::json!(["path"]));
+            assert_eq!(parameters["properties"]["path"]["type"], "string");
+            assert_eq!(parameters["additionalProperties"], false);
+        }
     }
 
     #[test]
@@ -134,6 +163,8 @@
             &[
                 "exec_command",
                 "write_stdin",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
@@ -362,6 +393,8 @@
             &tools,
             &[
                 "local_shell",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
@@ -403,6 +436,8 @@
             &tools,
             &[
                 "shell",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "update_plan",
                 "request_user_input",
                 "request_permissions",
@@ -483,6 +518,8 @@
             &tools,
             &[
                 "shell",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -504,7 +541,7 @@
         );
 
         assert_eq!(
-            tools[17],
+            tools[19],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -616,6 +653,8 @@
             &[
                 "shell",
                 "image_view",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -637,7 +676,7 @@
         );
 
         assert_eq!(
-            tools[18],
+            tools[20],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -751,6 +790,8 @@
             &[
                 "shell",
                 "image_view",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -772,7 +813,7 @@
         );
 
         assert_eq!(
-            tools[18],
+            tools[20],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
@@ -835,6 +876,8 @@
             &tools,
             &[
                 "shell",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -917,6 +960,8 @@
             &tools,
             &[
                 "shell",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -937,7 +982,7 @@
             ],
         );
         assert_eq!(
-            tools[17],
+            tools[19],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
@@ -1000,6 +1045,8 @@
             &tools,
             &[
                 "shell",
+                "ocr.read.ckj",
+                "ocr.read.eng",
                 "request_user_input",
                 "request_permissions",
                 "request_resources",
@@ -1020,7 +1067,7 @@
             ],
         );
         assert_eq!(
-            tools[17],
+            tools[19],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {

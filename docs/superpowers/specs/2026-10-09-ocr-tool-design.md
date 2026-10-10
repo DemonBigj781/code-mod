@@ -1,6 +1,6 @@
 # Local OCR Tool Design
 
-**Status:** Proposed — pending user review
+**Status:** Approved — implementation complete
 
 ## Goal
 
@@ -22,7 +22,9 @@ name supplied by the user; the implementation backend is the CJK OCR project.
 
 ## Engine and model choices
 
-- English uses the upstream `robertknight/ocrs` Rust library.
+- English uses the upstream `robertknight/ocrs` Rust library, pinned to
+  version 0.12.2 so it shares RTen 0.24 with the selected CJK release and
+  remains compatible with this repository's Rust 1.93 toolchain.
 - CJK uses the `kent-tokyo/ocrs-cjk` Rust library with its documented PP-OCRv5
   detection and recognition models and the model's character dictionary.
 - Each engine is initialized lazily and cached for reuse. Inference runs on a
@@ -31,6 +33,9 @@ name supplied by the user; the implementation backend is the CJK OCR project.
   `models/ocr` directory, and verified against pinned revisions and SHA-256
   values before being accepted. Weights are not bundled in the repository or
   executable.
+- The CJK models and dictionary are pinned to Hugging Face repository revision
+  `06c3603ca8002e22e1f41d47c1aae0a251b4d940`. The English model files are
+  fetched from upstream S3 URLs and pinned by SHA-256.
 - The CJK model files are from the Apache-2.0 model repository. The English
   model-weight repository has no formal `LICENSE` file. Its maintainer says he
   considers the weights CC-BY-SA-4.0 based on training data and calls that a
@@ -41,10 +46,10 @@ name supplied by the user; the implementation backend is the CJK OCR project.
   a missing model file; image bytes and recognized text are not uploaded by
   the OCR implementation.
 
-The two selected crates currently resolve different `rten` versions. The
-implementation will keep the user-requested engines separate and account for
-the resulting additional dependency/build footprint rather than silently
-substituting another engine.
+Both selected crates use RTen 0.24. The English crate is pinned to the latest
+release compatible with that RTen version and the repository's Rust 1.93
+toolchain; each requested language still uses its own OCR engine and model
+set.
 
 ## Alternatives considered
 
@@ -106,3 +111,16 @@ large model weights or depend on network access.
 - `marsena/paddleocr-onnx-models` model card and file metadata.
 - `robertknight/ocrs-models` license discussion (issue 34) and maintainer
   comment.
+
+## Pinned model checksums
+
+- English `text-detection.onnx`:
+  SHA-256 `a917b23dbd9524b465df7e922641b3ff2981623df4ded5a0234004ef2fee7cfe`.
+- English `text-recognition.onnx`:
+  SHA-256 `86c145c2edb96c8caed5b1ebb8f44d706408922211451c309c625157dd6061c5`.
+- CJK `PP-OCRv5_server_det_infer.onnx`:
+  SHA-256 `127edf0182bb3d218ad59476377b02ca90296cfb4cc85df55042d671a3e53aeb`.
+- CJK `PP-OCRv5_server_rec_infer.onnx`:
+  SHA-256 `13d0dda27d63dc0f4938af48df2c55b33f3c989a0bd5eacb8410e30f1735f644`.
+- CJK `PP-OCRv5_server_rec_infer.yml`:
+  SHA-256 `2c719dba044c4e2228aef8ff92f5f575394d75d24c16de096a33b7cfd902f66d`.
