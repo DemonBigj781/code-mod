@@ -644,7 +644,9 @@
     }
 
     #[test]
+    #[serial_test::serial]
     fn direct_provider_catalog_models_receive_agent_rows() {
+    let (_bin_dir, _path_guard) = prepend_fake_executable_to_path("coder");
     let mut harness = ChatWidgetHarness::new();
     let chat = harness.chat();
     let provider_id = "openrouter".to_owned();

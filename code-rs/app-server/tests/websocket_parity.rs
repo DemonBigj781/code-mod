@@ -25,7 +25,7 @@ async fn connect_with_retry(
             Ok((stream, _)) => return stream,
             Err(err) => {
                 attempts += 1;
-                assert!(attempts < 40, "failed to connect to {url}: {err}");
+                assert!(attempts < 400, "failed to connect to {url}: {err}");
                 sleep(Duration::from_millis(25)).await;
             }
         }

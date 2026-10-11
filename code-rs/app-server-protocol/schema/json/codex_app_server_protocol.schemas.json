@@ -10688,7 +10688,6 @@
           {
             "properties": {
               "content": {
-                "default": null,
                 "items": {
                   "$ref": "#/definitions/v2/ReasoningItemContent"
                 },
