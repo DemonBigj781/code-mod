@@ -17,8 +17,8 @@
 - Read: `third_party/rust_ape/README.cosmo` and its pinned Rust-APE SDK commit
 - Output only: `o/cosmopolitan-source/`, `o/rust-ape/`, and the disposable workspace `o/cosmo-code-rs/`
 
-- [ ] Fetch only the pinned Rust-APE SDK directory from the reference commit into the ignored `o/cosmopolitan-source/` area; do not add generated toolchains or compiled outputs to Git.
-- [ ] From the repository root, run SDK setup with one Cargo job and its default x86-64 target:
+- [x] Fetch only the pinned Rust-APE SDK directory from the reference commit into the ignored `o/cosmopolitan-source/` area; do not add generated toolchains or compiled outputs to Git.
+- [x] From the repository root, run SDK setup with one Cargo job and its default x86-64 target:
 
 ```sh
 CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$PWD/o/rust-ape" bash o/cosmopolitan-source/third_party/rust_ape/run.sh setup
@@ -50,8 +50,8 @@ export RUSTUP_TOOLCHAIN=nightly-2026-07-28
 
 - [ ] Write a failing Python test that rejects missing artifacts and checks that an artifact manifest records the pinned source SHA, target architecture, and output SHA-256.
 - [ ] Run `python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'` and confirm the expected missing-manifest failure.
-- [ ] Implement the smallest artifact test script and JSON manifest contract needed by the observed Rust-APE packaging output.
-- [ ] Re-run `python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'` and require it to pass for both a valid temporary fixture and malformed/missing manifest cases.
+- [x] Implement the smallest artifact test script and JSON manifest contract needed by the observed Rust-APE packaging output.
+- [x] Re-run `python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'` and require it to pass for both a valid temporary fixture and malformed/missing manifest cases.
 
 ## Task 3: Build and package the existing CLI
 
@@ -61,11 +61,11 @@ export RUSTUP_TOOLCHAIN=nightly-2026-07-28
 - Modify only if demonstrated necessary: `code-rs/cli/Cargo.toml`, shared workspace manifests, and the exact crates named by compiler diagnostics
 - Test: `scripts/cosmopolitan-code/tests/test_artifact_contract.py`
 
-- [ ] Add a build script that verifies the exact Cosmopolitan and Rust-APE pins, uses an output directory under `o/`, and invokes the existing `code-cli` workspace target with `CARGO_BUILD_JOBS=1` and `-j1`.
-- [ ] Use the Rust-APE SDK's actual linker/APE packaging path; do not substitute `mold` or GCC for Cosmocc/`apelink` unless an isolated compatibility test proves that the replacement preserves APE output.
+- [x] Add a build script that verifies the exact Cosmopolitan and Rust-APE pins, uses an output directory under `o/`, and invokes the existing `code-cli` workspace target with `CARGO_BUILD_JOBS=1` and `-j1`.
+- [x] Use the Rust-APE SDK's actual linker/APE packaging path; do not substitute `mold` or GCC for Cosmocc/`apelink` unless an isolated compatibility test proves that the replacement preserves APE output.
 - [ ] Resolve each build blocker narrowly. Add a regression test before changing runtime behavior, and leave native platform manifests and builds unchanged.
-- [ ] Produce a distinct APE artifact and manifest; never overwrite the native `code` executable.
-- [ ] Run the artifact contract test, `file`, Cosmopolitan `pecheck`, and the APE's `--version` and `--help` commands on the Linux host.
+- [x] Produce a distinct APE artifact and manifest; never overwrite the native `code` executable.
+- [x] Run the artifact contract test, `file`, Cosmopolitan `pecheck`, and the APE's `--version` and `--help` commands on the Linux host.
 
 ## Task 4: Add host-aware compatibility without reducing security
 
@@ -93,11 +93,18 @@ export RUSTUP_TOOLCHAIN=nightly-2026-07-28
 - Modify: `.github/workflows/README.md`
 - Test: `scripts/cosmopolitan-code/test-artifact.sh`
 
-- [ ] Configure the workflow to run only for `main`. Build and upload one APE artifact on a Linux x86-64 runner with the source and SDK pinned to immutable commits.
-- [ ] Download the same named artifact in Linux and Windows validation jobs; verify the recorded hash before execution.
+- [x] Configure the workflow to run only for `main`. Build and upload one APE artifact on a Linux x86-64 runner with the source and SDK pinned to immutable commits.
+- [x] Download the same named artifact in Linux and Windows validation jobs; verify the recorded hash before execution.
 - [ ] Test startup, `--version`, `--help`, TLS/network, credentials, PTY/process handling, and sandbox behavior as separate checks; fail closed if an expected security guarantee is missing.
 - [ ] Run the artifact manifest and package checks locally, validate workflow YAML, and review that the native build workflows are unchanged.
-- [ ] Document the tested commands, supported host/architecture scope, experimental status, and any features blocked by missing equivalent runtime support.
+- [x] Document the tested commands, supported host/architecture scope, experimental status, and any features blocked by missing equivalent runtime support.
+
+## Audit notes — 2026-10-11
+
+- Verified complete items above are based on successful GitHub Actions run `38159610363` from `Main` commit `c32df7a9b241e3c4c3643d41208e630d583dba66`, plus installed artifact manifest validation for `/var/home/jack/bin/code.com.json`.
+- Items left unchecked were not independently verified in this audit, even where code may already exist.
+- The Task 4 requirement to return an unsupported error for APE agent command execution conflicts with the later command-parity requirement. Current source intentionally restores normal command execution paths for the APE build; do not mark that Task 4 item complete without rewriting the plan to match the current parity decision.
+- The workflow currently gates on `refs/heads/Main`, matching this repository's actual default branch name, rather than lowercase `main` as written in the original task wording.
 
 ## Completion criteria
 
