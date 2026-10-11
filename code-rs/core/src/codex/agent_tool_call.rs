@@ -5,6 +5,7 @@ use super::fs_utils::{ensure_agent_dir, write_agent_file};
 use super::truncation::truncate_middle_bytes;
 use crate::tools::events::execute_custom_tool;
 use code_protocol::models::FunctionCallOutputBody;
+#[cfg(test)]
 use rand::seq::IndexedRandom;
 
 const AGENT_PREVIEW_MAX_BYTES: usize = 32 * 1024; // 32 KiB
@@ -108,6 +109,7 @@ fn build_agent_handoff_context(sess: &Session) -> String {
     )
 }
 
+#[cfg(test)]
 fn select_agent_models_for_batch<R: rand::Rng + ?Sized>(
     selected: Vec<String>,
     rng: &mut R,

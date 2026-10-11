@@ -58,8 +58,9 @@ outside this first target.
 
 - A successful link is not a successful port. The binary must start and return
   the expected version/help output on Linux and Windows.
-- Agent command execution must fail closed until a secure, host-appropriate
-  sandbox path is available. No implicit unsandboxed fallback is allowed.
+- Agent command execution must keep parity with the native command paths. Any
+  sandbox, process-group, or PTY behavior change must be verified on both Linux
+  and Windows before claiming APE feature completeness.
 - Credential storage must not select a Linux D-Bus backend when running on
   Windows, and TLS must use an intentional trust-root policy on both hosts.
 - PTY-dependent execution must be verified independently; a missing PTY must

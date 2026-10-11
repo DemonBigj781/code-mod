@@ -130,13 +130,6 @@ pub(crate) async fn spawn_child_async_with_limits(
     exec_limits: crate::cgroup::ExecCgroupLimits,
     env: HashMap<String, String>,
 ) -> std::io::Result<Child> {
-    if let Some(message) = crate::process_execution::unsupported_process_tool_message() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            message,
-        ));
-    }
-
     trace!(
         "spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {sandbox_policy:?} {stdio_policy:?} {env:?}"
     );

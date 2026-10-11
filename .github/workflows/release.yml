@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     branches:
-      - main
+      - Main
     # Pushes build a reviewable beta artifact. Cross-platform builds and stable releases are manual.
   workflow_dispatch:
     inputs:
@@ -30,7 +30,7 @@ jobs:
     name: Verify Approved Beta
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main' &&
+      github.ref == 'refs/heads/Main' &&
       inputs.channel != 'beta'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -43,7 +43,7 @@ jobs:
         run: |
           set -eu
           run_ids=$(gh api --paginate \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?branch=main&status=success&per_page=100" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?branch=Main&status=success&per_page=100" \
             --jq ".workflow_runs[] | select(.head_sha == \"$RELEASE_SHA\") | .id")
 
           for run_id in $run_ids; do
@@ -65,7 +65,7 @@ jobs:
       - verify-beta
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main' &&
+      github.ref == 'refs/heads/Main' &&
       inputs.channel != 'beta'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -151,7 +151,7 @@ jobs:
       - verify-beta
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main' &&
+      github.ref == 'refs/heads/Main' &&
       inputs.channel != 'beta'
     runs-on: ubuntu-latest
     outputs:
@@ -386,7 +386,7 @@ jobs:
       - preflight-tests
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main' &&
+      github.ref == 'refs/heads/Main' &&
       inputs.channel == 'stable'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -427,7 +427,7 @@ jobs:
   beta-linux:
     name: Beta Linux x86_64
     if: >-
-      github.ref == 'refs/heads/main' &&
+      github.ref == 'refs/heads/Main' &&
       (github.event_name == 'push' ||
       (github.event_name == 'workflow_dispatch' && inputs.channel == 'beta'))
     runs-on: ubuntu-24.04

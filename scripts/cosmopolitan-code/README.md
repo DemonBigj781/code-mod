@@ -88,9 +88,9 @@ not evidence of a completed Windows runtime check.
   pre-release, not a production support claim.
 - Native file pickers, file-manager reveal, and clipboard-image paste are
   unavailable in the APE profile; users can enter paths directly.
-- External process tools are deliberately rejected in the APE profile until
-  host-specific sandboxing and PTY behavior are validated. Native builds retain
-  their normal process execution behavior, including the four-worker shared
-  subagent limit and cancellation of running child processes.
+- External process tools use the same command execution paths as native builds,
+  including the four-worker shared subagent limit and cancellation of running
+  child processes. Changes to sandboxing or PTY behavior must be validated on
+  both Linux and Windows for the APE artifact.
 - This workflow checks startup on Windows; it does not establish Windows
   sandbox, credential-store, system-certificate, or PTY parity.

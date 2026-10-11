@@ -48,10 +48,9 @@ Additional workers wait for a slot. Canceling a queued worker prevents it from
 starting; canceling a running worker terminates its child process and releases
 the slot.
 
-The Cosmopolitan APE build currently reports external process tools as
-unsupported. Host-specific sandboxing and PTY behavior have not been validated
-for that runtime; native Linux and Windows builds keep their existing execution
-paths.
+The Cosmopolitan APE build keeps the same agent and command execution paths as
+the native builds. Validate host-specific sandboxing and PTY behavior on both
+Linux and Windows when changing those execution paths.
 
 ## TUI controls
 - `/agents` opens the settings overlay to the Agents section: toggle enabled/read-only, view defaults, and open editors.

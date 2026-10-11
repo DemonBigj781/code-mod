@@ -167,8 +167,8 @@ def publish(output: Path, commit: str, tag: str, *, prerelease: bool) -> None:
                 f"Source: `{commit}`. Linux and Windows startup checks: {run['url']}\n\n"
                 f"{summary}\n\n"
                 "The adjacent manifest records the source and SDK pins and executable SHA-256.\n"
-                "This experimental APE build does not yet support external process tools, native file "
-                "pickers, file-manager reveal, or clipboard-image paste.\n",
+                "This experimental APE build supports the normal command execution paths. "
+                "Native file pickers, file-manager reveal, and clipboard-image paste remain unavailable.\n",
                 encoding="utf-8",
             )
             command(["gh", "release", "create", tag, str(artifact), str(manifest_path),

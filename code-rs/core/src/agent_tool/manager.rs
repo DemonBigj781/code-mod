@@ -347,11 +347,6 @@ impl AgentManager {
 
         self.agents.insert(agent_id.clone(), agent);
 
-        if let Some(message) = crate::process_execution::unsupported_process_tool_message() {
-            self.update_agent_result(&agent_id, Err(message.to_owned())).await;
-            return agent_id;
-        }
-
         // Send initial status update
         self.send_agent_status_update();
 
