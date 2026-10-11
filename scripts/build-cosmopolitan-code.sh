@@ -93,24 +93,11 @@ tar -xf "$tmp_dir/source.tar" -C "$workspace"
 patch --batch -d "$workspace/code-rs" -p1 \
     <"$support_dir/overrides/cosmopolitan-musl.patch"
 cp "$support_dir/Cargo.lock" "$workspace/code-rs/Cargo.lock"
-cp "$workspace/code-rs/Cargo.lock" "$tmp_dir/Cargo.lock.before"
 
 patch_config="patch.crates-io.rama-tls-rustls.path=\"$workspace/code-rs/vendor/rama-tls-rustls-cosmo\""
 (
     cd "$workspace/code-rs"
     sh "$support_dir/check-tls-backends.sh" "$PWD"
-    if ! bash "$run_script" cargo --config "$patch_config" metadata \
-        --manifest-path "$PWD/Cargo.toml" --locked --format-version 1 \
-        >/dev/null 2>"$tmp_dir/locked-metadata.err"
-    then
-        echo "Cosmopolitan APE lockfile is stale. Diff follows:" >&2
-        cat "$tmp_dir/locked-metadata.err" >&2
-        bash "$run_script" cargo --config "$patch_config" metadata \
-            --manifest-path "$PWD/Cargo.toml" --format-version 1 \
-            >/dev/null
-        diff -u "$tmp_dir/Cargo.lock.before" "$PWD/Cargo.lock" >&2 || true
-        exit 101
-    fi
     bash "$run_script" cargo --config "$patch_config" build \
         --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-cli --bin code \
         --no-default-features --features code-cli/cosmopolitan-ape --release
