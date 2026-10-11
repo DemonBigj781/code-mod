@@ -9,6 +9,21 @@ patched_rama="$script_dir/code-rs/vendor/rama-tls-rustls-cosmo"
 
 if [ -f "$patched_rama/Cargo.toml" ]; then
   patch_config="patch.crates-io.rama-tls-rustls.path=\"$patched_rama\""
+  lock_before=$(mktemp)
+  cp "$workspace/Cargo.lock" "$lock_before"
+  if ! CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$build_root" \
+    bash "$run_script" cargo --config "$patch_config" metadata \
+      --manifest-path "$workspace/Cargo.toml" --locked --format-version 1 \
+      >/dev/null 2>"$lock_before.err"
+  then
+    echo "Cosmopolitan APE lockfile is stale. Diff follows:" >&2
+    cat "$lock_before.err" >&2
+    CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$build_root" \
+      bash "$run_script" cargo --config "$patch_config" metadata \
+        --manifest-path "$workspace/Cargo.toml" --format-version 1 >/dev/null
+    diff -u "$lock_before" "$workspace/Cargo.lock" >&2 || true
+    exit 101
+  fi
   tree=$(CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$build_root" \
     bash "$run_script" cargo --config "$patch_config" tree \
       --manifest-path "$workspace/Cargo.toml" --locked \
@@ -22,6 +37,20 @@ if [ -f "$patched_rama/Cargo.toml" ]; then
       --manifest-path "$workspace/Cargo.toml" --locked \
       --no-default-features --features code-cli/cosmopolitan-ape -p code-cli -e features -i zstd-sys)
 else
+  lock_before=$(mktemp)
+  cp "$workspace/Cargo.lock" "$lock_before"
+  if ! CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$build_root" \
+    bash "$run_script" cargo metadata --manifest-path "$workspace/Cargo.toml" \
+      --locked --format-version 1 >/dev/null 2>"$lock_before.err"
+  then
+    echo "Cosmopolitan APE lockfile is stale. Diff follows:" >&2
+    cat "$lock_before.err" >&2
+    CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$build_root" \
+      bash "$run_script" cargo metadata --manifest-path "$workspace/Cargo.toml" \
+        --format-version 1 >/dev/null
+    diff -u "$lock_before" "$workspace/Cargo.lock" >&2 || true
+    exit 101
+  fi
   tree=$(CARGO_BUILD_JOBS=1 COSMO_RUST_BUILD_ROOT="$build_root" \
     bash "$run_script" cargo tree --manifest-path "$workspace/Cargo.toml" \
       --locked --no-default-features --features code-cli/cosmopolitan-ape -p code-cli -e normal)
