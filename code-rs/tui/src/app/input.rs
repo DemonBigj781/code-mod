@@ -119,9 +119,18 @@ impl App<'_> {
             tracing::warn!(%thread_id, "conversation event thread id could not be parsed");
             return;
         };
-        let is_inactive = self.inactive_chat_widgets.contains_key(&thread_id);
-        let active_thread_id = self.active_thread_router.active_thread_id();
-        let is_bootstrapping_active = matches!(&self.app_state, AppState::Chat { widget } if widget.session_id().is_none());
+        let mut is_inactive = self.inactive_chat_widgets.contains_key(&thread_id);
+        let active_thread_id = match &self.app_state {
+            AppState::Chat { widget } => widget
+                .session_id()
+                .and_then(|id| ThreadId::from_string(&id.to_string()).ok()),
+            AppState::Onboarding { .. } => None,
+        };
+        let is_session_configured = matches!(&event.msg, EventMsg::SessionConfigured(_));
+        if active_thread_id.is_none() && is_session_configured && is_inactive {
+            self.inactive_chat_widgets.remove(&thread_id);
+            is_inactive = false;
+        }
         if let EventMsg::SessionConfigured(session) = &event.msg {
             self.register_session_configured_with_router(session);
             if !is_inactive {
@@ -134,7 +143,7 @@ impl App<'_> {
             active_thread_id,
             thread_id,
             is_inactive,
-            is_bootstrapping_active,
+            is_session_configured,
         ) {
             ThreadEventDestination::Active => {
                 if let AppState::Chat { widget } = &mut self.app_state {
@@ -146,7 +155,9 @@ impl App<'_> {
                     widget.handle_code_event(event);
                 }
             }
-            ThreadEventDestination::Drop => {}
+            ThreadEventDestination::Drop => {
+                tracing::warn!(%thread_id, "discarding event for an unowned conversation");
+            }
         }
     }
 
@@ -172,28 +183,6 @@ impl App<'_> {
             }
             _ => {}
         }
-    }
-
-    pub(super) fn register_app_server_loaded_threads_with_router(
-        &mut self,
-        thread_ids: Vec<ThreadId>,
-    ) {
-        if thread_ids.is_empty() {
-            return;
-        }
-
-        for thread_id in thread_ids {
-            self.active_thread_router.upsert_thread_metadata(
-                thread_id,
-                ThreadTabMetadata {
-                    is_running: true,
-                    is_closed: false,
-                    ..ThreadTabMetadata::default()
-                },
-            );
-        }
-        self.sync_active_thread_tabs_to_widget();
-        self.schedule_redraw();
     }
 
     pub(super) fn register_app_server_loaded_thread_details_with_router(
@@ -373,13 +362,17 @@ fn thread_event_destination(
     active_thread_id: Option<ThreadId>,
     event_thread_id: ThreadId,
     is_inactive_thread: bool,
-    is_bootstrapping_active_thread: bool,
+    is_session_configured: bool,
 ) -> ThreadEventDestination {
+    if active_thread_id.is_none() && is_session_configured {
+        return ThreadEventDestination::Active;
+    }
+
     if is_inactive_thread {
         return ThreadEventDestination::Inactive;
     }
 
-    if active_thread_id == Some(event_thread_id) || is_bootstrapping_active_thread {
+    if active_thread_id == Some(event_thread_id) {
         return ThreadEventDestination::Active;
     }
 
@@ -450,6 +443,10 @@ mod app_server_thread_metadata_tests {
         assert_eq!(
             thread_event_destination(Some(active), other, true, false),
             ThreadEventDestination::Inactive
+        );
+        assert_eq!(
+            thread_event_destination(None, other, true, true),
+            ThreadEventDestination::Active
         );
     }
 

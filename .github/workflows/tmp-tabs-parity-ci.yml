@@ -2,12 +2,6 @@ name: Tabs Parity Disposable Check
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - fix/tab-feature-parity
-    paths:
-      - ".github/workflows/tmp-tabs-parity-ci.yml"
-      - "code-rs/**"
 
 jobs:
   code-rs:
