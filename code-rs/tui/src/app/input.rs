@@ -361,7 +361,7 @@ fn thread_navigation_direction(
     if !composer_is_empty
         || has_active_modal
         || !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-        || !key_event.modifiers.contains(KeyModifiers::CONTROL)
+        || key_event.modifiers != KeyModifiers::ALT
     {
         return None;
     }
@@ -529,8 +529,10 @@ mod app_server_thread_metadata_tests {
 
     #[test]
     fn thread_navigation_requires_an_empty_composer_without_a_modal() {
-        let next = KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL);
-        let previous = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
+        let next = KeyEvent::new(KeyCode::Right, KeyModifiers::ALT);
+        let previous = KeyEvent::new(KeyCode::Left, KeyModifiers::ALT);
+        let edit_word_right = KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL);
+        let edit_word_left = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
 
         assert_eq!(
             thread_navigation_direction(next, true, false),
@@ -542,5 +544,7 @@ mod app_server_thread_metadata_tests {
         );
         assert_eq!(thread_navigation_direction(next, false, false), None);
         assert_eq!(thread_navigation_direction(next, true, true), None);
+        assert_eq!(thread_navigation_direction(edit_word_right, true, false), None);
+        assert_eq!(thread_navigation_direction(edit_word_left, true, false), None);
     }
 }
