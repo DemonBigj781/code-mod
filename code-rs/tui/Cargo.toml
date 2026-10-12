@@ -35,6 +35,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 code-ansi-escape = { path = "../ansi-escape" }
 code-arg0 = { path = "../arg0" }
+code-app-server-client = { workspace = true }
 code-browser = { path = "../browser", optional = true }
 code-common = { path = "../common", features = [
     "cli",

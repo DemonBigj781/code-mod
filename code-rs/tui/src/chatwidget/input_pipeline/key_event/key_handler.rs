@@ -328,6 +328,27 @@ impl ChatWidget<'_> {
             return;
         }
 
+        // When the composer is empty, Ctrl+Left/Ctrl+Right scroll the top
+        // status/header row horizontally. Preserve the same chords for normal
+        // text-editing behavior once the composer has content.
+        if !self.bottom_pane.has_active_modal_view()
+            && self.bottom_pane.composer_is_empty()
+            && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+            && key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+        {
+            match key_event.code {
+                crossterm::event::KeyCode::Left => {
+                    self.scroll_top_status_row(-3);
+                    return;
+                }
+                crossterm::event::KeyCode::Right => {
+                    self.scroll_top_status_row(3);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // Fast-path PageUp/PageDown to scroll the transcript by a viewport at a time.
         if let crossterm::event::KeyEvent {
             code: crossterm::event::KeyCode::PageUp,
@@ -607,5 +628,40 @@ impl ChatWidget<'_> {
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
         }
+    }
+
+    fn scroll_top_status_row(&self, delta: i32) {
+        let current = i32::from(self.status_bar_hscroll.get());
+        self.status_bar_hscroll
+            .set(current.saturating_add(delta).max(0) as u16);
+        self.request_redraw();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
+
+    #[test]
+    fn ctrl_arrows_scroll_top_status_row_only_when_composer_is_empty() {
+        let mut harness = ChatWidgetHarness::new();
+
+        harness.send_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL));
+        harness.with_chat(|chat| assert_eq!(chat.status_bar_hscroll.get(), 3));
+
+        harness.send_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+        harness.with_chat(|chat| assert_eq!(chat.status_bar_hscroll.get(), 0));
+
+        harness.send_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        harness.send_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL));
+        harness.with_chat(|chat| {
+            assert_eq!(
+                chat.status_bar_hscroll.get(),
+                0,
+                "Ctrl+Right should remain available to the composer while editing text"
+            )
+        });
     }
 }

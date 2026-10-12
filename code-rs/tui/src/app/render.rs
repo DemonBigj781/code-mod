@@ -130,6 +130,7 @@ impl App<'_> {
             .filter(|split| split.current != split.preview);
         let theme_before_split = split_preview.map(|_| crate::theme::current_theme_name());
 
+        self.sync_active_thread_tabs_to_widget();
         let completed_frame = terminal.draw(|frame| {
             match &mut self.app_state {
                 AppState::Chat { widget } => {

@@ -258,6 +258,18 @@
                 AppEvent::CodexEvent(event) => {
                     self.dispatch_code_event(*event);
                 }
+                AppEvent::ThreadCodexEvent { thread_id, event } => {
+                    self.dispatch_thread_code_event(thread_id, *event);
+                }
+                AppEvent::AppServerNotification(notification) => {
+                    self.dispatch_app_server_notification(*notification);
+                }
+                AppEvent::AppServerLoadedThreads(thread_ids) => {
+                    self.register_app_server_loaded_threads_with_router(thread_ids);
+                }
+                AppEvent::AppServerLoadedThreadDetails(threads) => {
+                    self.register_app_server_loaded_thread_details_with_router(threads);
+                }
                 AppEvent::ExitRequest => {
                     // Stop background threads and break the UI loop.
                     self.commit_anim_running.store(false, Ordering::Release);

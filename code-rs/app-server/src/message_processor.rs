@@ -119,9 +119,6 @@ impl MessageProcessor {
         remote_control_handle: Option<RemoteControlHandle>,
         shared_auth_manager: Option<Arc<AuthManager>>,
     ) -> Self {
-        let sandbox_exe = code_linux_sandbox_exe
-            .clone()
-            .or_else(|| config.code_linux_sandbox_exe.clone());
         let auth_manager = shared_auth_manager.unwrap_or_else(|| {
             AuthManager::shared_with_mode_and_originator(
                 config.code_home.clone(),
@@ -133,6 +130,31 @@ impl MessageProcessor {
             auth_manager.clone(),
             SessionSource::Mcp,
         ));
+        Self::new_with_conversation_manager(
+            outgoing,
+            code_linux_sandbox_exe,
+            config,
+            config_warnings,
+            cli_overrides,
+            remote_control_handle,
+            auth_manager,
+            conversation_manager,
+        )
+    }
+
+    pub(crate) fn new_with_conversation_manager(
+        outgoing: Arc<OutgoingMessageSender>,
+        code_linux_sandbox_exe: Option<PathBuf>,
+        config: Arc<Config>,
+        config_warnings: Vec<serde_json::Value>,
+        cli_overrides: Vec<(String, TomlValue)>,
+        remote_control_handle: Option<RemoteControlHandle>,
+        auth_manager: Arc<AuthManager>,
+        conversation_manager: Arc<ConversationManager>,
+    ) -> Self {
+        let sandbox_exe = code_linux_sandbox_exe
+            .clone()
+            .or_else(|| config.code_linux_sandbox_exe.clone());
         let config_for_processor = config.clone();
         let code_message_processor = CodexMessageProcessor::new(
             auth_manager.clone(),
@@ -1332,6 +1354,38 @@ mod tests {
         })
         .await
         .expect("MCP snapshot should arrive");
+    }
+
+    #[test]
+    fn shared_conversation_manager_is_retained_by_message_processor() {
+        let (outgoing_tx, _outgoing_rx) = mpsc::unbounded_channel();
+        let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+        let config = Arc::new(
+            Config::load_with_cli_overrides(
+                Vec::new(),
+                code_core::config::ConfigOverrides::default(),
+            )
+            .expect("load default config"),
+        );
+        let conversation_manager = Arc::new(ConversationManager::with_auth(
+            CodexAuth::from_api_key("test"),
+        ));
+
+        let processor = MessageProcessor::new_with_conversation_manager(
+            outgoing,
+            None,
+            config,
+            Vec::new(),
+            Vec::new(),
+            None,
+            conversation_manager.auth_manager(),
+            conversation_manager.clone(),
+        );
+
+        assert!(Arc::ptr_eq(
+            &processor.conversation_manager,
+            &conversation_manager,
+        ));
     }
 
     #[tokio::test]

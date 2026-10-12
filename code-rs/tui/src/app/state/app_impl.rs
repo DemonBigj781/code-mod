@@ -1,8 +1,14 @@
 use std::sync::atomic::Ordering;
 
 use super::{App, AppState};
+use super::super::thread_routing::ThreadSessionState;
+use super::super::thread_routing::ThreadTabMetadata;
+use crate::chatwidget::TopSessionTab;
+use crate::chatwidget::ChatWidget;
+use code_core::protocol::SessionConfiguredEvent;
+use code_protocol::ThreadId;
 
-impl App<'_> {
+impl<'a> App<'a> {
     pub(crate) const DEFAULT_TERMINAL_TITLE: &'static str = "Code";
 
     #[cfg(unix)]
@@ -43,6 +49,89 @@ impl App<'_> {
         config.demo_developer_message.clone_from(&self.config.demo_developer_message);
 
         Ok(config)
+    }
+
+    pub(crate) fn sync_active_thread_tabs_to_widget(&mut self) {
+        let tabs: Vec<TopSessionTab> = self
+            .active_thread_router
+            .ordered_tabs()
+            .into_iter()
+            .map(|tab| TopSessionTab {
+                ordinal: tab.ordinal,
+                title: tab.title,
+                is_active: tab.is_active,
+            })
+            .collect();
+        if tabs.is_empty() {
+            return;
+        }
+
+        if let AppState::Chat { widget } = &mut self.app_state {
+            widget.set_top_session_tabs(tabs);
+        }
+    }
+
+    pub(crate) fn replace_active_chat_widget(&mut self, new_widget: ChatWidget<'a>) {
+        let AppState::Chat { widget } = &mut self.app_state else {
+            self.app_state = AppState::Chat {
+                widget: Box::new(new_widget),
+            };
+            return;
+        };
+
+        let previous = std::mem::replace(widget, Box::new(new_widget));
+        let Some(previous_thread_id) = previous
+            .session_id()
+            .and_then(|id| ThreadId::from_string(&id.to_string()).ok())
+        else {
+            return;
+        };
+        self.inactive_chat_widgets
+            .insert(previous_thread_id, previous);
+    }
+
+    pub(crate) fn register_session_configured_with_router(
+        &mut self,
+        session: &SessionConfiguredEvent,
+    ) {
+        let Ok(thread_id) = ThreadId::from_string(&session.session_id.to_string()) else {
+            tracing::warn!(session_id = %session.session_id, "session id could not be converted to thread id");
+            return;
+        };
+
+        let session_state = ThreadSessionState {
+            thread_id,
+            forked_from_id: None,
+            fork_parent_title: None,
+            thread_name: None,
+            model: session.model.clone(),
+            model_provider_id: self.config.model_provider_id.clone(),
+            service_tier: self.config.service_tier,
+            approval_policy: self.config.approval_policy,
+            sandbox_policy: self.config.sandbox_policy.clone(),
+            cwd: self.config.cwd.clone(),
+            instruction_source_paths: Vec::new(),
+            reasoning_effort: Some(self.config.model_reasoning_effort),
+            history_log_id: session.history_log_id,
+            history_entry_count: session.history_entry_count,
+            rollout_path: None,
+        };
+        self.active_thread_router.upsert_session(session_state);
+        self.active_thread_router.upsert_thread_metadata(
+            thread_id,
+            ThreadTabMetadata {
+                title: None,
+                agent_nickname: None,
+                agent_role: None,
+                agent_path: None,
+                is_running: true,
+                is_closed: false,
+            },
+        );
+        self.sync_active_thread_tabs_to_widget();
+        if let Some(bridge) = &self._app_server_bridge {
+            bridge.refresh_loaded_threads();
+        }
     }
 
     /// Return a human-readable performance summary if timing was enabled.

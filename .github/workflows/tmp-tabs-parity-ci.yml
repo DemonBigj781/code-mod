@@ -1,0 +1,90 @@
+name: Tabs Parity Disposable Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/tab-feature-parity
+    paths:
+      - ".github/workflows/tmp-tabs-parity-ci.yml"
+      - "code-rs/**"
+
+jobs:
+  code-rs:
+    name: code-rs tabs parity checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code-rs
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux GUI deps
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev
+
+      - name: Restore Cargo registry cache
+        id: cargo-registry-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-registry-tabs-parity-${{ hashFiles('code-rs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-tabs-parity-
+
+      - name: Restore Cargo target cache
+        id: cargo-target-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: code-rs/target
+          key: ${{ runner.os }}-cargo-target-tabs-parity-${{ hashFiles('code-rs/Cargo.lock', 'code-rs/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-tabs-parity-
+
+      - name: Schema fixtures match generated
+        run: cargo test -p code-app-server-protocol schema_fixtures_match_generated -- --test-threads=1
+
+      - name: Loaded thread tree tests
+        run: cargo test -p code-tui app::loaded_threads -- --test-threads=1
+
+      - name: Thread metadata/input tests
+        run: cargo test -p code-tui app::input::app_server_thread_metadata_tests -- --test-threads=1
+
+      - name: App server session tests
+        run: cargo test -p code-tui app::app_server_session -- --test-threads=1
+
+      - name: App server protocol check
+        run: cargo check -p code-app-server-protocol
+
+      - name: App server check
+        run: cargo check -p code-app-server
+
+      - name: TUI check
+        run: cargo check -p code-tui
+
+      - name: Save Cargo registry cache
+        if: always() && steps.cargo-registry-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ steps.cargo-registry-cache.outputs.cache-primary-key }}
+
+      - name: Save Cargo target cache
+        if: always() && steps.cargo-target-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: code-rs/target
+          key: ${{ steps.cargo-target-cache.outputs.cache-primary-key }}

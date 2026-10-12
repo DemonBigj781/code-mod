@@ -18,6 +18,7 @@ enum AutoDriveRole {
 
 pub(crate) struct ChatWidgetInit {
     pub(crate) config: Config,
+    pub(crate) conversation_manager: Arc<code_core::ConversationManager>,
     pub(crate) app_event_tx: AppEventSender,
     pub(crate) initial_prompt: Option<String>,
     pub(crate) initial_images: Vec<PathBuf>,

@@ -278,6 +278,7 @@
                 }) => {
                     let mut w = ChatWidget::new(crate::chatwidget::ChatWidgetInit {
                         config,
+                        conversation_manager: self._server.clone(),
                         app_event_tx: app_event_tx.clone(),
                         initial_prompt,
                         initial_images,

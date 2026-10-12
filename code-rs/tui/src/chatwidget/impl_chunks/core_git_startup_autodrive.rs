@@ -212,14 +212,14 @@ impl ChatWidget<'_> {
     fn spawn_conversation_runtime(
         &mut self,
         config: Config,
-        auth_manager: Arc<AuthManager>,
+        conversation_manager: Arc<code_core::ConversationManager>,
         code_op_rx: UnboundedReceiver<Op>,
     ) {
         let ticket = self.make_background_tail_ticket();
         agent::spawn_new_conversation_runtime(
             config,
             self.app_event_tx.clone(),
-            auth_manager,
+            conversation_manager,
             code_op_rx,
             ticket,
         );

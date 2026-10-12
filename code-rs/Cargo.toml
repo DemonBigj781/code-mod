@@ -3,6 +3,7 @@ members = [
     "backend-client",
     "ansi-escape",
     "app-server",
+    "app-server-client",
     "app-server-daemon",
     "app-server-protocol",
     "apply-patch",
@@ -79,6 +80,7 @@ license = "Apache-2.0"
 # Internal
 code-ansi-escape = { path = "ansi-escape" }
 code-app-server = { path = "app-server" }
+code-app-server-client = { path = "app-server-client" }
 code-app-server-daemon = { path = "app-server-daemon" }
 code-app-server-protocol = { path = "app-server-protocol" }
 code-apply-patch = { path = "apply-patch" }

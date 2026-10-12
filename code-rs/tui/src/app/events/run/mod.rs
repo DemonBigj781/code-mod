@@ -17,7 +17,7 @@ use code_core::config_types::Notifications;
 use code_core::protocol::Event;
 use code_core::protocol::{Op, SandboxPolicy};
 use code_core::SessionCatalog;
-use code_login::{AuthManager, AuthMode, ServerOptions};
+use code_login::ServerOptions;
 use portable_pty::PtySize;
 
 use crate::app_event::{AppEvent, SessionPickerAction};

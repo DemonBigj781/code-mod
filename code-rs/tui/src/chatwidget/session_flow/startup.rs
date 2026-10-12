@@ -16,6 +16,7 @@ impl ChatWidget<'_> {
     pub(crate) fn new(args: ChatWidgetInit) -> Self {
         let ChatWidgetInit {
             mut config,
+            conversation_manager,
             app_event_tx,
             initial_prompt,
             initial_images,
@@ -32,11 +33,7 @@ impl ChatWidget<'_> {
 
         let (code_op_tx, code_op_rx) = unbounded_channel::<Op>();
 
-        let auth_manager = AuthManager::shared_with_mode_and_originator(
-            config.code_home.clone(),
-            AuthMode::ApiKey,
-            config.responses_originator_header.clone(),
-        );
+        let auth_manager = conversation_manager.auth_manager();
 
         // Browser manager is now handled through the global state
         // The core session will use the same global manager when browser tools are invoked
@@ -339,6 +336,7 @@ impl ChatWidget<'_> {
             resume_picker_loading: false,
             clickable_regions: RefCell::new(Vec::new()),
             hovered_clickable_action: RefCell::new(None),
+            top_session_tabs: vec![TopSessionTab::main()],
             status_bar_hscroll: Cell::new(0),
             bottom_status_hscroll: Cell::new(0),
             mouse_down_pos: Cell::new(None),
@@ -348,7 +346,7 @@ impl ChatWidget<'_> {
             mouse_capture_paused: Cell::new(false),
         };
         new_widget.load_auto_review_baseline_marker();
-        new_widget.spawn_conversation_runtime(config.clone(), auth_manager, code_op_rx);
+        new_widget.spawn_conversation_runtime(config.clone(), conversation_manager, code_op_rx);
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.code_home)
             && let Ok(records) = account_usage::list_rate_limit_snapshots(&config.code_home)
                 && let Some(record) = records.into_iter().find(|r| r.account_id == active_id) {
