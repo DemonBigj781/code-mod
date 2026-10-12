@@ -70,6 +70,14 @@ impl App<'_> {
             self.schedule_redraw();
             return true;
         }
+        if !self.inactive_chat_widgets.contains_key(&target_thread_id) {
+            if let AppState::Chat { widget } = &mut self.app_state {
+                widget.flash_footer_notice(
+                    "Thread tab is loaded in the app server but is not attached to this TUI yet",
+                );
+            }
+            return false;
+        }
 
         let AppState::Chat { widget } = &mut self.app_state else {
             return false;
