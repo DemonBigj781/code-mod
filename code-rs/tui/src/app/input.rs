@@ -185,6 +185,28 @@ impl App<'_> {
         }
     }
 
+    pub(super) fn register_app_server_loaded_threads_with_router(
+        &mut self,
+        thread_ids: Vec<ThreadId>,
+    ) {
+        if thread_ids.is_empty() {
+            return;
+        }
+
+        for thread_id in thread_ids {
+            self.active_thread_router.upsert_thread_metadata(
+                thread_id,
+                ThreadTabMetadata {
+                    is_running: true,
+                    is_closed: false,
+                    ..ThreadTabMetadata::default()
+                },
+            );
+        }
+        self.sync_active_thread_tabs_to_widget();
+        self.schedule_redraw();
+    }
+
     pub(super) fn register_app_server_loaded_thread_details_with_router(
         &mut self,
         threads: Vec<code_app_server_protocol::Thread>,
