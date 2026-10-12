@@ -678,6 +678,8 @@ enum ClickableAction {
     ShowNetworkSettings,
     /// Open the MCP settings page (e.g. when the header shows an MCP error).
     ShowMcpSettings,
+    /// Switch the visible top-row conversation tab to a thread.
+    SwitchThread(code_protocol::ThreadId),
     JumpToCallId(String),
     /// Toggle fold/collapse for a history cell at the given index.
     ToggleFoldAtIndex(usize),
@@ -1087,6 +1089,7 @@ pub(crate) struct ChatWidget<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TopSessionTab {
+    pub(crate) thread_id: Option<code_protocol::ThreadId>,
     pub(crate) ordinal: usize,
     pub(crate) title: String,
     pub(crate) is_active: bool,
@@ -1097,6 +1100,7 @@ pub(crate) struct TopSessionTab {
 impl TopSessionTab {
     pub(crate) fn main() -> Self {
         Self {
+            thread_id: None,
             ordinal: 1,
             title: "Main".to_owned(),
             is_active: true,

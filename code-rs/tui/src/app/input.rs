@@ -46,15 +46,30 @@ impl App<'_> {
             return false;
         };
 
+        let Some(target_thread_id) = self.active_thread_router.adjacent_thread_id(direction) else {
+            return false;
+        };
+
+        self.switch_active_thread_backing(target_thread_id)
+    }
+
+    pub(super) fn switch_active_thread_backing(&mut self, target_thread_id: ThreadId) -> bool {
+        let AppState::Chat { widget } = &self.app_state else {
+            return false;
+        };
         let Some(current_thread_id) = widget
             .session_id()
             .and_then(|id| ThreadId::from_string(&id.to_string()).ok())
         else {
             return false;
         };
-        let Some(target_thread_id) = self.active_thread_router.adjacent_thread_id(direction) else {
-            return false;
-        };
+        if current_thread_id == target_thread_id {
+            let activated = self.active_thread_router.set_active_thread(target_thread_id);
+            debug_assert!(activated, "target thread should remain registered");
+            self.sync_active_thread_tabs_to_widget();
+            self.schedule_redraw();
+            return true;
+        }
 
         let AppState::Chat { widget } = &mut self.app_state else {
             return false;
@@ -68,7 +83,7 @@ impl App<'_> {
             return false;
         }
         let activated = self.active_thread_router.set_active_thread(target_thread_id);
-        debug_assert!(activated, "adjacent thread should remain registered");
+        debug_assert!(activated, "target thread should remain registered");
         self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
         true

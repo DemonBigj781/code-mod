@@ -553,6 +553,7 @@ impl ChatWidget<'_> {
 
         let mut spans = Vec::with_capacity(render.line.spans.len() + tabs.len().saturating_mul(2));
         let mut prefix_width = 0usize;
+        let mut clickable_ranges = Vec::new();
         for tab in tabs {
             let status_marker = if tab.is_running {
                 Some("*")
@@ -567,6 +568,12 @@ impl ChatWidget<'_> {
                 format!("[{} {}]", tab.ordinal, tab.title)
             };
             let tab_width = tab_text.width();
+            if let Some(thread_id) = tab.thread_id {
+                clickable_ranges.push((
+                    prefix_width..prefix_width.saturating_add(tab_width),
+                    ClickableAction::SwitchThread(thread_id),
+                ));
+            }
             let tab_style = if tab.is_active {
                 crate::colors::style_text()
                     .bg(crate::colors::selection())
@@ -586,17 +593,16 @@ impl ChatWidget<'_> {
 
         HeaderTemplateRender {
             line: ratatui::text::Line::from(spans),
-            clickable_ranges: render
-                .clickable_ranges
-                .into_iter()
-                .map(|(range, action)| {
+            clickable_ranges: {
+                clickable_ranges.extend(render.clickable_ranges.into_iter().map(|(range, action)| {
                     (
                         range.start.saturating_add(prefix_width)
                             ..range.end.saturating_add(prefix_width),
                         action,
                     )
-                })
-                .collect(),
+                }));
+                clickable_ranges
+            },
             width: render.width.saturating_add(prefix_width),
         }
     }
@@ -840,6 +846,7 @@ impl ChatWidget<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use code_protocol::ThreadId;
     use ratatui::text::{Line, Span};
 
     #[test]
@@ -877,6 +884,7 @@ mod tests {
         let tabs = vec![
             TopSessionTab::main(),
             TopSessionTab {
+                thread_id: None,
                 ordinal: 2,
                 title: "Builder".to_owned(),
                 is_active: false,
@@ -884,6 +892,7 @@ mod tests {
                 is_closed: false,
             },
             TopSessionTab {
+                thread_id: None,
                 ordinal: 3,
                 title: "Scout".to_owned(),
                 is_active: false,
@@ -899,6 +908,55 @@ mod tests {
         assert_eq!(
             with_tabs.width,
             "[1 Main]  [2 * Builder]  [3 x Scout]  model".width()
+        );
+    }
+
+    #[test]
+    fn top_session_tab_prefix_adds_clickable_tab_ranges() {
+        let rendered = HeaderTemplateRender {
+            line: Line::from(vec![Span::raw("model")]),
+            clickable_ranges: vec![(0..5, ClickableAction::ShowModelSelector)],
+            width: 5,
+        };
+        let first = ThreadId::from_string("00000000-0000-0000-0000-000000000001")
+            .expect("valid first thread id");
+        let second = ThreadId::from_string("00000000-0000-0000-0000-000000000002")
+            .expect("valid second thread id");
+
+        let tabs = vec![
+            TopSessionTab {
+                thread_id: Some(first),
+                ordinal: 1,
+                title: "Main".to_owned(),
+                is_active: true,
+                is_running: false,
+                is_closed: false,
+            },
+            TopSessionTab {
+                thread_id: Some(second),
+                ordinal: 2,
+                title: "Builder".to_owned(),
+                is_active: false,
+                is_running: true,
+                is_closed: false,
+            },
+        ];
+        let with_tabs = ChatWidget::prepend_top_session_tabs_for_render(rendered, &tabs);
+
+        assert_eq!(
+            with_tabs.clickable_ranges,
+            vec![
+                (0.."[1 Main]".width(), ClickableAction::SwitchThread(first)),
+                (
+                    "[1 Main]  ".width().."[1 Main]  [2 * Builder]".width(),
+                    ClickableAction::SwitchThread(second),
+                ),
+                (
+                    "[1 Main]  [2 * Builder]  ".width()
+                        .."[1 Main]  [2 * Builder]  model".width(),
+                    ClickableAction::ShowModelSelector,
+                ),
+            ]
         );
     }
 }

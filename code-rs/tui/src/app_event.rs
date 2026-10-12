@@ -303,6 +303,9 @@ pub(crate) enum AppEvent {
 
     MouseEvent(MouseEvent),
 
+    /// Switch the visible top-row conversation tab to the requested thread.
+    SwitchActiveThread { thread_id: code_protocol::ThreadId },
+
     /// Text pasted from the terminal clipboard.
     Paste(String),
 

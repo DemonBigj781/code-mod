@@ -54,6 +54,9 @@ jobs:
       - name: Thread metadata/input tests
         run: cargo test -p code-tui app::input::app_server_thread_metadata_tests -- --test-threads=1
 
+      - name: Top tab render tests
+        run: cargo test -p code-tui chatwidget::terminal_surface_render -- --test-threads=1
+
       - name: App server session tests
         run: cargo test -p code-tui app::app_server_session -- --test-threads=1
 

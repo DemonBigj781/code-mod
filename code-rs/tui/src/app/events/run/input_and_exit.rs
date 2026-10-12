@@ -216,6 +216,9 @@
                 AppEvent::MouseEvent(mouse_event) => {
                     self.dispatch_mouse_event(mouse_event);
                 }
+                AppEvent::SwitchActiveThread { thread_id } => {
+                    self.switch_active_thread_backing(thread_id);
+                }
                 AppEvent::Paste(text) => {
                     self.dispatch_paste_event(text);
                 }

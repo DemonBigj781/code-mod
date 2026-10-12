@@ -57,6 +57,7 @@ impl<'a> App<'a> {
             .ordered_tabs()
             .into_iter()
             .map(|tab| TopSessionTab {
+                thread_id: Some(tab.thread_id),
                 ordinal: tab.ordinal,
                 title: tab.title,
                 is_active: tab.is_active,
