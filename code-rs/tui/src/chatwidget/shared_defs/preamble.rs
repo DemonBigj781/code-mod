@@ -1090,6 +1090,8 @@ pub(crate) struct TopSessionTab {
     pub(crate) ordinal: usize,
     pub(crate) title: String,
     pub(crate) is_active: bool,
+    pub(crate) is_running: bool,
+    pub(crate) is_closed: bool,
 }
 
 impl TopSessionTab {
@@ -1098,6 +1100,8 @@ impl TopSessionTab {
             ordinal: 1,
             title: "Main".to_owned(),
             is_active: true,
+            is_running: false,
+            is_closed: false,
         }
     }
 }

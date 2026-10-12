@@ -60,6 +60,8 @@ impl<'a> App<'a> {
                 ordinal: tab.ordinal,
                 title: tab.title,
                 is_active: tab.is_active,
+                is_running: tab.is_running,
+                is_closed: tab.is_closed,
             })
             .collect();
         if tabs.is_empty() {

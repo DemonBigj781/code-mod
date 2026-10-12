@@ -202,6 +202,14 @@ impl ActiveThreadRouter {
                     title,
                     is_active: Some(*thread_id) == self.active_thread_id(),
                     is_primary,
+                    is_running: self
+                        .thread_metadata
+                        .get(thread_id)
+                        .is_some_and(|metadata| metadata.is_running),
+                    is_closed: self
+                        .thread_metadata
+                        .get(thread_id)
+                        .is_some_and(|metadata| metadata.is_closed),
                 }
             })
             .collect()
@@ -283,6 +291,8 @@ pub(crate) struct ThreadTab {
     pub(crate) title: String,
     pub(crate) is_active: bool,
     pub(crate) is_primary: bool,
+    pub(crate) is_running: bool,
+    pub(crate) is_closed: bool,
 }
 
 #[cfg(test)]
@@ -349,6 +359,8 @@ mod tests {
         assert_eq!(tabs[0].title, "Main");
         assert!(tabs[0].is_primary);
         assert!(!tabs[0].is_active);
+        assert!(!tabs[0].is_running);
+        assert!(!tabs[0].is_closed);
         assert_eq!(tabs[1].ordinal, 2);
         assert_eq!(tabs[1].title, "Review");
         assert!(!tabs[1].is_primary);
@@ -375,6 +387,8 @@ mod tests {
         let tabs = router.ordered_tabs();
         assert_eq!(tabs.iter().map(|tab| tab.thread_id).collect::<Vec<_>>(), vec![main, agent]);
         assert_eq!(tabs[1].title, "Builder (implementation)");
+        assert!(tabs[1].is_running);
+        assert!(!tabs[1].is_closed);
     }
 
     #[test]

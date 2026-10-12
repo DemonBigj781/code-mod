@@ -554,7 +554,18 @@ impl ChatWidget<'_> {
         let mut spans = Vec::with_capacity(render.line.spans.len() + tabs.len().saturating_mul(2));
         let mut prefix_width = 0usize;
         for tab in tabs {
-            let tab_text = format!("[{} {}]", tab.ordinal, tab.title);
+            let status_marker = if tab.is_running {
+                Some("*")
+            } else if tab.is_closed {
+                Some("x")
+            } else {
+                None
+            };
+            let tab_text = if let Some(marker) = status_marker {
+                format!("[{} {} {}]", tab.ordinal, marker, tab.title)
+            } else {
+                format!("[{} {}]", tab.ordinal, tab.title)
+            };
             let tab_width = tab_text.width();
             let tab_style = if tab.is_active {
                 crate::colors::style_text()
@@ -852,6 +863,42 @@ mod tests {
                 "[1 Main]  ".width().."[1 Main]  model".width(),
                 ClickableAction::ShowModelSelector,
             )]
+        );
+    }
+
+    #[test]
+    fn top_session_tab_prefix_renders_status_markers() {
+        let rendered = HeaderTemplateRender {
+            line: Line::from(vec![Span::raw("model")]),
+            clickable_ranges: vec![],
+            width: 5,
+        };
+
+        let tabs = vec![
+            TopSessionTab::main(),
+            TopSessionTab {
+                ordinal: 2,
+                title: "Builder".to_owned(),
+                is_active: false,
+                is_running: true,
+                is_closed: false,
+            },
+            TopSessionTab {
+                ordinal: 3,
+                title: "Scout".to_owned(),
+                is_active: false,
+                is_running: false,
+                is_closed: true,
+            },
+        ];
+        let with_tabs = ChatWidget::prepend_top_session_tabs_for_render(rendered, &tabs);
+
+        assert_eq!(with_tabs.line.spans[0].content, "[1 Main]");
+        assert_eq!(with_tabs.line.spans[2].content, "[2 * Builder]");
+        assert_eq!(with_tabs.line.spans[4].content, "[3 x Scout]");
+        assert_eq!(
+            with_tabs.width,
+            "[1 Main]  [2 * Builder]  [3 x Scout]  model".width()
         );
     }
 }
