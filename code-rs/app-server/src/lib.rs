@@ -58,6 +58,7 @@ mod error_code;
 mod external_agent_config_api;
 mod fs_api;
 mod fs_watch;
+pub mod in_process;
 mod installation_id;
 #[allow(dead_code)]
 mod fuzzy_file_search;

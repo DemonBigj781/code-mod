@@ -258,6 +258,9 @@
                 AppEvent::CodexEvent(event) => {
                     self.dispatch_code_event(*event);
                 }
+                AppEvent::AppServerNotification(notification) => {
+                    self.dispatch_app_server_notification(*notification);
+                }
                 AppEvent::ExitRequest => {
                     // Stop background threads and break the UI loop.
                     self.commit_anim_running.store(false, Ordering::Release);

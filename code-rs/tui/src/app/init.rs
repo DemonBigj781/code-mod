@@ -362,6 +362,7 @@ impl App<'_> {
             consecutive_high_events: 0,
             event_deduper: super::event_deduper::EventDeduper::new(),
             app_state,
+            active_thread_router: super::thread_routing::ActiveThreadRouter::default(),
             config,
             cli_kv_overrides,
             config_overrides,

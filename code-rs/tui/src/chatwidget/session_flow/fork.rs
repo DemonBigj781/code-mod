@@ -323,6 +323,7 @@ impl ChatWidget<'_> {
             resume_picker_loading: false,
             clickable_regions: RefCell::new(Vec::new()),
             hovered_clickable_action: RefCell::new(None),
+            top_session_tabs: vec![TopSessionTab::main()],
             status_bar_hscroll: Cell::new(0),
             bottom_status_hscroll: Cell::new(0),
             mouse_down_pos: Cell::new(None),

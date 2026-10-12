@@ -1,0 +1,26 @@
+[package]
+name = "code-app-server-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "code_app_server_client"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+code-app-server = { workspace = true }
+code-app-server-protocol = { workspace = true }
+code-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

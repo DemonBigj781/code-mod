@@ -212,6 +212,11 @@ pub(crate) enum AgentUpdateIntent {
 pub(crate) enum AppEvent {
     CodexEvent(Box<Event>),
 
+    /// App-server protocol notification delivered by the in-process/remote
+    /// app-server session bridge. This is separate from `CodexEvent` while the
+    /// TUI is being ported from direct core events to app-server protocol events.
+    AppServerNotification(Box<code_app_server_protocol::ServerNotification>),
+
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
 
@@ -1088,6 +1093,12 @@ pub(crate) enum AppEvent {
         result: Result<(), String>,
         attempt_id: Uuid,
     },
+}
+
+impl From<code_app_server_protocol::ServerNotification> for AppEvent {
+    fn from(notification: code_app_server_protocol::ServerNotification) -> Self {
+        Self::AppServerNotification(Box::new(notification))
+    }
 }
 
 impl AppEvent {

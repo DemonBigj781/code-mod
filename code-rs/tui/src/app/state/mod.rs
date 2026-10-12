@@ -18,6 +18,7 @@ use crate::file_search::FileSearchManager;
 use crate::history::state::HistorySnapshot;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::tui::TerminalInfo;
+use super::thread_routing::ActiveThreadRouter;
 use code_core::config::Config;
 use code_core::config_types::ThemeName;
 use code_core::ConversationManager;
@@ -129,6 +130,7 @@ pub(crate) struct App<'a> {
     pub(super) consecutive_high_events: u32,
     pub(super) event_deduper: super::event_deduper::EventDeduper,
     pub(super) app_state: AppState<'a>,
+    pub(super) active_thread_router: ActiveThreadRouter,
 
     /// Config is stored here so we can recreate `ChatWidgets` as needed.
     pub(super) config: Config,

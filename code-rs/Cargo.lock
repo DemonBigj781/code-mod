@@ -1406,6 +1406,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "code-app-server-client"
+version = "0.0.0"
+dependencies = [
+ "code-app-server",
+ "code-app-server-protocol",
+ "code-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml 0.9.8",
+ "tracing",
+]
+
+[[package]]
 name = "code-app-server-daemon"
 version = "0.0.0"
 dependencies = [
@@ -2200,6 +2215,7 @@ dependencies = [
  "chrono",
  "clap",
  "code-ansi-escape",
+ "code-app-server-client",
  "code-app-server-protocol",
  "code-arg0",
  "code-auto-drive-core",

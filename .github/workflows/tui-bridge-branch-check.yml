@@ -1,0 +1,56 @@
+name: TUI Bridge Branch Check
+
+on:
+  push:
+    branches:
+      - ci/tui-bridge-check-*
+
+permissions:
+  contents: read
+
+jobs:
+  tui-bridge:
+    name: code-rs tui bridge checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      RUST_WORKSPACE_DIR: code-rs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read Rust toolchain
+        id: rust_toolchain
+        shell: sh
+        run: |
+          set -eu
+          channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' code-rs/rust-toolchain.toml | head -n 1)
+          if [ -z "$channel" ]; then
+            echo "Unable to read the Rust channel from code-rs/rust-toolchain.toml" >&2
+            exit 1
+          fi
+          printf 'channel=%s\n' "$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.rust_toolchain.outputs.channel }}
+
+      - name: Install Linux build dependencies
+        shell: sh
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake libssl-dev libudev-dev libwayland-dev libx11-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev pkg-config
+
+      - name: Test app-server event forwarder
+        working-directory: code-rs
+        run: cargo test -p code-tui app::app_server_event_forwarder -- --test-threads=1
+
+      - name: Check code-tui
+        working-directory: code-rs
+        run: cargo check -p code-tui

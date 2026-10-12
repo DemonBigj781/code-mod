@@ -1,3 +1,4 @@
+mod app_server_event_forwarder;
 mod events;
 mod event_deduper;
 mod init;
@@ -5,5 +6,6 @@ mod input;
 mod render;
 mod state;
 mod terminal;
+mod thread_routing;
 
 pub(crate) use state::{App, AppInitArgs, ChatWidgetArgs};
