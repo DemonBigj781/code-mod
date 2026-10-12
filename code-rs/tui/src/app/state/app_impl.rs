@@ -52,12 +52,20 @@ impl<'a> App<'a> {
     }
 
     pub(crate) fn sync_active_thread_tabs_to_widget(&mut self) {
+        let current_thread_id = match &self.app_state {
+            AppState::Chat { widget } => widget
+                .session_id()
+                .and_then(|id| ThreadId::from_string(&id.to_string()).ok()),
+            AppState::Onboarding { .. } => None,
+        };
         let tabs: Vec<TopSessionTab> = self
             .active_thread_router
             .ordered_tabs()
             .into_iter()
             .map(|tab| TopSessionTab {
-                thread_id: Some(tab.thread_id),
+                thread_id: (current_thread_id == Some(tab.thread_id)
+                    || self.inactive_chat_widgets.contains_key(&tab.thread_id))
+                .then_some(tab.thread_id),
                 ordinal: tab.ordinal,
                 title: tab.title,
                 is_active: tab.is_active,

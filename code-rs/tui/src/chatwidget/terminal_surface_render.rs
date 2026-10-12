@@ -909,6 +909,7 @@ mod tests {
             with_tabs.width,
             "[1 Main]  [2 * Builder]  [3 x Scout]  model".width()
         );
+        assert!(with_tabs.clickable_ranges.is_empty());
     }
 
     #[test]
