@@ -273,12 +273,17 @@
                 AppEvent::AppServerLoadedThreadDetails(threads) => {
                     self.register_app_server_loaded_thread_details_with_router(threads);
                 }
-                AppEvent::AppServerThreadSubscribeFinished { thread_id, status } => {
+                AppEvent::AppServerThreadSubscribeFinished {
+                    thread_id,
+                    status,
+                    replayable_turns,
+                    replayable_items,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         match status {
                             code_app_server_protocol::ThreadSubscribeStatus::Subscribed => {
                                 widget.flash_footer_notice(format!(
-                                    "Subscribed to loaded app-server thread {thread_id}; replay attach is not available yet"
+                                    "Subscribed to loaded app-server thread {thread_id}; {replayable_turns} turns / {replayable_items} items available for replay"
                                 ));
                             }
                             code_app_server_protocol::ThreadSubscribeStatus::NotLoaded => {

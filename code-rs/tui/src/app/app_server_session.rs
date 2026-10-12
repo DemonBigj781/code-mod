@@ -140,10 +140,51 @@ async fn subscribe_thread(
         }
     };
 
+    let (replayable_turns, replayable_items) = if status == ThreadSubscribeStatus::Subscribed {
+        fetch_replayable_thread_counts(request_handle, thread_id).await
+    } else {
+        (0, 0)
+    };
+
     app_event_tx.send(AppEvent::AppServerThreadSubscribeFinished {
         thread_id,
         status,
+        replayable_turns,
+        replayable_items,
     });
+}
+
+async fn fetch_replayable_thread_counts(
+    request_handle: &AppServerRequestHandle,
+    thread_id: ThreadId,
+) -> (usize, usize) {
+    let response = request_handle
+        .request_typed::<ThreadReadResponse>(ClientRequest::ThreadRead {
+            request_id: RequestId::String(format!(
+                "tui-thread-replay-read-{}-{}",
+                thread_id,
+                uuid::Uuid::new_v4()
+            )),
+            params: ThreadReadParams {
+                thread_id: thread_id.to_string(),
+                include_turns: true,
+            },
+        })
+        .await;
+
+    match response {
+        Ok(response) => replayable_thread_counts(&response.thread),
+        Err(err) => {
+            tracing::warn!(%thread_id, "failed to read app-server thread history after subscribe: {err}");
+            (0, 0)
+        }
+    }
+}
+
+fn replayable_thread_counts(thread: &code_app_server_protocol::Thread) -> (usize, usize) {
+    let replayable_turns = thread.turns.len();
+    let replayable_items = thread.turns.iter().map(|turn| turn.items.len()).sum();
+    (replayable_turns, replayable_items)
 }
 
 async fn refresh_loaded_threads(
@@ -225,7 +266,16 @@ fn parse_loaded_thread_ids(ids: Vec<String>) -> Vec<ThreadId> {
 #[cfg(test)]
 mod tests {
     use super::parse_loaded_thread_ids;
+    use super::replayable_thread_counts;
+    use code_app_server_protocol::SessionSource;
+    use code_app_server_protocol::Thread;
+    use code_app_server_protocol::ThreadItem;
+    use code_app_server_protocol::ThreadStatus;
+    use code_app_server_protocol::Turn;
+    use code_app_server_protocol::TurnStatus;
+    use code_app_server_protocol::UserInput;
     use code_protocol::ThreadId;
+    use std::path::PathBuf;
 
     #[test]
     fn parse_loaded_thread_ids_filters_invalid_values_in_order() {
@@ -245,5 +295,51 @@ mod tests {
                 ThreadId::from_string(second).expect("valid thread id"),
             ]
         );
+    }
+
+    #[test]
+    fn replayable_thread_counts_counts_turns_and_items() {
+        let thread = Thread {
+            id: "00000000-0000-0000-0000-000000000001".to_string(),
+            name: None,
+            preview: String::new(),
+            status: Some(ThreadStatus::Idle),
+            model_provider: "openai".to_string(),
+            created_at: 0,
+            updated_at: 0,
+            path: None,
+            cwd: PathBuf::from("/tmp"),
+            cli_version: "test".to_string(),
+            source: SessionSource::AppServer,
+            git_info: None,
+            turns: vec![
+                Turn {
+                    id: "turn-1".to_string(),
+                    items: vec![
+                        ThreadItem::UserMessage {
+                            id: "user-1".to_string(),
+                            content: vec![UserInput::Text {
+                                text: "hello".to_string(),
+                                text_elements: Vec::new(),
+                            }],
+                        },
+                        ThreadItem::AgentMessage {
+                            id: "agent-1".to_string(),
+                            text: "hi".to_string(),
+                        },
+                    ],
+                    status: TurnStatus::Completed,
+                    error: None,
+                },
+                Turn {
+                    id: "turn-2".to_string(),
+                    items: Vec::new(),
+                    status: TurnStatus::Completed,
+                    error: None,
+                },
+            ],
+        };
+
+        assert_eq!(replayable_thread_counts(&thread), (2, 2));
     }
 }

@@ -235,6 +235,8 @@ pub(crate) enum AppEvent {
     AppServerThreadSubscribeFinished {
         thread_id: code_protocol::ThreadId,
         status: code_app_server_protocol::ThreadSubscribeStatus,
+        replayable_turns: usize,
+        replayable_items: usize,
     },
 
     /// Request a redraw which will be debounced by the [`App`].
