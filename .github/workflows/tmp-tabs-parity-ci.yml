@@ -57,6 +57,9 @@ jobs:
       - name: App server session tests
         run: cargo test -p code-tui app::app_server_session -- --test-threads=1
 
+      - name: App server thread status tests
+        run: cargo test -p code-app-server catalog_thread_status_reflects_whether_the_thread_is_loaded -- --test-threads=1
+
       - name: App server protocol check
         run: cargo check -p code-app-server-protocol
 

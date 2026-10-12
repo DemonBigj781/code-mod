@@ -2482,9 +2482,7 @@ impl MessageProcessor {
             id: thread_id.to_string(),
             name: None,
             preview: String::new(),
-            status: Some(ThreadStatus::Active {
-                active_flags: Vec::new(),
-            }),
+            status: Some(ThreadStatus::Idle),
             model_provider: model_provider.clone(),
             created_at: Utc::now().timestamp(),
             updated_at: Utc::now().timestamp(),
@@ -2730,18 +2728,14 @@ impl MessageProcessor {
                 entry,
                 &self.base_config.code_home,
                 Vec::new(),
-                ThreadStatus::Active {
-                    active_flags: Vec::new(),
-                },
+                ThreadStatus::Idle,
             )
         } else {
             Thread {
                 id: thread_id.to_string(),
                 name: None,
                 preview: String::new(),
-                status: Some(ThreadStatus::Active {
-                    active_flags: Vec::new(),
-                }),
+                status: Some(ThreadStatus::Idle),
                 model_provider: model_provider.clone(),
                 created_at: Utc::now().timestamp(),
                 updated_at: Utc::now().timestamp(),
@@ -2957,9 +2951,7 @@ impl MessageProcessor {
             id: thread_id.to_string(),
             name: None,
             preview: String::new(),
-            status: Some(ThreadStatus::Active {
-                active_flags: Vec::new(),
-            }),
+            status: Some(ThreadStatus::Idle),
             model_provider: model_provider.clone(),
             created_at: Utc::now().timestamp(),
             updated_at: Utc::now().timestamp(),
@@ -4529,9 +4521,7 @@ fn session_entry_to_thread(
 
 fn catalog_thread_status(is_loaded: bool) -> ThreadStatus {
     if is_loaded {
-        ThreadStatus::Active {
-            active_flags: Vec::new(),
-        }
+        ThreadStatus::Idle
     } else {
         ThreadStatus::NotLoaded
     }
