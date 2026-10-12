@@ -90,6 +90,9 @@ use code_app_server_protocol::ThreadForkParams;
 use code_app_server_protocol::ThreadForkResponse;
 use code_app_server_protocol::ThreadArchiveParams;
 use code_app_server_protocol::ThreadArchiveResponse;
+use code_app_server_protocol::ThreadSubscribeParams;
+use code_app_server_protocol::ThreadSubscribeResponse;
+use code_app_server_protocol::ThreadSubscribeStatus;
 use code_app_server_protocol::ThreadUnsubscribeParams;
 use code_app_server_protocol::ThreadUnsubscribeResponse;
 use code_app_server_protocol::ThreadUnsubscribeStatus;
@@ -3140,6 +3143,52 @@ impl MessageProcessor {
                 connection_id,
                 request_id,
                 ThreadUnsubscribeResponse { status },
+            )
+            .await;
+    }
+
+    pub(super) async fn thread_subscribe_v2(
+        &mut self,
+        connection_id: ConnectionId,
+        request_id: mcp_types::RequestId,
+        params: ThreadSubscribeParams,
+    ) {
+        let thread_id = match code_protocol::ConversationId::from_string(&params.thread_id) {
+            Ok(id) => id,
+            Err(err) => {
+                self.outgoing
+                    .send_error_to_connection(
+                        connection_id,
+                        request_id,
+                        JSONRPCErrorError {
+                            code: INVALID_REQUEST_ERROR_CODE,
+                            message: format!("invalid thread id: {err}"),
+                            data: None,
+                        },
+                    )
+                    .await;
+                return;
+            }
+        };
+
+        let status = match self.conversation_manager.get_conversation(thread_id).await {
+            Ok(conversation) => {
+                let thread_state = self
+                    .thread_state_manager
+                    .ensure_connection_subscribed(thread_id, connection_id)
+                    .await;
+                self.ensure_thread_listener(thread_id.to_string(), conversation, thread_state)
+                    .await;
+                ThreadSubscribeStatus::Subscribed
+            }
+            Err(_) => ThreadSubscribeStatus::NotLoaded,
+        };
+
+        self.outgoing
+            .send_response_to_connection(
+                connection_id,
+                request_id,
+                ThreadSubscribeResponse { status },
             )
             .await;
     }

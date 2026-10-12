@@ -273,6 +273,22 @@
                 AppEvent::AppServerLoadedThreadDetails(threads) => {
                     self.register_app_server_loaded_thread_details_with_router(threads);
                 }
+                AppEvent::AppServerThreadSubscribeFinished { thread_id, status } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        match status {
+                            code_app_server_protocol::ThreadSubscribeStatus::Subscribed => {
+                                widget.flash_footer_notice(format!(
+                                    "Subscribed to loaded app-server thread {thread_id}; replay attach is not available yet"
+                                ));
+                            }
+                            code_app_server_protocol::ThreadSubscribeStatus::NotLoaded => {
+                                widget.flash_footer_notice(format!(
+                                    "Thread {thread_id} is no longer loaded in the app server"
+                                ));
+                            }
+                        }
+                    }
+                }
                 AppEvent::ExitRequest => {
                     // Stop background threads and break the UI loop.
                     self.commit_anim_running.store(false, Ordering::Release);

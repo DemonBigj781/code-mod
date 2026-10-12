@@ -71,9 +71,12 @@ impl App<'_> {
             return true;
         }
         if !self.inactive_chat_widgets.contains_key(&target_thread_id) {
+            if let Some(bridge) = &self._app_server_bridge {
+                bridge.subscribe_thread(target_thread_id);
+            }
             if let AppState::Chat { widget } = &mut self.app_state {
                 widget.flash_footer_notice(
-                    "Thread tab is loaded in the app server but is not attached to this TUI yet",
+                    "Subscribing to loaded app-server thread; replay attach is not available yet",
                 );
             }
             return false;

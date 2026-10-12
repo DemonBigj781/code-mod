@@ -231,6 +231,12 @@ pub(crate) enum AppEvent {
     /// Thread metadata for loaded app-server threads fetched with `thread/read`.
     AppServerLoadedThreadDetails(Vec<code_app_server_protocol::Thread>),
 
+    /// Result of subscribing the TUI bridge to an existing loaded app-server thread.
+    AppServerThreadSubscribeFinished {
+        thread_id: code_protocol::ThreadId,
+        status: code_app_server_protocol::ThreadSubscribeStatus,
+    },
+
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
 

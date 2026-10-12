@@ -10,6 +10,9 @@ use code_app_server_protocol::ThreadLoadedListParams;
 use code_app_server_protocol::ThreadLoadedListResponse;
 use code_app_server_protocol::ThreadReadParams;
 use code_app_server_protocol::ThreadReadResponse;
+use code_app_server_protocol::ThreadSubscribeParams;
+use code_app_server_protocol::ThreadSubscribeResponse;
+use code_app_server_protocol::ThreadSubscribeStatus;
 use code_core::config::Config;
 use code_core::ConversationManager;
 use code_protocol::ThreadId;
@@ -23,7 +26,12 @@ use super::app_server_event_forwarder::forward_app_server_event;
 
 pub(super) struct AppServerSessionBridge {
     task_handle: JoinHandle<()>,
-    refresh_tx: mpsc::UnboundedSender<()>,
+    command_tx: mpsc::UnboundedSender<AppServerBridgeCommand>,
+}
+
+enum AppServerBridgeCommand {
+    RefreshLoadedThreads,
+    SubscribeThread(ThreadId),
 }
 
 impl Drop for AppServerSessionBridge {
@@ -38,7 +46,7 @@ pub(super) fn spawn_in_process_app_server_bridge(
     app_event_tx: AppEventSender,
     conversation_manager: Arc<ConversationManager>,
 ) -> AppServerSessionBridge {
-    let (refresh_tx, mut refresh_rx) = mpsc::unbounded_channel();
+    let (command_tx, mut command_rx) = mpsc::unbounded_channel();
     let task_handle = tokio::spawn(async move {
         let code_linux_sandbox_exe = config.code_linux_sandbox_exe.clone();
         let client = InProcessAppServerClient::start(InProcessClientStartArgs {
@@ -70,11 +78,16 @@ pub(super) fn spawn_in_process_app_server_bridge(
                                 break;
                             }
                         }
-                        refresh = refresh_rx.recv() => {
-                            if refresh.is_none() {
-                                break;
+                        command = command_rx.recv() => {
+                            match command {
+                                Some(AppServerBridgeCommand::RefreshLoadedThreads) => {
+                                    refresh_loaded_threads(&request_handle, &app_event_tx).await;
+                                }
+                                Some(AppServerBridgeCommand::SubscribeThread(thread_id)) => {
+                                    subscribe_thread(&request_handle, &app_event_tx, thread_id).await;
+                                }
+                                None => break,
                             }
-                            refresh_loaded_threads(&request_handle, &app_event_tx).await;
                         }
                     }
                 }
@@ -87,14 +100,50 @@ pub(super) fn spawn_in_process_app_server_bridge(
 
     AppServerSessionBridge {
         task_handle,
-        refresh_tx,
+        command_tx,
     }
 }
 
 impl AppServerSessionBridge {
     pub(super) fn refresh_loaded_threads(&self) {
-        let _ = self.refresh_tx.send(());
+        let _ = self.command_tx.send(AppServerBridgeCommand::RefreshLoadedThreads);
     }
+
+    pub(super) fn subscribe_thread(&self, thread_id: ThreadId) {
+        let _ = self.command_tx.send(AppServerBridgeCommand::SubscribeThread(thread_id));
+    }
+}
+
+async fn subscribe_thread(
+    request_handle: &AppServerRequestHandle,
+    app_event_tx: &AppEventSender,
+    thread_id: ThreadId,
+) {
+    let response = request_handle
+        .request_typed::<ThreadSubscribeResponse>(ClientRequest::ThreadSubscribe {
+            request_id: RequestId::String(format!(
+                "tui-thread-subscribe-{}-{}",
+                thread_id,
+                uuid::Uuid::new_v4()
+            )),
+            params: ThreadSubscribeParams {
+                thread_id: thread_id.to_string(),
+            },
+        })
+        .await;
+
+    let status = match response {
+        Ok(response) => response.status,
+        Err(err) => {
+            tracing::warn!(%thread_id, "failed to subscribe to app-server thread: {err}");
+            ThreadSubscribeStatus::NotLoaded
+        }
+    };
+
+    app_event_tx.send(AppEvent::AppServerThreadSubscribeFinished {
+        thread_id,
+        status,
+    });
 }
 
 async fn refresh_loaded_threads(

@@ -2858,6 +2858,17 @@
       },
       "type": "object"
     },
+    "ThreadSubscribeParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadUnarchiveParams": {
       "properties": {
         "threadId": {
@@ -3400,6 +3411,30 @@
         "params"
       ],
       "title": "Thread/archiveRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/subscribe"
+          ],
+          "title": "Thread/subscribeRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadSubscribeParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/subscribeRequest",
       "type": "object"
     },
     {

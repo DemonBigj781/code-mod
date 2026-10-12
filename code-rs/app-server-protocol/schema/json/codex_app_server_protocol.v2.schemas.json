@@ -824,6 +824,30 @@
             },
             "method": {
               "enum": [
+                "thread/subscribe"
+              ],
+              "title": "Thread/subscribeRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadSubscribeParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/subscribeRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/unsubscribe"
               ],
               "title": "Thread/unsubscribeRequestMethod",
@@ -11201,6 +11225,39 @@
       ],
       "title": "ThreadStatusChangedNotification",
       "type": "object"
+    },
+    "ThreadSubscribeParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "title": "ThreadSubscribeParams",
+      "type": "object"
+    },
+    "ThreadSubscribeResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/ThreadSubscribeStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "ThreadSubscribeResponse",
+      "type": "object"
+    },
+    "ThreadSubscribeStatus": {
+      "enum": [
+        "notLoaded",
+        "subscribed"
+      ],
+      "type": "string"
     },
     "ThreadTokenUsage": {
       "properties": {

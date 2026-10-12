@@ -240,6 +240,10 @@ client_request_definitions! {
         params: v2::ThreadArchiveParams,
         response: v2::ThreadArchiveResponse,
     },
+    ThreadSubscribe => "thread/subscribe" {
+        params: v2::ThreadSubscribeParams,
+        response: v2::ThreadSubscribeResponse,
+    },
     ThreadUnsubscribe => "thread/unsubscribe" {
         params: v2::ThreadUnsubscribeParams,
         response: v2::ThreadUnsubscribeResponse,
