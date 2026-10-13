@@ -71,13 +71,23 @@ impl App<'_> {
             return true;
         }
         if !self.inactive_chat_widgets.contains_key(&target_thread_id) {
-            if let Some(bridge) = &self._app_server_bridge {
+            let notice = if self.app_server_thread_replays.contains_key(&target_thread_id) {
+                "Loaded app-server thread replay is cached; replay attach rendering is not available yet"
+            } else if self
+                .app_server_thread_subscriptions_pending
+                .contains(&target_thread_id)
+            {
+                "Already subscribing to loaded app-server thread"
+            } else if let Some(bridge) = &self._app_server_bridge {
+                self.app_server_thread_subscriptions_pending
+                    .insert(target_thread_id);
                 bridge.subscribe_thread(target_thread_id);
-            }
+                "Subscribing to loaded app-server thread; replay attach is not available yet"
+            } else {
+                "Loaded app-server thread is not attached to this TUI yet"
+            };
             if let AppState::Chat { widget } = &mut self.app_state {
-                widget.flash_footer_notice(
-                    "Subscribing to loaded app-server thread; replay attach is not available yet",
-                );
+                widget.flash_footer_notice(notice);
             }
             return false;
         }

@@ -280,8 +280,14 @@
                     replayable_items,
                     replay_thread,
                 } => {
+                    self.app_server_thread_subscriptions_pending.remove(&thread_id);
                     if let Some(thread) = replay_thread {
                         self.register_app_server_thread_replay(thread);
+                    } else if matches!(
+                        status,
+                        code_app_server_protocol::ThreadSubscribeStatus::NotLoaded
+                    ) {
+                        self.app_server_thread_replays.remove(&thread_id);
                     }
                     if let AppState::Chat { widget } = &mut self.app_state {
                         match status {

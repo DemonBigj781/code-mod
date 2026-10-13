@@ -135,6 +135,7 @@ pub(crate) struct App<'a> {
     pub(super) inactive_chat_widgets: HashMap<code_protocol::ThreadId, Box<ChatWidget<'a>>>,
     pub(super) app_server_thread_replays:
         HashMap<code_protocol::ThreadId, code_app_server_protocol::Thread>,
+    pub(super) app_server_thread_subscriptions_pending: HashSet<code_protocol::ThreadId>,
     pub(super) _app_server_bridge: Option<AppServerSessionBridge>,
 
     /// Config is stored here so we can recreate `ChatWidgets` as needed.
