@@ -470,6 +470,7 @@ impl ChatWidget<'_> {
         // Use the ordered items (text + images interleaved with markers)
         items.extend(message.ordered_items.clone());
         message.ordered_items = items;
+        message.sanitize_local_images_for_dispatch();
 
         if message.ordered_items.is_empty() {
             return;

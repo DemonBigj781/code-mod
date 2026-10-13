@@ -130,10 +130,11 @@ impl ChatWidget<'_> {
     /// Dispatch a user message immediately, bypassing the queued/turn-active
     /// path. Used for developer/system injections that must not be lost if the
     /// current turn ends abruptly.
-    fn submit_user_message_immediate(&mut self, message: UserMessage) {
+    fn submit_user_message_immediate(&mut self, mut message: UserMessage) {
         if message.ordered_items.is_empty() {
             return;
         }
+        message.sanitize_local_images_for_dispatch();
 
         let items = message.ordered_items.clone();
         if let Err(e) = self.code_op_tx.send(Op::UserInput {
