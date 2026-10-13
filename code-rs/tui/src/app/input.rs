@@ -1,5 +1,8 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
+use super::app_server_replay_view::top_tab_thread_at_x;
 use super::loaded_threads::LoadedSubagentThread;
 use super::loaded_threads::find_loaded_subagent_threads_for_primary;
 use super::state::{App, AppState};
@@ -20,6 +23,9 @@ impl App<'_> {
         if self.handle_active_thread_navigation_key(key_event) {
             return;
         }
+        if self.is_app_server_replay_view_active() {
+            return;
+        }
 
         match &mut self.app_state {
             AppState::Chat { widget } => {
@@ -35,13 +41,14 @@ impl App<'_> {
     }
 
     fn handle_active_thread_navigation_key(&mut self, key_event: KeyEvent) -> bool {
+        let replay_view_active = self.is_app_server_replay_view_active();
         let AppState::Chat { widget } = &self.app_state else {
             return false;
         };
         let Some(direction) = thread_navigation_direction(
             key_event,
-            widget.composer_is_empty(),
-            widget.has_active_modal_view(),
+            replay_view_active || widget.composer_is_empty(),
+            !replay_view_active && widget.has_active_modal_view(),
         ) else {
             return false;
         };
@@ -71,16 +78,25 @@ impl App<'_> {
             return true;
         }
         if !self.inactive_chat_widgets.contains_key(&target_thread_id) {
-            let notice = if self.app_server_thread_replays.contains_key(&target_thread_id) {
-                "Loaded app-server thread replay is cached; replay attach rendering is not available yet"
-            } else if self
+            if self.app_server_thread_replays.contains_key(&target_thread_id) {
+                let activated = self.active_thread_router.set_active_thread(target_thread_id);
+                debug_assert!(activated, "target thread should remain registered");
+                self.sync_active_thread_tabs_to_widget();
+                self.schedule_redraw();
+                return activated;
+            }
+            let notice = if self
                 .app_server_thread_subscriptions_pending
                 .contains(&target_thread_id)
             {
                 "Already subscribing to loaded app-server thread"
-            } else if let Some(bridge) = &self._app_server_bridge {
+            } else if self
+                ._app_server_bridge
+                .is_some()
+            {
                 self.app_server_thread_subscriptions_pending
                     .insert(target_thread_id);
+                let bridge = self._app_server_bridge.as_ref().expect("checked is_some");
                 bridge.subscribe_thread(target_thread_id);
                 "Subscribing to loaded app-server thread; replay attach is not available yet"
             } else {
@@ -111,6 +127,9 @@ impl App<'_> {
     }
 
     pub(super) fn dispatch_paste_event(&mut self, pasted: String) {
+        if self.is_app_server_replay_view_active() {
+            return;
+        }
         match &mut self.app_state {
             AppState::Chat { widget } => widget.handle_paste(pasted),
             AppState::Onboarding { .. } => {}
@@ -118,6 +137,16 @@ impl App<'_> {
     }
 
     pub(super) fn dispatch_mouse_event(&mut self, mouse_event: MouseEvent) {
+        if self.is_app_server_replay_view_active() {
+            if matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left))
+                && mouse_event.row == 0
+                && let Some(thread_id) = top_tab_thread_at_x(&self.top_session_tabs(), mouse_event.column)
+            {
+                self.app_event_tx
+                    .send(AppEvent::SwitchActiveThread { thread_id });
+            }
+            return;
+        }
         match &mut self.app_state {
             AppState::Chat { widget } => {
                 widget.handle_mouse_event(mouse_event);

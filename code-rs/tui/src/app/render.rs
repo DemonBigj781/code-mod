@@ -13,6 +13,7 @@ use crate::app_event::AppEvent;
 use crate::thread_spawner;
 use crate::tui;
 
+use super::app_server_replay_view::render_replay_view;
 use super::state::{App, AppState, REDRAW_DEBOUNCE};
 
 impl App<'_> {
@@ -131,32 +132,38 @@ impl App<'_> {
         let theme_before_split = split_preview.map(|_| crate::theme::current_theme_name());
 
         self.sync_active_thread_tabs_to_widget();
+        let replay_thread = self.active_app_server_replay_thread().cloned();
+        let replay_tabs = self.top_session_tabs();
         let completed_frame = terminal.draw(|frame| {
             match &mut self.app_state {
                 AppState::Chat { widget } => {
                     let area = frame.area();
-                    widget.maybe_clear_stale_reconnecting_for_idle();
-                    widget.sync_settings_route_for_width(area.width);
-                    let cursor_pos = widget.cursor_pos(area);
-                    if let Some(split) = split_preview {
-                        apply_runtime_theme_for_render(split.current);
-                        if let Some((x, y)) = cursor_pos {
-                            frame.set_cursor_position((x, y));
-                        }
-                        frame.render_widget_ref(&**widget, area);
-                        let left_snapshot = snapshot_left_half(frame.buffer_mut(), area);
-
-                        apply_runtime_theme_for_render(split.preview);
-                        if let Some((x, y)) = cursor_pos {
-                            frame.set_cursor_position((x, y));
-                        }
-                        frame.render_widget_ref(&**widget, area);
-                        restore_left_half(frame.buffer_mut(), area, &left_snapshot);
+                    if let Some(thread) = replay_thread.as_ref() {
+                        render_replay_view(thread, &replay_tabs, area, frame.buffer_mut());
                     } else {
-                        if let Some((x, y)) = cursor_pos {
-                            frame.set_cursor_position((x, y));
+                        widget.maybe_clear_stale_reconnecting_for_idle();
+                        widget.sync_settings_route_for_width(area.width);
+                        let cursor_pos = widget.cursor_pos(area);
+                        if let Some(split) = split_preview {
+                            apply_runtime_theme_for_render(split.current);
+                            if let Some((x, y)) = cursor_pos {
+                                frame.set_cursor_position((x, y));
+                            }
+                            frame.render_widget_ref(&**widget, area);
+                            let left_snapshot = snapshot_left_half(frame.buffer_mut(), area);
+
+                            apply_runtime_theme_for_render(split.preview);
+                            if let Some((x, y)) = cursor_pos {
+                                frame.set_cursor_position((x, y));
+                            }
+                            frame.render_widget_ref(&**widget, area);
+                            restore_left_half(frame.buffer_mut(), area, &left_snapshot);
+                        } else {
+                            if let Some((x, y)) = cursor_pos {
+                                frame.set_cursor_position((x, y));
+                            }
+                            frame.render_widget_ref(&**widget, area);
                         }
-                        frame.render_widget_ref(&**widget, area);
                     }
                 }
                 AppState::Onboarding { screen } => frame.render_widget_ref(&**screen, frame.area()),

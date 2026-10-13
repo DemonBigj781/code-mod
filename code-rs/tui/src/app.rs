@@ -1,4 +1,5 @@
 mod app_server_event_forwarder;
+mod app_server_replay_view;
 mod app_server_session;
 mod events;
 mod event_deduper;

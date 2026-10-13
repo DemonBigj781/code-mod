@@ -3,8 +3,8 @@ use std::sync::atomic::Ordering;
 use super::{App, AppState};
 use super::super::thread_routing::ThreadSessionState;
 use super::super::thread_routing::ThreadTabMetadata;
-use crate::chatwidget::TopSessionTab;
 use crate::chatwidget::ChatWidget;
+use crate::chatwidget::TopSessionTab;
 use code_core::protocol::SessionConfiguredEvent;
 use code_protocol::ThreadId;
 
@@ -52,7 +52,18 @@ impl<'a> App<'a> {
     }
 
     pub(crate) fn sync_active_thread_tabs_to_widget(&mut self) {
-        let tabs: Vec<TopSessionTab> = self
+        let tabs = self.top_session_tabs();
+        if tabs.is_empty() {
+            return;
+        }
+
+        if let AppState::Chat { widget } = &mut self.app_state {
+            widget.set_top_session_tabs(tabs);
+        }
+    }
+
+    pub(crate) fn top_session_tabs(&self) -> Vec<TopSessionTab> {
+        self
             .active_thread_router
             .ordered_tabs()
             .into_iter()
@@ -64,14 +75,30 @@ impl<'a> App<'a> {
                 is_running: tab.is_running,
                 is_closed: tab.is_closed,
             })
-            .collect();
-        if tabs.is_empty() {
-            return;
-        }
+            .collect()
+    }
 
-        if let AppState::Chat { widget } = &mut self.app_state {
-            widget.set_top_session_tabs(tabs);
+    pub(crate) fn active_chat_thread_id(&self) -> Option<ThreadId> {
+        match &self.app_state {
+            AppState::Chat { widget } => widget
+                .session_id()
+                .and_then(|id| ThreadId::from_string(&id.to_string()).ok()),
+            AppState::Onboarding { .. } => None,
         }
+    }
+
+    pub(crate) fn active_app_server_replay_thread(
+        &self,
+    ) -> Option<&code_app_server_protocol::Thread> {
+        let active_thread_id = self.active_thread_router.active_thread_id()?;
+        if self.active_chat_thread_id() == Some(active_thread_id) {
+            return None;
+        }
+        self.app_server_thread_replays.get(&active_thread_id)
+    }
+
+    pub(crate) fn is_app_server_replay_view_active(&self) -> bool {
+        self.active_app_server_replay_thread().is_some()
     }
 
     pub(crate) fn replace_active_chat_widget(&mut self, new_widget: ChatWidget<'a>) {
