@@ -278,7 +278,11 @@
                     status,
                     replayable_turns,
                     replayable_items,
+                    replay_thread,
                 } => {
+                    if let Some(thread) = replay_thread {
+                        self.register_app_server_thread_replay(thread);
+                    }
                     if let AppState::Chat { widget } = &mut self.app_state {
                         match status {
                             code_app_server_protocol::ThreadSubscribeStatus::Subscribed => {

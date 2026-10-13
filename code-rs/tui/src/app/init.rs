@@ -375,6 +375,7 @@ impl App<'_> {
             app_state,
             active_thread_router: super::thread_routing::ActiveThreadRouter::default(),
             inactive_chat_widgets: HashMap::new(),
+            app_server_thread_replays: HashMap::new(),
             _app_server_bridge: app_server_bridge,
             config,
             cli_kv_overrides,

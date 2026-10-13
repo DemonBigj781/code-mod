@@ -140,24 +140,29 @@ async fn subscribe_thread(
         }
     };
 
-    let (replayable_turns, replayable_items) = if status == ThreadSubscribeStatus::Subscribed {
-        fetch_replayable_thread_counts(request_handle, thread_id).await
+    let replay_thread = if status == ThreadSubscribeStatus::Subscribed {
+        fetch_replayable_thread(request_handle, thread_id).await
     } else {
-        (0, 0)
+        None
     };
+    let (replayable_turns, replayable_items) = replay_thread
+        .as_ref()
+        .map(replayable_thread_counts)
+        .unwrap_or((0, 0));
 
     app_event_tx.send(AppEvent::AppServerThreadSubscribeFinished {
         thread_id,
         status,
         replayable_turns,
         replayable_items,
+        replay_thread,
     });
 }
 
-async fn fetch_replayable_thread_counts(
+async fn fetch_replayable_thread(
     request_handle: &AppServerRequestHandle,
     thread_id: ThreadId,
-) -> (usize, usize) {
+) -> Option<code_app_server_protocol::Thread> {
     let response = request_handle
         .request_typed::<ThreadReadResponse>(ClientRequest::ThreadRead {
             request_id: RequestId::String(format!(
@@ -173,10 +178,10 @@ async fn fetch_replayable_thread_counts(
         .await;
 
     match response {
-        Ok(response) => replayable_thread_counts(&response.thread),
+        Ok(response) => Some(response.thread),
         Err(err) => {
             tracing::warn!(%thread_id, "failed to read app-server thread history after subscribe: {err}");
-            (0, 0)
+            None
         }
     }
 }

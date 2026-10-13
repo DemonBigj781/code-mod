@@ -269,6 +269,28 @@ impl App<'_> {
         self.schedule_redraw();
     }
 
+    pub(super) fn register_app_server_thread_replay(
+        &mut self,
+        thread: code_app_server_protocol::Thread,
+    ) {
+        let Ok(thread_id) = ThreadId::from_string(&thread.id) else {
+            tracing::warn!(thread_id = %thread.id, "app-server replay thread id could not be parsed");
+            return;
+        };
+        self.active_thread_router.upsert_thread_metadata(
+            thread_id,
+            ThreadTabMetadata {
+                title: title_from_app_server_thread(&thread),
+                is_running: thread_is_running(&thread),
+                is_closed: thread_is_closed(&thread),
+                ..ThreadTabMetadata::default()
+            },
+        );
+        self.app_server_thread_replays.insert(thread_id, thread);
+        self.sync_active_thread_tabs_to_widget();
+        self.schedule_redraw();
+    }
+
     fn register_loaded_subagent_threads_with_router(&mut self, threads: Vec<LoadedSubagentThread>) {
         for thread in threads {
             self.active_thread_router.upsert_thread_metadata(
