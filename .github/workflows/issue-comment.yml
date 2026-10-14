@@ -397,7 +397,7 @@ jobs:
             const issue_number = Number(process.env.ISSUE_NUMBER || 0);
             const pr = Number(process.env.PR_NUMBER || 0);
             if (!issue_number) { core.notice('No linked issue detected; skipping issue comment.'); return; }
-            const ISSUE_MARK = '<!-- preview-build:issue -->';
+            const ISSUE_MARK = '<!-- issue-code:comment -->';
             let body = '';
             try { body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md','utf8').trim(); } catch {}
             const PLACEHOLDER = '…final Markdown comment…';
