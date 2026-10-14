@@ -224,6 +224,190 @@ pub(super) fn upsert_replay_item(
     true
 }
 
+pub(super) fn append_agent_message_delta(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    delta: &str,
+) -> bool {
+    mutate_replay_item(replays, thread_id, turn_id, item_id, |item| {
+        let ThreadItem::AgentMessage { text, .. } = item else {
+            return false;
+        };
+        text.push_str(delta);
+        true
+    })
+}
+
+pub(super) fn append_plan_delta(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    delta: &str,
+) -> bool {
+    mutate_replay_item(replays, thread_id, turn_id, item_id, |item| {
+        let ThreadItem::Plan { text, .. } = item else {
+            return false;
+        };
+        text.push_str(delta);
+        true
+    })
+}
+
+pub(super) fn append_command_output_delta(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    delta: &str,
+) -> bool {
+    mutate_replay_item(replays, thread_id, turn_id, item_id, |item| {
+        let ThreadItem::CommandExecution {
+            aggregated_output, ..
+        } = item
+        else {
+            return false;
+        };
+        aggregated_output.get_or_insert_with(String::new).push_str(delta);
+        true
+    })
+}
+
+pub(super) fn append_file_change_output_delta(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    delta: &str,
+) -> bool {
+    mutate_replay_item(replays, thread_id, turn_id, item_id, |item| {
+        let ThreadItem::FileChange { changes, .. } = item else {
+            return false;
+        };
+        if let Some(change) = changes.last_mut() {
+            change.diff.push_str(delta);
+            return true;
+        }
+        false
+    })
+}
+
+pub(super) fn append_reasoning_text_delta(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    content_index: i64,
+    delta: &str,
+) -> bool {
+    append_indexed_text_delta(
+        replays,
+        thread_id,
+        turn_id,
+        item_id,
+        content_index,
+        delta,
+        |item| match item {
+            ThreadItem::Reasoning { content, .. } => Some(content),
+            _ => None,
+        },
+    )
+}
+
+pub(super) fn append_reasoning_summary_delta(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    summary_index: i64,
+    delta: &str,
+) -> bool {
+    append_indexed_text_delta(
+        replays,
+        thread_id,
+        turn_id,
+        item_id,
+        summary_index,
+        delta,
+        |item| match item {
+            ThreadItem::Reasoning { summary, .. } => Some(summary),
+            _ => None,
+        },
+    )
+}
+
+pub(super) fn add_reasoning_summary_part(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    summary_index: i64,
+) -> bool {
+    let Ok(summary_index) = usize::try_from(summary_index) else {
+        return false;
+    };
+    mutate_replay_item(replays, thread_id, turn_id, item_id, |item| {
+        let ThreadItem::Reasoning { summary, .. } = item else {
+            return false;
+        };
+        ensure_text_slot(summary, summary_index);
+        true
+    })
+}
+
+fn append_indexed_text_delta(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    index: i64,
+    delta: &str,
+    list_for_item: impl FnOnce(&mut ThreadItem) -> Option<&mut Vec<String>>,
+) -> bool {
+    let Ok(index) = usize::try_from(index) else {
+        return false;
+    };
+    mutate_replay_item(replays, thread_id, turn_id, item_id, |item| {
+        let Some(parts) = list_for_item(item) else {
+            return false;
+        };
+        ensure_text_slot(parts, index);
+        parts[index].push_str(delta);
+        true
+    })
+}
+
+fn ensure_text_slot(parts: &mut Vec<String>, index: usize) {
+    while parts.len() <= index {
+        parts.push(String::new());
+    }
+}
+
+fn mutate_replay_item(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item_id: &str,
+    mutate: impl FnOnce(&mut ThreadItem) -> bool,
+) -> bool {
+    let Some(thread) = replay_thread_mut(replays, thread_id) else {
+        return false;
+    };
+    let Some(turn) = thread.turns.iter_mut().find(|turn| turn.id == turn_id) else {
+        return false;
+    };
+    let Some(item) = turn
+        .items
+        .iter_mut()
+        .find(|item| thread_item_id(item) == item_id)
+    else {
+        return false;
+    };
+    mutate(item)
+}
+
 fn replay_thread_mut<'a>(
     replays: &'a mut HashMap<ThreadId, Thread>,
     thread_id: &str,
@@ -405,6 +589,9 @@ mod tests {
     use code_app_server_protocol::ThreadStatus;
     use code_app_server_protocol::Turn;
     use code_app_server_protocol::TurnStatus;
+    use code_app_server_protocol::{
+        CommandExecutionStatus, FileUpdateChange, PatchApplyStatus, PatchChangeKind,
+    };
 
     fn replay_thread() -> Thread {
         Thread {
@@ -569,5 +756,160 @@ mod tests {
         assert_eq!(thread.turns[1].id, "turn-2");
         assert_eq!(thread.turns[1].status, TurnStatus::InProgress);
         assert_eq!(thread.turns[1].items.len(), 1);
+    }
+
+    #[test]
+    fn replay_cache_applies_text_deltas_to_existing_items() {
+        let mut thread = replay_thread();
+        thread.turns[0].items.extend([
+            ThreadItem::Plan {
+                id: "plan-1".to_owned(),
+                text: "step".to_owned(),
+            },
+            ThreadItem::Reasoning {
+                id: "reasoning-1".to_owned(),
+                summary: Vec::new(),
+                content: Vec::new(),
+            },
+        ]);
+        let mut cache = replay_cache(thread);
+        let thread_id = "00000000-0000-0000-0000-000000000001";
+
+        assert!(append_agent_message_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "agent-1",
+            " more"
+        ));
+        assert!(append_plan_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "plan-1",
+            " done"
+        ));
+        assert!(add_reasoning_summary_part(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "reasoning-1",
+            1
+        ));
+        assert!(append_reasoning_summary_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "reasoning-1",
+            1,
+            "summary"
+        ));
+        assert!(append_reasoning_text_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "reasoning-1",
+            0,
+            "raw"
+        ));
+
+        let thread = cache.values().next().expect("cached thread");
+        assert!(matches!(
+            &thread.turns[0].items[1],
+            ThreadItem::AgentMessage { text, .. } if text.ends_with(" more")
+        ));
+        assert!(matches!(
+            &thread.turns[0].items[2],
+            ThreadItem::Plan { text, .. } if text == "step done"
+        ));
+        assert!(matches!(
+            &thread.turns[0].items[3],
+            ThreadItem::Reasoning { summary, content, .. }
+                if summary == &vec![String::new(), "summary".to_owned()]
+                    && content == &vec!["raw".to_owned()]
+        ));
+    }
+
+    #[test]
+    fn replay_cache_applies_output_deltas_to_existing_items() {
+        let mut thread = replay_thread();
+        thread.turns[0].items.extend([
+            ThreadItem::CommandExecution {
+                id: "cmd-1".to_owned(),
+                command: "echo hi".to_owned(),
+                cwd: std::path::PathBuf::from("/tmp"),
+                process_id: None,
+                status: CommandExecutionStatus::InProgress,
+                command_actions: Vec::new(),
+                aggregated_output: None,
+                exit_code: None,
+                duration_ms: None,
+            },
+            ThreadItem::FileChange {
+                id: "file-1".to_owned(),
+                changes: vec![FileUpdateChange {
+                    path: "src/main.rs".to_owned(),
+                    kind: PatchChangeKind::Update { move_path: None },
+                    diff: "@@".to_owned(),
+                }],
+                status: PatchApplyStatus::InProgress,
+            },
+        ]);
+        let mut cache = replay_cache(thread);
+        let thread_id = "00000000-0000-0000-0000-000000000001";
+
+        assert!(append_command_output_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "cmd-1",
+            "hello"
+        ));
+        assert!(append_file_change_output_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "file-1",
+            " +line"
+        ));
+
+        let thread = cache.values().next().expect("cached thread");
+        assert!(matches!(
+            &thread.turns[0].items[2],
+            ThreadItem::CommandExecution { aggregated_output: Some(output), .. } if output == "hello"
+        ));
+        assert!(matches!(
+            &thread.turns[0].items[3],
+            ThreadItem::FileChange { changes, .. } if changes[0].diff == "@@ +line"
+        ));
+    }
+
+    #[test]
+    fn replay_cache_ignores_delta_for_missing_or_mismatched_item() {
+        let mut cache = replay_cache(replay_thread());
+        let thread_id = "00000000-0000-0000-0000-000000000001";
+
+        assert!(!append_agent_message_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "missing",
+            "ignored"
+        ));
+        assert!(!append_plan_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "agent-1",
+            "ignored"
+        ));
+        assert!(!append_reasoning_text_delta(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            "agent-1",
+            -1,
+            "ignored"
+        ));
     }
 }

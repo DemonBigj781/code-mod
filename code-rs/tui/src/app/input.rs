@@ -305,6 +305,85 @@ impl App<'_> {
                     self.schedule_redraw();
                 }
             }
+            ServerNotification::AgentMessageDelta(notification) => {
+                if app_server_replay_view::append_agent_message_delta(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    &notification.item_id,
+                    &notification.delta,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::PlanDelta(notification) => {
+                if app_server_replay_view::append_plan_delta(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    &notification.item_id,
+                    &notification.delta,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::ReasoningTextDelta(notification) => {
+                if app_server_replay_view::append_reasoning_text_delta(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    &notification.item_id,
+                    notification.content_index,
+                    &notification.delta,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::ReasoningSummaryPartAdded(notification) => {
+                if app_server_replay_view::add_reasoning_summary_part(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    &notification.item_id,
+                    notification.summary_index,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::ReasoningSummaryTextDelta(notification) => {
+                if app_server_replay_view::append_reasoning_summary_delta(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    &notification.item_id,
+                    notification.summary_index,
+                    &notification.delta,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::CommandExecutionOutputDelta(notification) => {
+                if app_server_replay_view::append_command_output_delta(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    &notification.item_id,
+                    &notification.delta,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::FileChangeOutputDelta(notification) => {
+                if app_server_replay_view::append_file_change_output_delta(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    &notification.item_id,
+                    &notification.delta,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
             _ => {}
         }
     }
