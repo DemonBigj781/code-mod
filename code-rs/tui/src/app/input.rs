@@ -3,7 +3,6 @@ use crossterm::event::{
 };
 
 use super::app_server_replay_view;
-use super::app_server_replay_view::top_tab_thread_at_x;
 use super::loaded_threads::LoadedSubagentThread;
 use super::loaded_threads::find_loaded_subagent_threads_for_primary;
 use super::state::{App, AppState};
@@ -55,17 +54,18 @@ impl App<'_> {
 
         match key_event.code {
             KeyCode::Enter => {
-                let Some(text) = self.app_server_replay_composers.remove(&thread_id) else {
+                let Some(text) = self.app_server_replay_composers.get(&thread_id).cloned() else {
                     return;
                 };
                 let text = text.trim().to_owned();
-                if text.is_empty() {
+                if text.is_empty() { return; }
+                if let Some(("tab" | "tabs", args)) = crate::slash_command::parse_slash_name(&text) {
+                    self.app_server_replay_composers.remove(&thread_id);
+                    self.handle_tab_command(args);
                     return;
                 }
                 let Some(bridge) = &self._app_server_bridge else {
-                    self.app_server_replay_composers
-                        .insert(thread_id, "[app-server bridge unavailable] ".to_owned());
-                    self.schedule_redraw();
+                    self.tab_notice("App-server bridge unavailable; draft kept.");
                     return;
                 };
                 self.app_server_turns_pending.insert(thread_id);
@@ -104,7 +104,6 @@ impl App<'_> {
         };
         let Some(direction) = thread_navigation_direction(
             key_event,
-            replay_view_active || widget.composer_is_empty(),
             !replay_view_active && widget.has_active_modal_view(),
         ) else {
             return false;
@@ -118,9 +117,12 @@ impl App<'_> {
     }
 
     pub(super) fn switch_active_thread_backing(&mut self, target_thread_id: ThreadId) -> bool {
-        let AppState::Chat { widget } = &self.app_state else {
-            return false;
-        };
+        if !self.active_thread_router.is_visible(target_thread_id) { return false; }
+        self.persist_tab_state();
+        self.tab_layout_touched = true;
+        self.tab_hits.clear();
+        self.pending_tab_activation = None;
+        let AppState::Chat { widget } = &self.app_state else { return false; };
         let Some(current_thread_id) = widget
             .session_id()
             .and_then(|id| ThreadId::from_string(&id.to_string()).ok())
@@ -130,7 +132,6 @@ impl App<'_> {
         if current_thread_id == target_thread_id {
             let activated = self.active_thread_router.set_active_thread(target_thread_id);
             debug_assert!(activated, "target thread should remain registered");
-            self.sync_active_thread_tabs_to_widget();
             self.schedule_redraw();
             return true;
         }
@@ -138,10 +139,10 @@ impl App<'_> {
             if self.app_server_thread_replays.contains_key(&target_thread_id) {
                 let activated = self.active_thread_router.set_active_thread(target_thread_id);
                 debug_assert!(activated, "target thread should remain registered");
-                self.sync_active_thread_tabs_to_widget();
                 self.schedule_redraw();
                 return activated;
             }
+            self.pending_tab_activation = Some(target_thread_id);
             let notice = if self
                 .app_server_thread_subscriptions_pending
                 .contains(&target_thread_id)
@@ -155,13 +156,11 @@ impl App<'_> {
                     .insert(target_thread_id);
                 let bridge = self._app_server_bridge.as_ref().expect("checked is_some");
                 bridge.subscribe_thread(target_thread_id);
-                "Subscribing to loaded app-server thread; replay attach is not available yet"
+                "Loading session tab…"
             } else {
                 "Loaded app-server thread is not attached to this TUI yet"
             };
-            if let AppState::Chat { widget } = &mut self.app_state {
-                widget.flash_footer_notice(notice);
-            }
+            self.tab_notice(notice);
             return false;
         }
 
@@ -178,7 +177,6 @@ impl App<'_> {
         }
         let activated = self.active_thread_router.set_active_thread(target_thread_id);
         debug_assert!(activated, "target thread should remain registered");
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
         true
     }
@@ -186,6 +184,10 @@ impl App<'_> {
     pub(super) fn dispatch_paste_event(&mut self, pasted: String) {
         if self.is_app_server_replay_view_active() {
             if let Some(thread_id) = self.active_thread_router.active_thread_id() {
+                if self.app_server_turns_pending.contains(&thread_id) {
+                    self.tab_notice("Message is still being sent; paste again after it finishes.");
+                    return;
+                }
                 self.app_server_replay_composers
                     .entry(thread_id)
                     .or_default()
@@ -201,16 +203,13 @@ impl App<'_> {
     }
 
     pub(super) fn dispatch_mouse_event(&mut self, mouse_event: MouseEvent) {
-        if self.is_app_server_replay_view_active() {
-            if matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left))
-                && mouse_event.row == 0
-                && let Some(thread_id) = top_tab_thread_at_x(&self.top_session_tabs(), mouse_event.column)
-            {
-                self.app_event_tx
-                    .send(AppEvent::SwitchActiveThread { thread_id });
-            }
+        if matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left))
+            && let Some(action) = crate::session_tabs::hit_test(&self.tab_hits, mouse_event.column, mouse_event.row)
+        {
+            self.handle_tab_action(action);
             return;
         }
+        if self.is_app_server_replay_view_active() { return; }
         match &mut self.app_state {
             AppState::Chat { widget } => {
                 widget.handle_mouse_event(mouse_event);
@@ -233,7 +232,6 @@ impl App<'_> {
             self.register_session_configured_with_router(session);
             if let Ok(thread_id) = ThreadId::from_string(&session.session_id.to_string()) {
                 self.active_thread_router.set_active_thread(thread_id);
-                self.sync_active_thread_tabs_to_widget();
             }
         }
 
@@ -256,15 +254,17 @@ impl App<'_> {
             AppState::Onboarding { .. } => None,
         };
         let is_session_configured = matches!(&event.msg, EventMsg::SessionConfigured(_));
-        if active_thread_id.is_none() && is_session_configured && is_inactive {
+        if active_thread_id.is_none() && is_session_configured && is_inactive
+            && self.inactive_chat_widgets.get(&thread_id).is_some_and(|widget| widget.session_id().is_some())
+        {
             self.inactive_chat_widgets.remove(&thread_id);
             is_inactive = false;
         }
         if let EventMsg::SessionConfigured(session) = &event.msg {
             self.register_session_configured_with_router(session);
             if !is_inactive {
+                self.active_thread_router.set_thread_visible(thread_id, true);
                 self.active_thread_router.set_active_thread(thread_id);
-                self.sync_active_thread_tabs_to_widget();
             }
         }
 
@@ -469,7 +469,6 @@ impl App<'_> {
                 },
             );
         }
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
     }
 
@@ -505,7 +504,6 @@ impl App<'_> {
                 },
             );
         }
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
     }
 
@@ -527,7 +525,6 @@ impl App<'_> {
             },
         );
         self.app_server_thread_replays.insert(thread_id, thread);
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
     }
 
@@ -545,7 +542,6 @@ impl App<'_> {
                 },
             );
         }
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
     }
 
@@ -568,7 +564,6 @@ impl App<'_> {
                 is_closed: thread_is_closed(&thread),
             },
         );
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
     }
 
@@ -590,7 +585,6 @@ impl App<'_> {
                 ..ThreadTabMetadata::default()
             },
         );
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
     }
 
@@ -610,7 +604,6 @@ impl App<'_> {
                 ..ThreadTabMetadata::default()
             },
         );
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
     }
 
@@ -627,7 +620,6 @@ impl App<'_> {
                 ..ThreadTabMetadata::default()
             },
         );
-        self.sync_active_thread_tabs_to_widget();
         self.schedule_redraw();
     }
 
@@ -643,11 +635,9 @@ impl App<'_> {
 
 fn thread_navigation_direction(
     key_event: KeyEvent,
-    composer_is_empty: bool,
     has_active_modal: bool,
 ) -> Option<ThreadNavigationDirection> {
-    if !composer_is_empty
-        || has_active_modal
+    if has_active_modal
         || !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         || key_event.modifiers != KeyModifiers::ALT
     {
@@ -674,12 +664,11 @@ fn thread_event_destination(
     is_inactive_thread: bool,
     is_session_configured: bool,
 ) -> ThreadEventDestination {
-    if active_thread_id.is_none() && is_session_configured {
-        return ThreadEventDestination::Active;
-    }
-
     if is_inactive_thread {
         return ThreadEventDestination::Inactive;
+    }
+    if active_thread_id.is_none() && is_session_configured {
+        return ThreadEventDestination::Active;
     }
 
     if active_thread_id == Some(event_thread_id) {
@@ -756,7 +745,7 @@ mod app_server_thread_metadata_tests {
         );
         assert_eq!(
             thread_event_destination(None, other, true, true),
-            ThreadEventDestination::Active
+            ThreadEventDestination::Inactive
         );
     }
 
@@ -816,23 +805,22 @@ mod app_server_thread_metadata_tests {
     }
 
     #[test]
-    fn thread_navigation_requires_an_empty_composer_without_a_modal() {
+    fn thread_navigation_preserves_drafts_and_respects_modals() {
         let next = KeyEvent::new(KeyCode::Right, KeyModifiers::ALT);
         let previous = KeyEvent::new(KeyCode::Left, KeyModifiers::ALT);
         let edit_word_right = KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL);
         let edit_word_left = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL);
 
         assert_eq!(
-            thread_navigation_direction(next, true, false),
+            thread_navigation_direction(next, false),
             Some(ThreadNavigationDirection::Next)
         );
         assert_eq!(
-            thread_navigation_direction(previous, true, false),
+            thread_navigation_direction(previous, false),
             Some(ThreadNavigationDirection::Previous)
         );
-        assert_eq!(thread_navigation_direction(next, false, false), None);
-        assert_eq!(thread_navigation_direction(next, true, true), None);
-        assert_eq!(thread_navigation_direction(edit_word_right, true, false), None);
-        assert_eq!(thread_navigation_direction(edit_word_left, true, false), None);
+        assert_eq!(thread_navigation_direction(next, true), None);
+        assert_eq!(thread_navigation_direction(edit_word_right, false), None);
+        assert_eq!(thread_navigation_direction(edit_word_left, false), None);
     }
 }

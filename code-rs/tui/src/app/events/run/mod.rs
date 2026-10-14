@@ -80,8 +80,12 @@ impl App<'_> {
 
         'main: loop {
             let Some(event) = self.next_event_priority() else { break 'main };
-            include!("history_insert.rs")
+            self.persist_tab_state();
+            include!("history_insert.rs");
+            self.persist_tab_state();
+            self.continue_tab_restore();
         }
+        self.persist_tab_state();
         if self.alt_screen_active {
             terminal.clear()?;
         }

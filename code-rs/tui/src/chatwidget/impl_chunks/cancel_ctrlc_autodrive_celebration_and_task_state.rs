@@ -288,25 +288,6 @@ impl ChatWidget<'_> {
         self.interrupt_running_task();
     }
 
-    /// Stop any in-flight turn (Auto Drive, agents, streaming responses) before
-    /// starting a brand new chat so that stale output cannot leak into the new
-    /// conversation.
-    pub(crate) fn abort_active_turn_for_new_chat(&mut self) {
-        if self.has_cancelable_agents() {
-            self.cancel_active_agents();
-        }
-
-        if self.auto_state.is_active() {
-            self.auto_stop(None);
-        }
-
-        self.interrupt_running_task();
-        self.finalize_active_stream();
-        self.stream_state.drop_streaming = true;
-        self.bottom_pane.set_task_running(false);
-        self.maybe_hide_spinner();
-    }
-
     pub(crate) fn register_approved_command(
         &self,
         command: Vec<String>,

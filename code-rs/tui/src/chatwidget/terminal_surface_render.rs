@@ -1,6 +1,5 @@
 use super::*;
 use super::terminal_surface_header::HeaderTemplateContext;
-use super::terminal_surface_header::HeaderTemplateRender;
 use super::terminal_surface_header::DynamicHeaderLayoutInput;
 use super::terminal_surface_header::McpHeaderIndicatorKind;
 use super::terminal_surface_header::centered_clickable_regions_from_char_ranges;
@@ -317,7 +316,7 @@ impl ChatWidget<'_> {
         let inner_width = padded_inner.width as usize;
         // Build the header at full width — scroll handles overflow instead of
         // cascading segment removal.
-        let dynamic_header = self.prepend_top_session_tabs(render_dynamic_header_line(
+        let dynamic_header = render_dynamic_header_line(
             &DynamicHeaderLayoutInput {
                 title: header_title,
                 model: model_display.as_str(),
@@ -336,7 +335,7 @@ impl ChatWidget<'_> {
                 demo_mode: self.config.demo_developer_message.is_some(),
                 inner_width: usize::MAX,
             },
-        ));
+        );
 
         let now = Instant::now();
         let frame_needed = ENABLE_WARP_STRIPES && self.header_wave.schedule_if_needed(now);
@@ -379,8 +378,7 @@ impl ChatWidget<'_> {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(|value| render_styled_header_template(value, &header_template_ctx))
-            .map(|render| self.prepend_top_session_tabs(render));
+            .map(|value| render_styled_header_template(value, &header_template_ctx));
         let top_status_line_items = self.status_line_top_items();
         let has_selected_status_line =
             top_text_with_regions.is_none() && !top_status_line_items.is_empty();
@@ -392,8 +390,7 @@ impl ChatWidget<'_> {
                     hover_style,
                     usize::MAX,
                 )
-            })
-            .map(|render| self.prepend_top_session_tabs(render));
+            });
         let bottom_text = header_cfg
             .bottom_line_text
             .as_deref()
@@ -525,86 +522,6 @@ impl ChatWidget<'_> {
             area,
             total_width,
         ));
-    }
-
-    pub(crate) fn set_top_session_tabs(&mut self, tabs: Vec<TopSessionTab>) {
-        self.top_session_tabs = if tabs.is_empty() {
-            vec![TopSessionTab::main()]
-        } else {
-            tabs
-        };
-    }
-
-    fn prepend_top_session_tabs(&self, render: HeaderTemplateRender) -> HeaderTemplateRender {
-        Self::prepend_top_session_tabs_for_render(render, &self.top_session_tabs)
-    }
-
-    fn prepend_top_session_tabs_for_render(
-        mut render: HeaderTemplateRender,
-        tabs: &[TopSessionTab],
-    ) -> HeaderTemplateRender {
-        let default_tabs;
-        let tabs = if tabs.is_empty() {
-            default_tabs = vec![TopSessionTab::main()];
-            default_tabs.as_slice()
-        } else {
-            tabs
-        };
-
-        let mut spans = Vec::with_capacity(render.line.spans.len() + tabs.len().saturating_mul(2));
-        let mut prefix_width = 0usize;
-        let mut clickable_ranges = Vec::new();
-        for tab in tabs {
-            let status_marker = if tab.is_running {
-                Some("*")
-            } else if tab.is_closed {
-                Some("x")
-            } else {
-                None
-            };
-            let tab_text = if let Some(marker) = status_marker {
-                format!("[{} {} {}]", tab.ordinal, marker, tab.title)
-            } else {
-                format!("[{} {}]", tab.ordinal, tab.title)
-            };
-            let tab_width = tab_text.width();
-            if let Some(thread_id) = tab.thread_id {
-                clickable_ranges.push((
-                    prefix_width..prefix_width.saturating_add(tab_width),
-                    ClickableAction::SwitchThread(thread_id),
-                ));
-            }
-            let tab_style = if tab.is_active {
-                crate::colors::style_text()
-                    .bg(crate::colors::selection())
-                    .add_modifier(ratatui::style::Modifier::BOLD)
-            } else {
-                crate::colors::style_text_dim()
-            };
-            spans.push(ratatui::text::Span::styled(tab_text, tab_style));
-            prefix_width += tab_width;
-            spans.push(ratatui::text::Span::styled(
-                "  ".to_owned(),
-                crate::colors::style_text_dim(),
-            ));
-            prefix_width += 2;
-        }
-        spans.append(&mut render.line.spans);
-
-        HeaderTemplateRender {
-            line: ratatui::text::Line::from(spans),
-            clickable_ranges: {
-                clickable_ranges.extend(render.clickable_ranges.into_iter().map(|(range, action)| {
-                    (
-                        range.start.saturating_add(prefix_width)
-                            ..range.end.saturating_add(prefix_width),
-                        action,
-                    )
-                }));
-                clickable_ranges
-            },
-            width: render.width.saturating_add(prefix_width),
-        }
     }
 
     fn render_selected_status_line_with_width(
@@ -840,124 +757,5 @@ impl ChatWidget<'_> {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use code_protocol::ThreadId;
-    use ratatui::text::{Line, Span};
-
-    #[test]
-    fn top_session_tab_prefix_shifts_clickable_ranges() {
-        let rendered = HeaderTemplateRender {
-            line: Line::from(vec![Span::raw("model")]),
-            clickable_ranges: vec![(0..5, ClickableAction::ShowModelSelector)],
-            width: 5,
-        };
-
-        let tabs = vec![TopSessionTab::main()];
-        let with_tab = ChatWidget::prepend_top_session_tabs_for_render(rendered, &tabs);
-
-        assert_eq!(with_tab.line.spans[0].content, "[1 Main]");
-        assert_eq!(with_tab.line.spans[1].content, "  ");
-        assert_eq!(with_tab.line.spans[2].content, "model");
-        assert_eq!(with_tab.width, "[1 Main]  model".width());
-        assert_eq!(
-            with_tab.clickable_ranges,
-            vec![(
-                "[1 Main]  ".width().."[1 Main]  model".width(),
-                ClickableAction::ShowModelSelector,
-            )]
-        );
-    }
-
-    #[test]
-    fn top_session_tab_prefix_renders_status_markers() {
-        let rendered = HeaderTemplateRender {
-            line: Line::from(vec![Span::raw("model")]),
-            clickable_ranges: vec![],
-            width: 5,
-        };
-
-        let tabs = vec![
-            TopSessionTab::main(),
-            TopSessionTab {
-                thread_id: None,
-                ordinal: 2,
-                title: "Builder".to_owned(),
-                is_active: false,
-                is_running: true,
-                is_closed: false,
-            },
-            TopSessionTab {
-                thread_id: None,
-                ordinal: 3,
-                title: "Scout".to_owned(),
-                is_active: false,
-                is_running: false,
-                is_closed: true,
-            },
-        ];
-        let with_tabs = ChatWidget::prepend_top_session_tabs_for_render(rendered, &tabs);
-
-        assert_eq!(with_tabs.line.spans[0].content, "[1 Main]");
-        assert_eq!(with_tabs.line.spans[2].content, "[2 * Builder]");
-        assert_eq!(with_tabs.line.spans[4].content, "[3 x Scout]");
-        assert_eq!(
-            with_tabs.width,
-            "[1 Main]  [2 * Builder]  [3 x Scout]  model".width()
-        );
-        assert!(with_tabs.clickable_ranges.is_empty());
-    }
-
-    #[test]
-    fn top_session_tab_prefix_adds_clickable_tab_ranges() {
-        let rendered = HeaderTemplateRender {
-            line: Line::from(vec![Span::raw("model")]),
-            clickable_ranges: vec![(0..5, ClickableAction::ShowModelSelector)],
-            width: 5,
-        };
-        let first = ThreadId::from_string("00000000-0000-0000-0000-000000000001")
-            .expect("valid first thread id");
-        let second = ThreadId::from_string("00000000-0000-0000-0000-000000000002")
-            .expect("valid second thread id");
-
-        let tabs = vec![
-            TopSessionTab {
-                thread_id: Some(first),
-                ordinal: 1,
-                title: "Main".to_owned(),
-                is_active: true,
-                is_running: false,
-                is_closed: false,
-            },
-            TopSessionTab {
-                thread_id: Some(second),
-                ordinal: 2,
-                title: "Builder".to_owned(),
-                is_active: false,
-                is_running: true,
-                is_closed: false,
-            },
-        ];
-        let with_tabs = ChatWidget::prepend_top_session_tabs_for_render(rendered, &tabs);
-
-        assert_eq!(
-            with_tabs.clickable_ranges,
-            vec![
-                (0.."[1 Main]".width(), ClickableAction::SwitchThread(first)),
-                (
-                    "[1 Main]  ".width().."[1 Main]  [2 * Builder]".width(),
-                    ClickableAction::SwitchThread(second),
-                ),
-                (
-                    "[1 Main]  [2 * Builder]  ".width()
-                        .."[1 Main]  [2 * Builder]  model".width(),
-                    ClickableAction::ShowModelSelector,
-                ),
-            ]
-        );
     }
 }

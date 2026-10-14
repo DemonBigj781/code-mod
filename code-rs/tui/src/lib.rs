@@ -60,6 +60,9 @@ fn exit_with_stderr(args: std::fmt::Arguments<'_>) -> ! {
     std::process::exit(1);
 }
 
+mod session_tabs;
+mod tab_commands;
+mod tab_persistence;
 mod app;
 mod app_event;
 mod app_event_sender;

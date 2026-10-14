@@ -245,7 +245,7 @@ pub(crate) struct LayoutState {
     pub(crate) scrollbar_visible_until: std::cell::Cell<Option<std::time::Instant>>,
     // Last effective bottom pane height used by layout (rows)
     pub(crate) last_bottom_reserved_rows: std::cell::Cell<u16>,
-    pub(crate) last_frame_height: std::cell::Cell<u16>,
+    pub(crate) last_frame_area: std::cell::Cell<Rect>,
     pub(crate) last_frame_width: std::cell::Cell<u16>,
     // Last bottom pane area for mouse hit testing
     pub(crate) last_bottom_pane_area: std::cell::Cell<Rect>,

@@ -68,6 +68,8 @@ pub(crate) enum SlashCommand {
     Browser,
     Chrome,
     New,
+    Tab,
+    Tabs,
     Init,
     Compact,
     Undo,
@@ -141,6 +143,8 @@ impl SlashCommand {
             SlashCommand::Code => "perform a coding task (multiple agents)",
             SlashCommand::Reasoning => "change reasoning effort (minimal/low/medium/high)",
             SlashCommand::Verbosity => "change text verbosity (high/medium/low)",
+            SlashCommand::Tab => "switch or close tabs: /tab next|prev|N|close [N]|new",
+            SlashCommand::Tabs => "list tabs, or /tabs restore to reopen the previous layout",
             SlashCommand::New => "start a new chat during a conversation",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Code",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
@@ -368,6 +372,14 @@ pub(crate) enum ProcessedCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_commands_are_ui_commands_not_model_prompts() {
+        for (input, expected) in [("/tab next", SlashCommand::Tab), ("/tab close 2", SlashCommand::Tab), ("/tabs restore", SlashCommand::Tabs)] {
+            assert!(!expected.is_prompt_expanding());
+            assert!(matches!(process_slash_command_message(input), ProcessedCommand::RegularCommand(command, text) if command == expected && text == input));
+        }
+    }
 
     #[test]
     fn parse_slash_name_parses_name_and_rest() {

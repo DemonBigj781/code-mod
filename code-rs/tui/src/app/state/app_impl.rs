@@ -4,7 +4,7 @@ use super::{App, AppState};
 use super::super::thread_routing::ThreadSessionState;
 use super::super::thread_routing::ThreadTabMetadata;
 use crate::chatwidget::ChatWidget;
-use crate::chatwidget::TopSessionTab;
+use crate::session_tabs::TopSessionTab;
 use code_core::protocol::SessionConfiguredEvent;
 use code_protocol::ThreadId;
 
@@ -49,17 +49,6 @@ impl<'a> App<'a> {
         config.demo_developer_message.clone_from(&self.config.demo_developer_message);
 
         Ok(config)
-    }
-
-    pub(crate) fn sync_active_thread_tabs_to_widget(&mut self) {
-        let tabs = self.top_session_tabs();
-        if tabs.is_empty() {
-            return;
-        }
-
-        if let AppState::Chat { widget } = &mut self.app_state {
-            widget.set_top_session_tabs(tabs);
-        }
     }
 
     pub(crate) fn top_session_tabs(&self) -> Vec<TopSessionTab> {
@@ -158,7 +147,6 @@ impl<'a> App<'a> {
                 is_closed: false,
             },
         );
-        self.sync_active_thread_tabs_to_widget();
         if let Some(bridge) = &self._app_server_bridge {
             bridge.refresh_loaded_threads();
         }

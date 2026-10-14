@@ -316,8 +316,8 @@ pub(crate) enum AppEvent {
 
     MouseEvent(MouseEvent),
 
-    /// Switch the visible top-row conversation tab to the requested thread.
-    SwitchActiveThread { thread_id: code_protocol::ThreadId },
+    TabRestoreResolved { sessions: Vec<(uuid::Uuid, std::path::PathBuf, std::path::PathBuf)>, errors: Vec<String> },
+    TabResumeFailed { path: std::path::PathBuf },
 
     /// Text pasted from the terminal clipboard.
     Paste(String),

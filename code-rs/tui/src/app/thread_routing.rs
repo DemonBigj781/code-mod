@@ -144,7 +144,6 @@ impl ActiveThreadRouter {
         entry.is_running = metadata.is_running && !entry.is_closed;
     }
 
-    #[cfg(test)]
     pub(crate) fn set_thread_visible(&mut self, thread_id: ThreadId, is_visible: bool) {
         self.ensure_ordered(thread_id);
         if is_visible {
@@ -152,6 +151,16 @@ impl ActiveThreadRouter {
         } else {
             self.hidden_threads.insert(thread_id);
         }
+    }
+
+    pub(crate) fn restore_order(&mut self, order: &[ThreadId]) {
+        let mut seen = HashSet::new();
+        self.order = order.iter().chain(self.order.iter()).copied()
+            .filter(|id| self.order.contains(id) && seen.insert(*id)).collect();
+    }
+
+    pub(crate) fn is_visible(&self, id: ThreadId) -> bool {
+        self.order.contains(&id) && !self.hidden_threads.contains(&id)
     }
 
     pub(crate) fn set_active_thread(&mut self, thread_id: ThreadId) -> bool {
@@ -323,6 +332,23 @@ mod tests {
             history_entry_count: 0,
             rollout_path: None,
         }
+    }
+
+    #[test]
+    fn closed_tabs_stay_hidden_after_discovery_and_restore_in_saved_order() {
+        let mut router = ActiveThreadRouter::default();
+        let first = thread_id(1); let second = thread_id(2); let third = thread_id(3);
+        for id in [first, second, third] { router.upsert_session(session(id, None)); }
+        router.set_active_thread(second);
+        router.set_thread_visible(first, false);
+        router.upsert_thread_metadata(first, ThreadTabMetadata::default());
+        assert!(!router.is_visible(first));
+        assert!(!router.set_active_thread(first));
+        assert_eq!(router.adjacent_thread_id(ThreadNavigationDirection::Previous), Some(third));
+        router.set_thread_visible(first, true);
+        router.restore_order(&[third, first, third, thread_id(99)]);
+        assert_eq!(router.ordered_tabs().iter().map(|tab| tab.thread_id).collect::<Vec<_>>(), vec![third, first, second]);
+        assert_eq!(router.active_thread_id(), Some(second));
     }
 
     #[test]

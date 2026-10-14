@@ -217,6 +217,22 @@ fn is_reserved_subagent_name(name: &str) -> bool {
 }
 
 impl ChatComposer {
+    pub(crate) fn draft(&self) -> crate::tab_persistence::ComposerDraft {
+        crate::tab_persistence::ComposerDraft {
+            text: self.textarea.text().to_owned(),
+            cursor: self.textarea.cursor(),
+            pastes: self.pending_pastes.clone(),
+            images: Default::default(),
+        }
+    }
+
+    pub(crate) fn restore_draft(&mut self, draft: &crate::tab_persistence::ComposerDraft) {
+        self.set_text_content(&draft.text);
+        self.textarea.set_cursor(draft.cursor);
+        self.pending_pastes = draft.pastes.clone();
+        self.history.reset_navigation();
+    }
+
     pub(crate) const DEFAULT_FOOTER_NOTICE_DURATION: std::time::Duration =
         std::time::Duration::from_secs(2);
 

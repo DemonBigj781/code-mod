@@ -323,6 +323,9 @@
                                 widget.handle_push_command();
                             }
                         }
+                        SlashCommand::Tab | SlashCommand::Tabs => {
+                            self.handle_tab_command(command_args.trim());
+                        }
                         SlashCommand::Resume => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.show_resume_picker();
@@ -387,27 +390,7 @@
                                 }
                             }
                         }
-                        SlashCommand::New => {
-                            if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.abort_active_turn_for_new_chat();
-                            }
-                            // Start a brand new conversation (core session) with no carried history.
-                            // Replace the chat widget entirely, mirroring SwitchCwd flow but without import.
-                            let mut new_widget = ChatWidget::new(crate::chatwidget::ChatWidgetInit {
-                                config: self.config.clone(),
-                                conversation_manager: self._server.clone(),
-                                app_event_tx: self.app_event_tx.clone(),
-                                initial_prompt: None,
-                                initial_images: Vec::new(),
-                                terminal_info: self.terminal_info.clone(),
-                                show_order_overlay: self.show_order_overlay,
-                                latest_upgrade_version: self.latest_upgrade_version.clone(),
-                            });
-                            new_widget.enable_perf(self.timing_enabled);
-                            self.replace_active_chat_widget(new_widget);
-                            self.terminal_runs.clear();
-                            self.app_event_tx.send(AppEvent::RequestRedraw);
-                        }
+                        SlashCommand::New => { self.new_session_tab(); }
                         SlashCommand::Init => {
                             // Guard: do not run if a task is active.
                             if let AppState::Chat { widget } = &mut self.app_state {

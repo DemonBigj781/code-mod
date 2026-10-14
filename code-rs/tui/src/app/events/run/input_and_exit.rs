@@ -216,9 +216,10 @@
                 AppEvent::MouseEvent(mouse_event) => {
                     self.dispatch_mouse_event(mouse_event);
                 }
-                AppEvent::SwitchActiveThread { thread_id } => {
-                    self.switch_active_thread_backing(thread_id);
+                AppEvent::TabRestoreResolved { sessions, errors } => {
+                    self.resolve_tab_restore(sessions, errors);
                 }
+                AppEvent::TabResumeFailed { path } => { self.fail_tab_restore(&path); }
                 AppEvent::Paste(text) => {
                     self.dispatch_paste_event(text);
                 }
@@ -289,6 +290,12 @@
                     ) {
                         self.app_server_thread_replays.remove(&thread_id);
                     }
+                    if self.pending_tab_activation == Some(thread_id) {
+                        self.pending_tab_activation = None;
+                        if self.app_server_thread_replays.contains_key(&thread_id) {
+                            self.switch_active_thread_backing(thread_id);
+                        }
+                    }
                     if let AppState::Chat { widget } = &mut self.app_state {
                         match status {
                             code_app_server_protocol::ThreadSubscribeStatus::Subscribed => {
@@ -308,6 +315,7 @@
                     self.app_server_turns_pending.remove(&thread_id);
                     match result {
                         Ok(turn) => {
+                            self.app_server_replay_composers.remove(&thread_id);
                             let _ = crate::app::app_server_replay_view::upsert_replay_turn(
                                 &mut self.app_server_thread_replays,
                                 &thread_id.to_string(),
@@ -316,9 +324,7 @@
                             self.schedule_redraw();
                         }
                         Err(err) => {
-                            self.app_server_replay_composers
-                                .insert(thread_id, format!("[send failed: {err}] "));
-                            self.schedule_redraw();
+                            self.tab_notice(format!("Send failed; draft kept: {err}"));
                         }
                     }
                 }

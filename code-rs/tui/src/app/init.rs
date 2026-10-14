@@ -374,6 +374,19 @@ impl App<'_> {
             event_deduper: super::event_deduper::EventDeduper::new(),
             app_state,
             active_thread_router: super::thread_routing::ActiveThreadRouter::default(),
+            tab_hits: Vec::new(),
+            pending_tab_activation: None,
+            tab_persistence: {
+                let mut store = crate::tab_persistence::TabPersistence::new(&config.code_home, &config.cwd);
+                if let Err(error) = store.load_previous() {
+                    tracing::warn!(%error, "could not load previous tab layout");
+                }
+                store
+            },
+            tab_restore: None,
+            tab_layout_touched: false,
+            tab_save_error: None,
+            tab_notice_message: None,
             inactive_chat_widgets: HashMap::new(),
             app_server_thread_replays: HashMap::new(),
             app_server_thread_subscriptions_pending: HashSet::new(),

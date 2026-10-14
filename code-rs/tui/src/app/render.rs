@@ -131,26 +131,33 @@ impl App<'_> {
             .filter(|split| split.current != split.preview);
         let theme_before_split = split_preview.map(|_| crate::theme::current_theme_name());
 
-        self.sync_active_thread_tabs_to_widget();
         let replay_thread = self.active_app_server_replay_thread().cloned();
-        let replay_tabs = self.top_session_tabs();
+        let mut tabs = self.top_session_tabs();
+        if tabs.is_empty() { tabs.push(crate::session_tabs::TopSessionTab::main()); }
+        let mut tab_hits = Vec::new();
+        let show_tabs = self.alt_screen_active;
         let replay_thread_id = self.active_thread_router.active_thread_id();
         let replay_composer = replay_thread_id
             .and_then(|thread_id| self.app_server_replay_composers.get(&thread_id))
             .cloned()
             .unwrap_or_default();
+        let replay_notice = self.tab_notice_message.as_ref()
+            .filter(|(_, at)| at.elapsed() < Duration::from_secs(10))
+            .map(|(text, _)| text.clone());
         let replay_turn_pending = replay_thread_id
             .is_some_and(|thread_id| self.app_server_turns_pending.contains(&thread_id));
         let completed_frame = terminal.draw(|frame| {
             match &mut self.app_state {
                 AppState::Chat { widget } => {
-                    let area = frame.area();
+                    let full_area = frame.area();
+                    let (tab_area, area) = crate::session_tabs::split_tab_area(full_area, show_tabs);
+                    tab_hits = crate::session_tabs::render_tabs(&tabs, tab_area, frame.buffer_mut());
                     if let Some(thread) = replay_thread.as_ref() {
                         render_replay_view(
                             thread,
-                            &replay_tabs,
                             &replay_composer,
                             replay_turn_pending,
+                            replay_notice.as_deref(),
                             area,
                             frame.buffer_mut(),
                         );
@@ -189,6 +196,7 @@ impl App<'_> {
         }
 
         let completed_frame = completed_frame?;
+        self.tab_hits = tab_hits;
         if let AppState::Chat { widget } = &self.app_state {
             let area = completed_frame.buffer.area;
             let _ = code_core::markdown_logs::append(

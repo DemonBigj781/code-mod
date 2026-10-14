@@ -1,6 +1,24 @@
 use super::*;
 
 impl ChatWidget<'_> {
+    pub(crate) fn composer_draft_initialized(&self) -> bool { self.composer_draft_initialized }
+    pub(crate) fn mark_composer_draft_initialized(&mut self) { self.composer_draft_initialized = true; }
+
+    pub(crate) fn composer_draft(&self) -> crate::tab_persistence::ComposerDraft {
+        let mut draft = self.bottom_pane.composer_draft();
+        draft.images = self.pending_images.iter()
+            .filter(|(placeholder, _)| draft.text.contains(placeholder.as_str()))
+            .map(|(key, path)| (key.clone(), path.clone())).collect();
+        draft
+    }
+
+    pub(crate) fn restore_composer_draft(&mut self, draft: &crate::tab_persistence::ComposerDraft) {
+        self.composer_draft_initialized = true;
+        self.pending_images = draft.images.iter().map(|(key, path)| (key.clone(), path.clone())).collect();
+        self.bottom_pane.restore_composer_draft(draft);
+        self.request_redraw();
+    }
+
     // If a completed exec cell sits at `idx`, attempt to merge it into the
     // previous cell when they represent the same action header (e.g., Search, Read).
 
@@ -64,5 +82,30 @@ impl ChatWidget<'_> {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod draft_tests {
+    use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
+    use crate::tab_persistence::ComposerDraft;
+
+    #[test]
+    fn composer_round_trips_cursor_pastes_and_images_without_sharing_drafts() {
+        let mut first = ChatWidgetHarness::new();
+        let mut second = ChatWidgetHarness::new();
+        let draft = ComposerDraft {
+            text: "hello 界\n[paste] [image]".into(),
+            cursor: 6,
+            pastes: vec![("[paste]".into(), "large pasted input".repeat(500))],
+            images: std::collections::BTreeMap::from([("[image]".into(), "/tmp/saved-image.png".into())]),
+        };
+        first.chat().restore_composer_draft(&draft);
+        assert_eq!(first.chat().composer_draft(), draft);
+        second.chat().set_composer_text("other session");
+        assert_eq!(first.chat().composer_draft(), draft);
+        assert_eq!(second.chat().composer_draft().text, "other session");
+        first.chat().restore_composer_draft(&ComposerDraft::default());
+        assert_eq!(first.chat().composer_draft(), ComposerDraft::default());
     }
 }

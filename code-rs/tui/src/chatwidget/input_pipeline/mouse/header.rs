@@ -101,10 +101,6 @@ impl ChatWidget<'_> {
             ClickableAction::ShowMcpSettings => {
                 self.show_settings_overlay(Some(crate::bottom_pane::SettingsSection::Mcp));
             }
-            ClickableAction::SwitchThread(thread_id) => {
-                self.app_event_tx
-                    .send(AppEvent::SwitchActiveThread { thread_id });
-            }
             ClickableAction::JumpToCallId(call_id) => {
                 self.jump_to_call_id(&call_id);
             }

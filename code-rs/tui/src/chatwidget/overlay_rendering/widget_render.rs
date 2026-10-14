@@ -18,7 +18,7 @@ impl ChatWidget<'_> {
         }
 
         // Remember full frame size for layout and hit testing.
-        self.layout.last_frame_height.set(area.height);
+        self.layout.last_frame_area.set(area);
         self.layout.last_frame_width.set(area.width);
 
         let layout_areas = self.layout_areas(area);

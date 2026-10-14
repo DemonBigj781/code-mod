@@ -132,6 +132,13 @@ pub(crate) struct App<'a> {
     pub(super) event_deduper: super::event_deduper::EventDeduper,
     pub(super) app_state: AppState<'a>,
     pub(super) active_thread_router: ActiveThreadRouter,
+    pub(super) tab_hits: Vec<crate::session_tabs::TabHit>,
+    pub(super) pending_tab_activation: Option<code_protocol::ThreadId>,
+    pub(super) tab_persistence: crate::tab_persistence::TabPersistence,
+    pub(super) tab_restore: Option<super::tabs::TabRestore>,
+    pub(super) tab_layout_touched: bool,
+    pub(super) tab_save_error: Option<String>,
+    pub(super) tab_notice_message: Option<(String, Instant)>,
     pub(super) inactive_chat_widgets: HashMap<code_protocol::ThreadId, Box<ChatWidget<'a>>>,
     pub(super) app_server_thread_replays:
         HashMap<code_protocol::ThreadId, code_app_server_protocol::Thread>,

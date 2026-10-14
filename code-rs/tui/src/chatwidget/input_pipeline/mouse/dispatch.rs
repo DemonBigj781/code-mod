@@ -61,12 +61,7 @@ impl ChatWidget<'_> {
         // by the overlay layer and must not leak to global history/pane scrolling.
         if let Some(overlay) = self.settings.overlay.as_mut() {
             // Settings overlay covers the full screen - compute terminal area from layout
-            let terminal_area = Rect {
-                x: 0,
-                y: 0,
-                width: self.layout.last_frame_width.get(),
-                height: self.layout.last_frame_height.get(),
-            };
+            let terminal_area = self.layout.last_frame_area.get();
             let changed = overlay.handle_mouse_event(mouse_event, terminal_area);
             if overlay.close_requested.get() {
                 self.close_settings_overlay();

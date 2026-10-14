@@ -9,98 +9,45 @@ use code_app_server_protocol::UserInput;
 use code_protocol::ThreadId;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
 use ratatui::text::Line;
-use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
-use unicode_width::UnicodeWidthStr;
 
-use crate::chatwidget::TopSessionTab;
 
 pub(super) fn render_replay_view(
     thread: &Thread,
-    tabs: &[TopSessionTab],
     composer_text: &str,
     turn_pending: bool,
+    notice: Option<&str>,
     area: Rect,
     buf: &mut Buffer,
 ) {
-    let mut lines = Vec::new();
-    lines.push(render_top_tabs_line(tabs));
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![Span::styled(
-        "App-server session replay",
-        crate::colors::style_text().add_modifier(Modifier::BOLD),
-    )]));
-    lines.push(Line::from(Span::styled(
-        "This thread is owned by the app server. Type below and press Enter to start a turn in this session.",
-        crate::colors::style_text_dim(),
-    )));
-    lines.push(Line::from(""));
+    if area.is_empty() { return; }
+    let header_height = area.height.saturating_sub(1).min(3);
+    let header_area = Rect::new(area.x, area.y, area.width, header_height);
+    let status = format!("{} · {}", thread.name.as_deref().unwrap_or("App-server session"), thread.cwd.display());
+    Paragraph::new(status)
+        .block(Block::bordered().title("Session").border_style(crate::colors::style_border()))
+        .style(crate::colors::style_text()).render(header_area, buf);
 
-    lines.extend(
-        replay_text_lines(thread)
-            .into_iter()
-            .map(|line| Line::from(Span::styled(line, crate::colors::style_text()))),
-    );
-
-    lines.push(Line::from(""));
-    let composer_label = if turn_pending { "app-server> [sending] " } else { "app-server> " };
-    lines.push(Line::from(vec![
-        Span::styled(composer_label, crate::colors::style_text_dim()),
-        Span::styled(composer_text.to_owned(), crate::colors::style_text()),
-    ]));
-
-    Paragraph::new(lines)
-        .block(Block::default().style(crate::colors::style_text()))
-        .wrap(Wrap { trim: false })
-        .render(area, buf);
-}
-
-pub(super) fn top_tab_thread_at_x(tabs: &[TopSessionTab], x: u16) -> Option<ThreadId> {
-    let mut column = 0usize;
-    let x = usize::from(x);
-    for tab in effective_tabs(tabs) {
-        let text = tab_text(tab);
-        let width = text.width();
-        if x >= column && x < column.saturating_add(width) {
-            return tab.thread_id;
-        }
-        column = column.saturating_add(width).saturating_add(2);
-    }
-    None
-}
-
-fn render_top_tabs_line(tabs: &[TopSessionTab]) -> Line<'static> {
-    let mut spans = Vec::new();
-    for tab in effective_tabs(tabs) {
-        let style = if tab.is_active {
-            crate::colors::style_text()
-                .bg(crate::colors::selection())
-                .add_modifier(Modifier::BOLD)
-        } else {
-            crate::colors::style_text_dim()
-        };
-        spans.push(Span::styled(tab_text(tab), style));
-        spans.push(Span::styled("  ", crate::colors::style_text_dim()));
-    }
-    Line::from(spans)
-}
-
-fn effective_tabs(tabs: &[TopSessionTab]) -> Vec<&TopSessionTab> {
-    tabs.iter().collect()
-}
-
-fn tab_text(tab: &TopSessionTab) -> String {
-    if tab.is_running {
-        format!("[{} * {}]", tab.ordinal, tab.title)
-    } else if tab.is_closed {
-        format!("[{} x {}]", tab.ordinal, tab.title)
-    } else {
-        format!("[{} {}]", tab.ordinal, tab.title)
+    let notice_height = u16::from(notice.is_some() && area.height > header_height + 1);
+    let label = if turn_pending { "app-server> [sending] " } else { "app-server> " };
+    let composer = Paragraph::new(format!("{label}{composer_text}"))
+        .style(crate::colors::style_text()).wrap(Wrap { trim: false });
+    let composer_height = (composer.line_count(area.width) as u16).max(1).min(6)
+        .min(area.height.saturating_sub(header_height + notice_height));
+    let composer_area = Rect::new(area.x, area.bottom() - composer_height - notice_height, area.width, composer_height);
+    composer.render(composer_area, buf);
+    let history_area = Rect::new(area.x, header_area.bottom(), area.width, composer_area.y.saturating_sub(header_area.bottom()));
+    let history = Paragraph::new(replay_text_lines(thread).into_iter().map(Line::from).collect::<Vec<_>>())
+        .style(crate::colors::style_text()).wrap(Wrap { trim: false });
+    let scroll = history.line_count(history_area.width).saturating_sub(usize::from(history_area.height)).min(usize::from(u16::MAX)) as u16;
+    history.scroll((scroll, 0)).render(history_area, buf);
+    if let Some(notice) = notice.filter(|_| notice_height > 0) {
+        Paragraph::new(notice).style(crate::colors::style_text_dim())
+            .render(Rect::new(area.x, area.bottom() - 1, area.width, 1), buf);
     }
 }
 
@@ -643,42 +590,23 @@ mod tests {
     }
 
     #[test]
+    fn replay_keeps_status_composer_and_command_notice_visible() {
+        let area = Rect::new(0, 1, 80, 10);
+        let mut buf = Buffer::empty(area);
+        render_replay_view(&replay_thread(), "draft", false, Some("Tabs restored"), area, &mut buf);
+        let rows: Vec<String> = (area.y..area.bottom()).map(|y| (0..area.width).map(|x| buf[(x, y)].symbol()).collect()).collect();
+        assert!(rows[0].contains("Session"));
+        assert!(rows[8].contains("app-server> draft"));
+        assert!(rows[9].contains("Tabs restored"));
+    }
+
+    #[test]
     fn replay_text_lines_include_title_and_messages() {
         let lines = replay_text_lines(&replay_thread()).join("\n");
 
         assert!(lines.contains("Thread: Replay Demo"));
         assert!(lines.contains("user: What changed?"));
         assert!(lines.contains("agent: Tabs can now replay cached app-server threads."));
-    }
-
-    #[test]
-    fn top_tab_hit_test_matches_rendered_tab_widths() {
-        let first =
-            ThreadId::from_string("00000000-0000-0000-0000-000000000001").expect("valid thread id");
-        let second =
-            ThreadId::from_string("00000000-0000-0000-0000-000000000002").expect("valid thread id");
-        let tabs = vec![
-            TopSessionTab {
-                thread_id: Some(first),
-                ordinal: 1,
-                title: "Main".to_owned(),
-                is_active: false,
-                is_running: false,
-                is_closed: false,
-            },
-            TopSessionTab {
-                thread_id: Some(second),
-                ordinal: 2,
-                title: "Replay".to_owned(),
-                is_active: true,
-                is_running: true,
-                is_closed: false,
-            },
-        ];
-
-        assert_eq!(top_tab_thread_at_x(&tabs, 0), Some(first));
-        assert_eq!(top_tab_thread_at_x(&tabs, 8), None);
-        assert_eq!(top_tab_thread_at_x(&tabs, 10), Some(second));
     }
 
     #[test]

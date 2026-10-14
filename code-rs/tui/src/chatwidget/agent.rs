@@ -44,7 +44,7 @@ pub(crate) fn spawn_new_conversation_runtime(
         let mut code_op_rx = code_op_rx;
         let auth_manager = conversation_manager.auth_manager();
         let resume_path = config.experimental_resume.clone();
-        let new_conversation = match resume_path {
+        let new_conversation = match resume_path.clone() {
             Some(path) => conversation_manager
                 .resume_conversation_from_rollout(config.clone(), path, auth_manager.clone())
                 .await,
@@ -55,6 +55,9 @@ pub(crate) fn spawn_new_conversation_runtime(
             Ok(conv) => conv,
             Err(e) => {
                 tracing::error!("failed to initialize conversation: {e}");
+                if let Some(path) = resume_path {
+                    app_event_tx_clone.send(AppEvent::TabResumeFailed { path });
+                }
                 app_event_tx_clone.send_background_event_with_ticket(
                     &ticket,
                     format!(

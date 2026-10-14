@@ -13,9 +13,34 @@ Notes
 
 ## Navigation & Session
 
+In the full-screen TUI, the browser-style tab strip sits above the top status
+bar. Click a title to select it, its right-hand `×` to close it, or `+` to open
+a new session. `Alt+Left` / `Alt+Right` switch tabs even with unsent input
+(unless a modal is open). On narrow terminals, arrow buttons navigate tabs and
+the selected tab remains visible.
+
+Each session keeps its own draft across tab switches and TUI close/reopen.
+Resume that session with `/resume`, or use `/tabs restore` to recover the whole
+layout and its drafts. Drafts include multiline text, the cursor, large-paste
+payloads, and image references. Submitted or cleared text is not restored.
+Drafts and per-folder layouts are saved locally under `CODE_HOME/tui-tabs/`
+using atomic writes and private file permissions on Unix. They are plaintext,
+not encrypted; image references require the referenced image files to remain
+available. A save/load failure is shown in the TUI.
+
 - `/browser`: open internal browser.
 - `/chrome`: connect to your Chrome browser.
-- `/new`: start a new chat during a conversation.
+- `/new` or `/tab new`: open a new session tab without cancelling work in other tabs.
+- `/tab next` / `/tab prev`: switch to the next / previous visible tab.
+- `/tab <N>`: switch to the numbered tab (numbers start at 1).
+- `/tab close [N]`: close the current tab, or the numbered tab. This hides the
+  tab without deleting the session or its draft, and does not cancel running work.
+  Closing the last tab opens a new session.
+- `/tabs`: list open tabs and their numbers.
+- `/tabs restore`: load the tab layout saved by the previous TUI instance for
+  this working folder, reopen its sessions in order, and select its active tab.
+  Existing tabs are kept after the restored tabs. Sessions that cannot be found
+  or loaded are reported rather than silently replaced with new conversations.
 - `/resume`: resume a past session for this folder.
 - `/rename <name>`: rename the current session (shown in the resume list).
 - `/quit`: exit Code.

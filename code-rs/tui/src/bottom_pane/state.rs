@@ -193,6 +193,15 @@ impl<'a> BottomPane<'a> {
         self.composer.is_empty()
     }
 
+    pub(crate) fn composer_draft(&self) -> crate::tab_persistence::ComposerDraft {
+        self.composer.draft()
+    }
+
+    pub(crate) fn restore_composer_draft(&mut self, draft: &crate::tab_persistence::ComposerDraft) {
+        self.composer.restore_draft(draft);
+        self.request_redraw();
+    }
+
     pub(crate) fn composer_text(&self) -> String {
         self.composer.text().to_owned()
     }
