@@ -216,6 +216,9 @@
                 AppEvent::MouseEvent(mouse_event) => {
                     self.dispatch_mouse_event(mouse_event);
                 }
+                AppEvent::SwitchActiveThread { thread_id } => {
+                    self.switch_active_thread_backing(thread_id);
+                }
                 AppEvent::Paste(text) => {
                     self.dispatch_paste_event(text);
                 }
@@ -257,6 +260,67 @@
                 }
                 AppEvent::CodexEvent(event) => {
                     self.dispatch_code_event(*event);
+                }
+                AppEvent::ThreadCodexEvent { thread_id, event } => {
+                    self.dispatch_thread_code_event(thread_id, *event);
+                }
+                AppEvent::AppServerNotification(notification) => {
+                    self.dispatch_app_server_notification(*notification);
+                }
+                AppEvent::AppServerLoadedThreads(thread_ids) => {
+                    self.register_app_server_loaded_threads_with_router(thread_ids);
+                }
+                AppEvent::AppServerLoadedThreadDetails(threads) => {
+                    self.register_app_server_loaded_thread_details_with_router(threads);
+                }
+                AppEvent::AppServerThreadSubscribeFinished {
+                    thread_id,
+                    status,
+                    replayable_turns,
+                    replayable_items,
+                    replay_thread,
+                } => {
+                    self.app_server_thread_subscriptions_pending.remove(&thread_id);
+                    if let Some(thread) = replay_thread {
+                        self.register_app_server_thread_replay(thread);
+                    } else if matches!(
+                        status,
+                        code_app_server_protocol::ThreadSubscribeStatus::NotLoaded
+                    ) {
+                        self.app_server_thread_replays.remove(&thread_id);
+                    }
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        match status {
+                            code_app_server_protocol::ThreadSubscribeStatus::Subscribed => {
+                                widget.flash_footer_notice(format!(
+                                    "Subscribed to loaded app-server thread {thread_id}; {replayable_turns} turns / {replayable_items} items available for replay"
+                                ));
+                            }
+                            code_app_server_protocol::ThreadSubscribeStatus::NotLoaded => {
+                                widget.flash_footer_notice(format!(
+                                    "Thread {thread_id} is no longer loaded in the app server"
+                                ));
+                            }
+                        }
+                    }
+                }
+                AppEvent::AppServerTurnStartFinished { thread_id, result } => {
+                    self.app_server_turns_pending.remove(&thread_id);
+                    match result {
+                        Ok(turn) => {
+                            let _ = crate::app::app_server_replay_view::upsert_replay_turn(
+                                &mut self.app_server_thread_replays,
+                                &thread_id.to_string(),
+                                turn,
+                            );
+                            self.schedule_redraw();
+                        }
+                        Err(err) => {
+                            self.app_server_replay_composers
+                                .insert(thread_id, format!("[send failed: {err}] "));
+                            self.schedule_redraw();
+                        }
+                    }
                 }
                 AppEvent::ExitRequest => {
                     // Stop background threads and break the UI loop.

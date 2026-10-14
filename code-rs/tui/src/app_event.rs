@@ -212,6 +212,38 @@ pub(crate) enum AgentUpdateIntent {
 pub(crate) enum AppEvent {
     CodexEvent(Box<Event>),
 
+    /// A core event emitted by a specific live conversation. Unlike synthetic
+    /// `CodexEvent`s, these events must continue updating the owning widget even
+    /// while another thread is displayed.
+    ThreadCodexEvent {
+        thread_id: Uuid,
+        event: Box<Event>,
+    },
+
+    /// App-server protocol notification delivered by the in-process/remote
+    /// app-server session bridge. This is separate from `CodexEvent` while the
+    /// TUI is being ported from direct core events to app-server protocol events.
+    AppServerNotification(Box<code_app_server_protocol::ServerNotification>),
+
+    /// Loaded app-server thread ids discovered through `thread/loaded/list`.
+    AppServerLoadedThreads(Vec<code_protocol::ThreadId>),
+
+    /// Thread metadata for loaded app-server threads fetched with `thread/read`.
+    AppServerLoadedThreadDetails(Vec<code_app_server_protocol::Thread>),
+
+    /// Result of subscribing the TUI bridge to an existing loaded app-server thread.
+    AppServerThreadSubscribeFinished {
+        thread_id: code_protocol::ThreadId,
+        status: code_app_server_protocol::ThreadSubscribeStatus,
+        replayable_turns: usize,
+        replayable_items: usize,
+        replay_thread: Option<code_app_server_protocol::Thread>,
+    },
+    AppServerTurnStartFinished {
+        thread_id: code_protocol::ThreadId,
+        result: Result<code_app_server_protocol::Turn, String>,
+    },
+
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
 
@@ -283,6 +315,9 @@ pub(crate) enum AppEvent {
     KeyEvent(KeyEvent),
 
     MouseEvent(MouseEvent),
+
+    /// Switch the visible top-row conversation tab to the requested thread.
+    SwitchActiveThread { thread_id: code_protocol::ThreadId },
 
     /// Text pasted from the terminal clipboard.
     Paste(String),
@@ -1090,9 +1125,22 @@ pub(crate) enum AppEvent {
     },
 }
 
+impl From<code_app_server_protocol::ServerNotification> for AppEvent {
+    fn from(notification: code_app_server_protocol::ServerNotification) -> Self {
+        Self::AppServerNotification(Box::new(notification))
+    }
+}
+
 impl AppEvent {
     pub(crate) fn codex_event(event: Event) -> Self {
         Self::CodexEvent(Box::new(event))
+    }
+
+    pub(crate) fn thread_codex_event(thread_id: Uuid, event: Event) -> Self {
+        Self::ThreadCodexEvent {
+            thread_id,
+            event: Box::new(event),
+        }
     }
 
     pub(crate) fn codex_op(op: code_core::protocol::Op) -> Self {

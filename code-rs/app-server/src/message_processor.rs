@@ -119,9 +119,6 @@ impl MessageProcessor {
         remote_control_handle: Option<RemoteControlHandle>,
         shared_auth_manager: Option<Arc<AuthManager>>,
     ) -> Self {
-        let sandbox_exe = code_linux_sandbox_exe
-            .clone()
-            .or_else(|| config.code_linux_sandbox_exe.clone());
         let auth_manager = shared_auth_manager.unwrap_or_else(|| {
             AuthManager::shared_with_mode_and_originator(
                 config.code_home.clone(),
@@ -133,6 +130,31 @@ impl MessageProcessor {
             auth_manager.clone(),
             SessionSource::Mcp,
         ));
+        Self::new_with_conversation_manager(
+            outgoing,
+            code_linux_sandbox_exe,
+            config,
+            config_warnings,
+            cli_overrides,
+            remote_control_handle,
+            auth_manager,
+            conversation_manager,
+        )
+    }
+
+    pub(crate) fn new_with_conversation_manager(
+        outgoing: Arc<OutgoingMessageSender>,
+        code_linux_sandbox_exe: Option<PathBuf>,
+        config: Arc<Config>,
+        config_warnings: Vec<serde_json::Value>,
+        cli_overrides: Vec<(String, TomlValue)>,
+        remote_control_handle: Option<RemoteControlHandle>,
+        auth_manager: Arc<AuthManager>,
+        conversation_manager: Arc<ConversationManager>,
+    ) -> Self {
+        let sandbox_exe = code_linux_sandbox_exe
+            .clone()
+            .or_else(|| config.code_linux_sandbox_exe.clone());
         let config_for_processor = config.clone();
         let code_message_processor = CodexMessageProcessor::new(
             auth_manager.clone(),
@@ -807,6 +829,10 @@ impl MessageProcessor {
                 self.thread_archive_v2(connection_id, request_id, params)
                     .await;
             }
+            AppServerClientRequest::ThreadSubscribe { params, .. } => {
+                self.thread_subscribe_v2(connection_id, request_id, params)
+                    .await;
+            }
             AppServerClientRequest::ThreadUnsubscribe { params, .. } => {
                 self.thread_unsubscribe_v2(connection_id, request_id, params)
                     .await;
@@ -1334,12 +1360,47 @@ mod tests {
         .expect("MCP snapshot should arrive");
     }
 
+    #[test]
+    fn shared_conversation_manager_is_retained_by_message_processor() {
+        let (outgoing_tx, _outgoing_rx) = mpsc::unbounded_channel();
+        let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+        let config = Arc::new(
+            Config::load_with_cli_overrides(
+                Vec::new(),
+                code_core::config::ConfigOverrides::default(),
+            )
+            .expect("load default config"),
+        );
+        let conversation_manager = Arc::new(ConversationManager::with_auth(
+            CodexAuth::from_api_key("test"),
+        ));
+
+        let processor = MessageProcessor::new_with_conversation_manager(
+            outgoing,
+            None,
+            config,
+            Vec::new(),
+            Vec::new(),
+            None,
+            conversation_manager.auth_manager(),
+            conversation_manager.clone(),
+        );
+
+        assert!(Arc::ptr_eq(
+            &processor.conversation_manager,
+            &conversation_manager,
+        ));
+    }
+
     #[tokio::test]
     async fn initialize_applies_opt_out_notification_methods_per_connection() {
         let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(8);
         let outgoing = Arc::new(OutgoingMessageSender::new_with_routed_sender(outgoing_tx));
         let config = Arc::new(
-            Config::load_with_cli_overrides(Vec::new(), code_core::config::ConfigOverrides::default())
+            Config::load_with_cli_overrides(
+                Vec::new(),
+                code_core::config::ConfigOverrides::default(),
+            )
                 .expect("load default config"),
         );
         let mut processor = MessageProcessor::new(outgoing, None, config, Vec::new(), Vec::new());
@@ -1776,5 +1837,117 @@ model = "gpt-5.4"
 
         wait_for_mcp_snapshot(&first).await;
         wait_for_mcp_snapshot(&second).await;
+    }
+
+    #[tokio::test]
+    async fn thread_subscribe_v2_subscribes_connection_to_loaded_thread() {
+        let code_home = tempfile::tempdir().expect("create temp code home");
+        std::fs::write(code_home.path().join("config.toml"), "").expect("write empty config");
+        let config = ConfigBuilder::new()
+            .with_code_home(code_home.path().to_path_buf())
+            .with_overrides(code_core::config::ConfigOverrides {
+                cwd: Some(code_home.path().to_path_buf()),
+                ..Default::default()
+            })
+            .load()
+            .expect("load isolated config");
+
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(8);
+        let outgoing = Arc::new(OutgoingMessageSender::new_with_routed_sender(outgoing_tx));
+        let conversation_manager = Arc::new(ConversationManager::with_auth(
+            CodexAuth::from_api_key("Test API Key"),
+        ));
+        let mut processor = MessageProcessor::new_with_conversation_manager(
+            outgoing,
+            None,
+            Arc::new(config.clone()),
+            Vec::new(),
+            Vec::new(),
+            None,
+            conversation_manager.auth_manager(),
+            conversation_manager.clone(),
+        );
+
+        let thread_id = conversation_manager
+            .new_conversation(config)
+            .await
+            .expect("create conversation")
+            .conversation_id;
+
+        processor
+            .thread_subscribe_v2(
+                ConnectionId(7),
+                RequestId::Integer(11),
+                code_app_server_protocol::ThreadSubscribeParams {
+                    thread_id: thread_id.to_string(),
+                },
+            )
+            .await;
+
+        let envelope = outgoing_rx.recv().await.expect("subscribe response envelope");
+        match envelope {
+            OutgoingEnvelope::ToConnection {
+                connection_id: ConnectionId(7),
+                message: OutgoingMessage::Response(response),
+            } => {
+                assert_eq!(response.id, RequestId::Integer(11));
+                let response: code_app_server_protocol::ThreadSubscribeResponse =
+                    serde_json::from_value(response.result).expect("decode subscribe response");
+                assert_eq!(
+                    response.status,
+                    code_app_server_protocol::ThreadSubscribeStatus::Subscribed
+                );
+            }
+            _ => panic!("expected thread/subscribe response"),
+        }
+
+        let thread_state = processor.thread_state_manager.thread_state(thread_id);
+        assert!(
+            thread_state
+                .lock()
+                .await
+                .subscribed_connection_ids()
+                .contains(&ConnectionId(7)),
+            "connection should be subscribed to the existing loaded thread"
+        );
+    }
+
+    #[tokio::test]
+    async fn thread_subscribe_v2_reports_not_loaded_for_unknown_thread() {
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(8);
+        let outgoing = Arc::new(OutgoingMessageSender::new_with_routed_sender(outgoing_tx));
+        let config = Arc::new(
+            Config::load_with_cli_overrides(Vec::new(), code_core::config::ConfigOverrides::default())
+                .expect("load default config"),
+        );
+        let mut processor = MessageProcessor::new(outgoing, None, config, Vec::new(), Vec::new());
+        let thread_id = code_protocol::ConversationId::from(Uuid::new_v4());
+
+        processor
+            .thread_subscribe_v2(
+                ConnectionId(7),
+                RequestId::Integer(12),
+                code_app_server_protocol::ThreadSubscribeParams {
+                    thread_id: thread_id.to_string(),
+                },
+            )
+            .await;
+
+        let envelope = outgoing_rx.recv().await.expect("subscribe response envelope");
+        match envelope {
+            OutgoingEnvelope::ToConnection {
+                connection_id: ConnectionId(7),
+                message: OutgoingMessage::Response(response),
+            } => {
+                assert_eq!(response.id, RequestId::Integer(12));
+                let response: code_app_server_protocol::ThreadSubscribeResponse =
+                    serde_json::from_value(response.result).expect("decode subscribe response");
+                assert_eq!(
+                    response.status,
+                    code_app_server_protocol::ThreadSubscribeStatus::NotLoaded
+                );
+            }
+            _ => panic!("expected thread/subscribe response"),
+        }
     }
 }

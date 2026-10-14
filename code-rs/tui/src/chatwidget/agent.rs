@@ -6,8 +6,6 @@ use code_core::CodexConversation;
 use code_core::ConversationManager;
 use code_core::config::Config;
 use code_core::protocol::Op;
-use code_login::AuthManager;
-use code_protocol::protocol::SessionSource;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -35,7 +33,7 @@ impl Drop for ConversationShutdown {
 pub(crate) fn spawn_new_conversation_runtime(
     config: Config,
     app_event_tx: AppEventSender,
-    auth_manager: Arc<AuthManager>,
+    conversation_manager: Arc<ConversationManager>,
     code_op_rx: UnboundedReceiver<Op>,
     ticket: BackgroundOrderTicket,
 ) {
@@ -44,10 +42,7 @@ pub(crate) fn spawn_new_conversation_runtime(
     tokio::spawn(async move {
         let app_event_tx_clone = app_event_tx;
         let mut code_op_rx = code_op_rx;
-        let conversation_manager = ConversationManager::new(
-            auth_manager.clone(),
-            SessionSource::Cli,
-        );
+        let auth_manager = conversation_manager.auth_manager();
         let resume_path = config.experimental_resume.clone();
         let new_conversation = match resume_path {
             Some(path) => conversation_manager
@@ -76,7 +71,8 @@ pub(crate) fn spawn_new_conversation_runtime(
             msg: EventMsg::SessionConfigured(new_conversation.session_configured),
             order: None,
         };
-        app_event_tx_clone.send(AppEvent::codex_event(event));
+        let thread_id = uuid::Uuid::from(new_conversation.conversation_id);
+        app_event_tx_clone.send(AppEvent::thread_codex_event(thread_id, event));
 
         let conversation = new_conversation.conversation;
         let conversation_clone = conversation.clone();
@@ -96,7 +92,7 @@ pub(crate) fn spawn_new_conversation_runtime(
         });
 
         while let Ok(event) = conversation.next_event().await {
-            app_event_tx_clone.send(AppEvent::codex_event(event));
+            app_event_tx_clone.send(AppEvent::thread_codex_event(thread_id, event));
         }
     });
 
@@ -112,13 +108,14 @@ pub(crate) fn spawn_existing_conversation_runtime(
     tokio::spawn(async move {
         let app_event_tx_clone = app_event_tx;
         let mut code_op_rx = code_op_rx;
+        let thread_id = session_configured.session_id;
         let event = Event {
             id: "fork".to_owned(),
             event_seq: 0,
             msg: EventMsg::SessionConfigured(session_configured),
             order: None,
         };
-        app_event_tx_clone.send(AppEvent::codex_event(event));
+        app_event_tx_clone.send(AppEvent::thread_codex_event(thread_id, event));
 
         let conversation_clone = conversation.clone();
         tokio::spawn(async move {
@@ -131,7 +128,7 @@ pub(crate) fn spawn_existing_conversation_runtime(
         });
 
         while let Ok(event) = conversation.next_event().await {
-            app_event_tx_clone.send(AppEvent::codex_event(event));
+            app_event_tx_clone.send(AppEvent::thread_codex_event(thread_id, event));
         }
     });
 }

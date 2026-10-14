@@ -678,6 +678,8 @@ enum ClickableAction {
     ShowNetworkSettings,
     /// Open the MCP settings page (e.g. when the header shows an MCP error).
     ShowMcpSettings,
+    /// Switch the visible top-row conversation tab to a thread.
+    SwitchThread(code_protocol::ThreadId),
     JumpToCallId(String),
     /// Toggle fold/collapse for a history cell at the given index.
     ToggleFoldAtIndex(usize),
@@ -1066,6 +1068,7 @@ pub(crate) struct ChatWidget<'a> {
     // Horizontal scroll offset for the top and bottom status bars (in display columns).
     // When the rendered content is wider than the viewport, the user can scroll/drag
     // horizontally to reveal hidden segments.
+    top_session_tabs: Vec<TopSessionTab>,
     status_bar_hscroll: Cell<u16>,
     bottom_status_hscroll: Cell<u16>,
     // Tracks the mouse-down position for deferred click detection. A click is
@@ -1082,6 +1085,29 @@ pub(crate) struct ChatWidget<'a> {
     // When true, mouse capture is temporarily disabled so the terminal can
     // handle native text selection. Re-enabled on the next key event.
     pub(crate) mouse_capture_paused: Cell<bool>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TopSessionTab {
+    pub(crate) thread_id: Option<code_protocol::ThreadId>,
+    pub(crate) ordinal: usize,
+    pub(crate) title: String,
+    pub(crate) is_active: bool,
+    pub(crate) is_running: bool,
+    pub(crate) is_closed: bool,
+}
+
+impl TopSessionTab {
+    pub(crate) fn main() -> Self {
+        Self {
+            thread_id: None,
+            ordinal: 1,
+            title: "Main".to_owned(),
+            is_active: true,
+            is_running: false,
+            is_closed: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]

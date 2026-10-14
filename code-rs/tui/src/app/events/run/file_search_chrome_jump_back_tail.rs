@@ -95,59 +95,30 @@
                     let history_snapshot = self.pending_jump_back_history_snapshot.take();
                     let emit_prefix = history_snapshot.is_none();
 
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        let auth_manager = widget.auth_manager();
-                        let mut new_widget =
-                            ChatWidget::new_from_existing(crate::chatwidget::ForkedChatWidgetInit {
-                                config: cfg,
-                                conversation: conv,
-                                session_configured: session_conf,
-                                app_event_tx: self.app_event_tx.clone(),
-                                terminal_info: self.terminal_info.clone(),
-                                show_order_overlay: self.show_order_overlay,
-                                latest_upgrade_version: self.latest_upgrade_version.clone(),
-                                auth_manager,
-                                show_welcome: false,
-                            });
-                        if let Some(state) = ghost_state.take() {
-                            new_widget.adopt_ghost_state(state);
-                        } else {
-                            tracing::warn!("jump-back fork missing ghost snapshot state; redo may be unavailable");
-                        }
-                        if let Some(snapshot) = history_snapshot.as_ref() {
-                            new_widget.restore_history_snapshot(snapshot);
-                        }
-                        new_widget.enable_perf(self.timing_enabled);
-                        new_widget.check_for_initial_animations();
-                        **widget = new_widget;
+                    let auth_manager = self._server.auth_manager();
+                    let mut new_widget =
+                        ChatWidget::new_from_existing(crate::chatwidget::ForkedChatWidgetInit {
+                            config: cfg,
+                            conversation: conv,
+                            session_configured: session_conf,
+                            app_event_tx: self.app_event_tx.clone(),
+                            terminal_info: self.terminal_info.clone(),
+                            show_order_overlay: self.show_order_overlay,
+                            latest_upgrade_version: self.latest_upgrade_version.clone(),
+                            auth_manager,
+                            show_welcome: false,
+                        });
+                    if let Some(state) = ghost_state.take() {
+                        new_widget.adopt_ghost_state(state);
                     } else {
-                        let auth_manager = AuthManager::shared_with_mode_and_originator(
-                            cfg.code_home.clone(),
-                            AuthMode::ApiKey,
-                            cfg.responses_originator_header.clone(),
-                        );
-                        let mut new_widget =
-                            ChatWidget::new_from_existing(crate::chatwidget::ForkedChatWidgetInit {
-                                config: cfg,
-                                conversation: conv,
-                                session_configured: session_conf,
-                                app_event_tx: self.app_event_tx.clone(),
-                                terminal_info: self.terminal_info.clone(),
-                                show_order_overlay: self.show_order_overlay,
-                                latest_upgrade_version: self.latest_upgrade_version.clone(),
-                                auth_manager,
-                                show_welcome: false,
-                            });
-                        if let Some(state) = ghost_state.take() {
-                            new_widget.adopt_ghost_state(state);
-                        }
-                        if let Some(snapshot) = history_snapshot.as_ref() {
-                            new_widget.restore_history_snapshot(snapshot);
-                        }
-                        new_widget.enable_perf(self.timing_enabled);
-                        new_widget.check_for_initial_animations();
-                        self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                        tracing::warn!("jump-back fork missing ghost snapshot state; redo may be unavailable");
                     }
+                    if let Some(snapshot) = history_snapshot.as_ref() {
+                        new_widget.restore_history_snapshot(snapshot);
+                    }
+                    new_widget.enable_perf(self.timing_enabled);
+                    new_widget.check_for_initial_animations();
+                    self.replace_active_chat_widget(new_widget);
                     self.terminal_runs.clear();
                     // Reset any transient state from the previous widget/session
                     self.commit_anim_running.store(false, Ordering::Release);

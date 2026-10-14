@@ -18,6 +18,8 @@ use crate::file_search::FileSearchManager;
 use crate::history::state::HistorySnapshot;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::tui::TerminalInfo;
+use super::app_server_session::AppServerSessionBridge;
+use super::thread_routing::ActiveThreadRouter;
 use code_core::config::Config;
 use code_core::config_types::ThemeName;
 use code_core::ConversationManager;
@@ -129,6 +131,14 @@ pub(crate) struct App<'a> {
     pub(super) consecutive_high_events: u32,
     pub(super) event_deduper: super::event_deduper::EventDeduper,
     pub(super) app_state: AppState<'a>,
+    pub(super) active_thread_router: ActiveThreadRouter,
+    pub(super) inactive_chat_widgets: HashMap<code_protocol::ThreadId, Box<ChatWidget<'a>>>,
+    pub(super) app_server_thread_replays:
+        HashMap<code_protocol::ThreadId, code_app_server_protocol::Thread>,
+    pub(super) app_server_thread_subscriptions_pending: HashSet<code_protocol::ThreadId>,
+    pub(super) app_server_replay_composers: HashMap<code_protocol::ThreadId, String>,
+    pub(super) app_server_turns_pending: HashSet<code_protocol::ThreadId>,
+    pub(super) _app_server_bridge: Option<AppServerSessionBridge>,
 
     /// Config is stored here so we can recreate `ChatWidgets` as needed.
     pub(super) config: Config,

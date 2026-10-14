@@ -808,6 +808,13 @@
           "description": "Model provider used for this thread (for example, 'openai').",
           "type": "string"
         },
+        "name": {
+          "description": "Optional user-facing thread name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "description": "\\[UNSTABLE\\] Path to the thread on disk.",
           "type": [
@@ -826,6 +833,17 @@
             }
           ],
           "description": "Origin of the thread (CLI, `VSCode`, codex exec, codex app-server, etc.)."
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current known load/activity status for the thread."
         },
         "turns": {
           "description": "Only populated on `thread/resume`, `thread/rollback`, `thread/fork`, and `thread/read` (when `includeTurns` is true) responses. For all other responses and notifications returning a Thread, the turns field will be an empty list.",
@@ -852,6 +870,13 @@
         "updatedAt"
       ],
       "type": "object"
+    },
+    "ThreadActiveFlag": {
+      "enum": [
+        "waitingOnApproval",
+        "waitingOnUserInput"
+      ],
+      "type": "string"
     },
     "ThreadId": {
       "type": "string"
@@ -1395,6 +1420,81 @@
             "type"
           ],
           "title": "ContextCompactionThreadItem",
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadStatus": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "notLoaded"
+              ],
+              "title": "NotLoadedThreadStatusType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "NotLoadedThreadStatus",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "idle"
+              ],
+              "title": "IdleThreadStatusType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "IdleThreadStatus",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "systemError"
+              ],
+              "title": "SystemErrorThreadStatusType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "SystemErrorThreadStatus",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "activeFlags": {
+              "items": {
+                "$ref": "#/definitions/ThreadActiveFlag"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "active"
+              ],
+              "title": "ActiveThreadStatusType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "activeFlags",
+            "type"
+          ],
+          "title": "ActiveThreadStatus",
           "type": "object"
         }
       ]

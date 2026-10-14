@@ -325,6 +325,7 @@ impl App<'_> {
         } else {
             let mut chat_widget = ChatWidget::new(crate::chatwidget::ChatWidgetInit {
                 config: config.clone(),
+                conversation_manager: conversation_manager.clone(),
                 app_event_tx: app_event_tx.clone(),
                 initial_prompt,
                 initial_images,
@@ -354,6 +355,16 @@ impl App<'_> {
 
         let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
         let start_in_alt = config.tui.alternate_screen;
+        let app_server_bridge = if crate::chatwidget::is_test_mode() {
+            None
+        } else {
+            Some(super::app_server_session::spawn_in_process_app_server_bridge(
+                config.clone(),
+                cli_kv_overrides.clone(),
+                app_event_tx.clone(),
+                conversation_manager.clone(),
+            ))
+        };
         Self {
             _server: conversation_manager,
             app_event_tx,
@@ -362,6 +373,13 @@ impl App<'_> {
             consecutive_high_events: 0,
             event_deduper: super::event_deduper::EventDeduper::new(),
             app_state,
+            active_thread_router: super::thread_routing::ActiveThreadRouter::default(),
+            inactive_chat_widgets: HashMap::new(),
+            app_server_thread_replays: HashMap::new(),
+            app_server_thread_subscriptions_pending: HashSet::new(),
+            app_server_replay_composers: HashMap::new(),
+            app_server_turns_pending: HashSet::new(),
+            _app_server_bridge: app_server_bridge,
             config,
             cli_kv_overrides,
             config_overrides,

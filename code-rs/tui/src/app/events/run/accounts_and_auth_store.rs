@@ -395,6 +395,7 @@
                             // Replace the chat widget entirely, mirroring SwitchCwd flow but without import.
                             let mut new_widget = ChatWidget::new(crate::chatwidget::ChatWidgetInit {
                                 config: self.config.clone(),
+                                conversation_manager: self._server.clone(),
                                 app_event_tx: self.app_event_tx.clone(),
                                 initial_prompt: None,
                                 initial_images: Vec::new(),
@@ -403,7 +404,7 @@
                                 latest_upgrade_version: self.latest_upgrade_version.clone(),
                             });
                             new_widget.enable_perf(self.timing_enabled);
-                            self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                            self.replace_active_chat_widget(new_widget);
                             self.terminal_runs.clear();
                             self.app_event_tx.send(AppEvent::RequestRedraw);
                         }
@@ -759,6 +760,7 @@
                     if let AppState::Chat { .. } = &self.app_state {
                         let mut new_widget = ChatWidget::new(crate::chatwidget::ChatWidgetInit {
                             config: cfg,
+                            conversation_manager: self._server.clone(),
                             app_event_tx: self.app_event_tx.clone(),
                             initial_prompt: None,
                             initial_images: Vec::new(),
@@ -767,7 +769,7 @@
                             latest_upgrade_version: self.latest_upgrade_version.clone(),
                         });
                         new_widget.enable_perf(self.timing_enabled);
-                        self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                        self.replace_active_chat_widget(new_widget);
                         self.terminal_runs.clear();
                         self.app_event_tx.send(AppEvent::RequestRedraw);
                     }

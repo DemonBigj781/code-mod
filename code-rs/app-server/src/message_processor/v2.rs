@@ -90,6 +90,9 @@ use code_app_server_protocol::ThreadForkParams;
 use code_app_server_protocol::ThreadForkResponse;
 use code_app_server_protocol::ThreadArchiveParams;
 use code_app_server_protocol::ThreadArchiveResponse;
+use code_app_server_protocol::ThreadSubscribeParams;
+use code_app_server_protocol::ThreadSubscribeResponse;
+use code_app_server_protocol::ThreadSubscribeStatus;
 use code_app_server_protocol::ThreadUnsubscribeParams;
 use code_app_server_protocol::ThreadUnsubscribeResponse;
 use code_app_server_protocol::ThreadUnsubscribeStatus;
@@ -105,6 +108,7 @@ use code_app_server_protocol::ThreadReadParams;
 use code_app_server_protocol::ThreadReadResponse;
 use code_app_server_protocol::ThreadSortKey;
 use code_app_server_protocol::ThreadSourceKind;
+use code_app_server_protocol::ThreadStatus;
 use code_app_server_protocol::Turn;
 use code_app_server_protocol::TurnCompletedNotification;
 use code_app_server_protocol::TurnStartParams;
@@ -1872,9 +1876,23 @@ impl MessageProcessor {
         };
         let end = start.saturating_add(limit).min(total);
 
+        let loaded_thread_ids: HashSet<Uuid> = self
+            .conversation_manager
+            .loaded_conversation_ids()
+            .await
+            .into_iter()
+            .map(Uuid::from)
+            .collect();
         let data = entries[start..end]
             .iter()
-            .map(|entry| session_entry_to_thread(entry, &self.base_config.code_home, Vec::new()))
+            .map(|entry| {
+                session_entry_to_thread(
+                    entry,
+                    &self.base_config.code_home,
+                    Vec::new(),
+                    catalog_thread_status(loaded_thread_ids.contains(&entry.session_id)),
+                )
+            })
             .collect();
         let next_cursor = (end < total).then(|| end.to_string());
 
@@ -1885,6 +1903,14 @@ impl MessageProcessor {
                 ThreadListResponse { data, next_cursor },
             )
             .await;
+    }
+
+    async fn is_session_loaded(&self, session_id: Uuid) -> bool {
+        self.conversation_manager
+            .loaded_conversation_ids()
+            .await
+            .into_iter()
+            .any(|loaded_id| Uuid::from(loaded_id) == session_id)
     }
 
     pub(super) async fn list_loaded_threads_v2(
@@ -2007,7 +2033,12 @@ impl MessageProcessor {
             Vec::new()
         };
 
-        let thread = session_entry_to_thread(&entry, &self.base_config.code_home, turns);
+        let thread = session_entry_to_thread(
+            &entry,
+            &self.base_config.code_home,
+            turns,
+            catalog_thread_status(self.is_session_loaded(parsed_id).await),
+        );
         self.outgoing
             .send_response_to_connection(connection_id, request_id, ThreadReadResponse { thread })
             .await;
@@ -2452,7 +2483,9 @@ impl MessageProcessor {
         let thread_id = new_conversation.conversation_id;
         let thread = Thread {
             id: thread_id.to_string(),
+            name: None,
             preview: String::new(),
+            status: Some(ThreadStatus::Idle),
             model_provider: model_provider.clone(),
             created_at: Utc::now().timestamp(),
             updated_at: Utc::now().timestamp(),
@@ -2694,11 +2727,18 @@ impl MessageProcessor {
         let thread = if let Some(entry) = entry.as_ref()
             && entry.session_id == Uuid::from(thread_id)
         {
-            session_entry_to_thread(entry, &self.base_config.code_home, Vec::new())
+            session_entry_to_thread(
+                entry,
+                &self.base_config.code_home,
+                Vec::new(),
+                ThreadStatus::Idle,
+            )
         } else {
             Thread {
                 id: thread_id.to_string(),
+                name: None,
                 preview: String::new(),
+                status: Some(ThreadStatus::Idle),
                 model_provider: model_provider.clone(),
                 created_at: Utc::now().timestamp(),
                 updated_at: Utc::now().timestamp(),
@@ -2912,7 +2952,9 @@ impl MessageProcessor {
         let thread_id = forked.conversation_id;
         let thread = Thread {
             id: thread_id.to_string(),
+            name: None,
             preview: String::new(),
+            status: Some(ThreadStatus::Idle),
             model_provider: model_provider.clone(),
             created_at: Utc::now().timestamp(),
             updated_at: Utc::now().timestamp(),
@@ -3105,6 +3147,52 @@ impl MessageProcessor {
             .await;
     }
 
+    pub(super) async fn thread_subscribe_v2(
+        &mut self,
+        connection_id: ConnectionId,
+        request_id: mcp_types::RequestId,
+        params: ThreadSubscribeParams,
+    ) {
+        let thread_id = match code_protocol::ConversationId::from_string(&params.thread_id) {
+            Ok(id) => id,
+            Err(err) => {
+                self.outgoing
+                    .send_error_to_connection(
+                        connection_id,
+                        request_id,
+                        JSONRPCErrorError {
+                            code: INVALID_REQUEST_ERROR_CODE,
+                            message: format!("invalid thread id: {err}"),
+                            data: None,
+                        },
+                    )
+                    .await;
+                return;
+            }
+        };
+
+        let status = match self.conversation_manager.get_conversation(thread_id).await {
+            Ok(conversation) => {
+                let thread_state = self
+                    .thread_state_manager
+                    .ensure_connection_subscribed(thread_id, connection_id)
+                    .await;
+                self.ensure_thread_listener(thread_id.to_string(), conversation, thread_state)
+                    .await;
+                ThreadSubscribeStatus::Subscribed
+            }
+            Err(_) => ThreadSubscribeStatus::NotLoaded,
+        };
+
+        self.outgoing
+            .send_response_to_connection(
+                connection_id,
+                request_id,
+                ThreadSubscribeResponse { status },
+            )
+            .await;
+    }
+
     pub(super) async fn thread_set_name_v2(
         &self,
         connection_id: ConnectionId,
@@ -3274,7 +3362,12 @@ impl MessageProcessor {
             }
         };
 
-        let thread = session_entry_to_thread(&entry, &self.base_config.code_home, Vec::new());
+        let thread = session_entry_to_thread(
+            &entry,
+            &self.base_config.code_home,
+            Vec::new(),
+            catalog_thread_status(self.is_session_loaded(entry.session_id).await),
+        );
         self.outgoing
             .send_response_to_connection(
                 connection_id,
@@ -3348,7 +3441,12 @@ impl MessageProcessor {
                     Ok(Some(entry)) => entry,
                     _ => entry,
                 };
-                let thread = session_entry_to_thread(&refreshed, &self.base_config.code_home, Vec::new());
+                let thread = session_entry_to_thread(
+                    &refreshed,
+                    &self.base_config.code_home,
+                    Vec::new(),
+                    catalog_thread_status(self.is_session_loaded(refreshed.session_id).await),
+                );
                 self.outgoing
                     .send_response_to_connection(
                         connection_id,
@@ -4437,6 +4535,7 @@ fn session_entry_to_thread(
     entry: &SessionIndexEntry,
     code_home: &std::path::Path,
     turns: Vec<Turn>,
+    status: ThreadStatus,
 ) -> Thread {
     let preview = entry
         .nickname
@@ -4447,7 +4546,9 @@ fn session_entry_to_thread(
 
     Thread {
         id: entry.session_id.to_string(),
+        name: entry.nickname.clone(),
         preview,
+        status: Some(status),
         model_provider: entry
             .model_provider
             .clone()
@@ -4464,6 +4565,14 @@ fn session_entry_to_thread(
             origin_url: entry.git_origin_url.clone(),
         }),
         turns,
+    }
+}
+
+fn catalog_thread_status(is_loaded: bool) -> ThreadStatus {
+    if is_loaded {
+        ThreadStatus::Idle
+    } else {
+        ThreadStatus::NotLoaded
     }
 }
 
@@ -4719,8 +4828,19 @@ async fn copy_dir_recursive(
 mod apps_list_merge_tests {
     use std::collections::HashMap;
 
+    use super::catalog_thread_status;
     use super::merge_accessible_apps;
     use code_app_server_protocol::AppInfo;
+    use code_app_server_protocol::ThreadStatus;
+
+    #[test]
+    fn catalog_thread_status_reflects_whether_the_thread_is_loaded() {
+        assert_eq!(
+            catalog_thread_status(true),
+            ThreadStatus::Idle
+        );
+        assert_eq!(catalog_thread_status(false), ThreadStatus::NotLoaded);
+    }
 
     #[test]
     fn merge_accessible_apps_marks_accessible_and_adds_synthetic_entries() {

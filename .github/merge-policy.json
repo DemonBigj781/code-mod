@@ -25,6 +25,8 @@
     ".github/codex-cli-*.webp"
   ],
   "perma_removed_paths": [
+    ".github/workflows/preview-build.yml",
+    ".github/workflows/release.yml",
     ".github/workflows/rust-ci.yml",
     ".github/workflows/rust-ci-full.yml"
   ]

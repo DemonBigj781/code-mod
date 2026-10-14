@@ -430,25 +430,6 @@ jobs:
             // Hard fail so the pipeline surfaces the problem clearly
             core.setFailed(`Failed to open PR for head '${head}' → status=${(r && r.status) || 'n/a'}; body=${JSON.stringify((r && r.data) || {})}`);
 
-      - name: Dispatch Preview Build (backup)
-        if: steps.open_pr.outputs.number != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner; const repo = context.repo.repo;
-            const head = `issue-${{ steps.meta.outputs.issue_number }}`;
-            try {
-              // Manually kick Preview Build on the PR branch (redundant with PR opened event, but harmless)
-              await github.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
-                owner, repo,
-                workflow_id: 'preview-build.yml',
-                ref: head
-              });
-              core.notice(`Dispatched Preview Build for ${head}`);
-            } catch (e) {
-              core.warning(`Preview Build dispatch failed (non-fatal): ${e?.response?.status || ''}`);
-            }
-
       - name: Assign issue to bot
         uses: actions/github-script@v7
         env:
