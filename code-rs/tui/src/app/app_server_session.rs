@@ -13,6 +13,9 @@ use code_app_server_protocol::ThreadReadResponse;
 use code_app_server_protocol::ThreadSubscribeParams;
 use code_app_server_protocol::ThreadSubscribeResponse;
 use code_app_server_protocol::ThreadSubscribeStatus;
+use code_app_server_protocol::TurnStartParams;
+use code_app_server_protocol::TurnStartResponse;
+use code_app_server_protocol::UserInput;
 use code_core::config::Config;
 use code_core::ConversationManager;
 use code_protocol::ThreadId;
@@ -32,6 +35,7 @@ pub(super) struct AppServerSessionBridge {
 enum AppServerBridgeCommand {
     RefreshLoadedThreads,
     SubscribeThread(ThreadId),
+    StartTurn { thread_id: ThreadId, text: String },
 }
 
 impl Drop for AppServerSessionBridge {
@@ -86,6 +90,9 @@ pub(super) fn spawn_in_process_app_server_bridge(
                                 Some(AppServerBridgeCommand::SubscribeThread(thread_id)) => {
                                     subscribe_thread(&request_handle, &app_event_tx, thread_id).await;
                                 }
+                                Some(AppServerBridgeCommand::StartTurn { thread_id, text }) => {
+                                    start_turn(&request_handle, &app_event_tx, thread_id, text).await;
+                                }
                                 None => break,
                             }
                         }
@@ -112,6 +119,47 @@ impl AppServerSessionBridge {
     pub(super) fn subscribe_thread(&self, thread_id: ThreadId) {
         let _ = self.command_tx.send(AppServerBridgeCommand::SubscribeThread(thread_id));
     }
+
+    pub(super) fn start_turn(&self, thread_id: ThreadId, text: String) {
+        let _ = self
+            .command_tx
+            .send(AppServerBridgeCommand::StartTurn { thread_id, text });
+    }
+}
+
+async fn start_turn(
+    request_handle: &AppServerRequestHandle,
+    app_event_tx: &AppEventSender,
+    thread_id: ThreadId,
+    text: String,
+) {
+    let response = request_handle
+        .request_typed::<TurnStartResponse>(ClientRequest::TurnStart {
+            request_id: RequestId::String(format!(
+                "tui-turn-start-{}-{}",
+                thread_id,
+                uuid::Uuid::new_v4()
+            )),
+            params: TurnStartParams {
+                thread_id: thread_id.to_string(),
+                input: vec![UserInput::Text {
+                    text,
+                    text_elements: Vec::new(),
+                }],
+                ..TurnStartParams::default()
+            },
+        })
+        .await;
+
+    let result = match response {
+        Ok(response) => Ok(response.turn),
+        Err(err) => {
+            tracing::warn!(%thread_id, "failed to start app-server turn: {err}");
+            Err(err.to_string())
+        }
+    };
+
+    app_event_tx.send(AppEvent::AppServerTurnStartFinished { thread_id, result });
 }
 
 async fn subscribe_thread(

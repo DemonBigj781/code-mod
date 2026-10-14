@@ -23,6 +23,8 @@ use crate::chatwidget::TopSessionTab;
 pub(super) fn render_replay_view(
     thread: &Thread,
     tabs: &[TopSessionTab],
+    composer_text: &str,
+    turn_pending: bool,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -30,11 +32,11 @@ pub(super) fn render_replay_view(
     lines.push(render_top_tabs_line(tabs));
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
-        "Read-only app-server replay",
+        "App-server session replay",
         crate::colors::style_text().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::from(Span::styled(
-        "This thread is owned by the app server. Composer input is disabled here; switch back to an attached TUI tab to send messages.",
+        "This thread is owned by the app server. Type below and press Enter to start a turn in this session.",
         crate::colors::style_text_dim(),
     )));
     lines.push(Line::from(""));
@@ -44,6 +46,13 @@ pub(super) fn render_replay_view(
             .into_iter()
             .map(|line| Line::from(Span::styled(line, crate::colors::style_text()))),
     );
+
+    lines.push(Line::from(""));
+    let composer_label = if turn_pending { "app-server> [sending] " } else { "app-server> " };
+    lines.push(Line::from(vec![
+        Span::styled(composer_label, crate::colors::style_text_dim()),
+        Span::styled(composer_text.to_owned(), crate::colors::style_text()),
+    ]));
 
     Paragraph::new(lines)
         .block(Block::default().style(crate::colors::style_text()))

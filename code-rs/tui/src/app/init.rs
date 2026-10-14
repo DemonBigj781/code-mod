@@ -377,6 +377,8 @@ impl App<'_> {
             inactive_chat_widgets: HashMap::new(),
             app_server_thread_replays: HashMap::new(),
             app_server_thread_subscriptions_pending: HashSet::new(),
+            app_server_replay_composers: HashMap::new(),
+            app_server_turns_pending: HashSet::new(),
             _app_server_bridge: app_server_bridge,
             config,
             cli_kv_overrides,

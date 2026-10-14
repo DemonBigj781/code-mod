@@ -134,12 +134,26 @@ impl App<'_> {
         self.sync_active_thread_tabs_to_widget();
         let replay_thread = self.active_app_server_replay_thread().cloned();
         let replay_tabs = self.top_session_tabs();
+        let replay_thread_id = self.active_thread_router.active_thread_id();
+        let replay_composer = replay_thread_id
+            .and_then(|thread_id| self.app_server_replay_composers.get(&thread_id))
+            .cloned()
+            .unwrap_or_default();
+        let replay_turn_pending = replay_thread_id
+            .is_some_and(|thread_id| self.app_server_turns_pending.contains(&thread_id));
         let completed_frame = terminal.draw(|frame| {
             match &mut self.app_state {
                 AppState::Chat { widget } => {
                     let area = frame.area();
                     if let Some(thread) = replay_thread.as_ref() {
-                        render_replay_view(thread, &replay_tabs, area, frame.buffer_mut());
+                        render_replay_view(
+                            thread,
+                            &replay_tabs,
+                            &replay_composer,
+                            replay_turn_pending,
+                            area,
+                            frame.buffer_mut(),
+                        );
                     } else {
                         widget.maybe_clear_stale_reconnecting_for_idle();
                         widget.sync_settings_route_for_width(area.width);

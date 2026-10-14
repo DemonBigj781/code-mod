@@ -25,6 +25,7 @@ impl App<'_> {
             return;
         }
         if self.is_app_server_replay_view_active() {
+            self.handle_app_server_replay_key(key_event);
             return;
         }
 
@@ -38,6 +39,61 @@ impl App<'_> {
                 }
                 _ => screen.handle_key_event(key_event),
             },
+        }
+    }
+
+    fn handle_app_server_replay_key(&mut self, key_event: KeyEvent) {
+        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return;
+        }
+        let Some(thread_id) = self.active_thread_router.active_thread_id() else {
+            return;
+        };
+        if self.app_server_turns_pending.contains(&thread_id) {
+            return;
+        }
+
+        match key_event.code {
+            KeyCode::Enter => {
+                let Some(text) = self.app_server_replay_composers.remove(&thread_id) else {
+                    return;
+                };
+                let text = text.trim().to_owned();
+                if text.is_empty() {
+                    return;
+                }
+                let Some(bridge) = &self._app_server_bridge else {
+                    self.app_server_replay_composers
+                        .insert(thread_id, "[app-server bridge unavailable] ".to_owned());
+                    self.schedule_redraw();
+                    return;
+                };
+                self.app_server_turns_pending.insert(thread_id);
+                bridge.start_turn(thread_id, text);
+                self.schedule_redraw();
+            }
+            KeyCode::Backspace => {
+                self.app_server_replay_composers
+                    .entry(thread_id)
+                    .or_default()
+                    .pop();
+                self.schedule_redraw();
+            }
+            KeyCode::Esc => {
+                self.app_server_replay_composers.remove(&thread_id);
+                self.schedule_redraw();
+            }
+            KeyCode::Char(ch)
+                if key_event.modifiers.is_empty()
+                    || key_event.modifiers == KeyModifiers::SHIFT =>
+            {
+                self.app_server_replay_composers
+                    .entry(thread_id)
+                    .or_default()
+                    .push(ch);
+                self.schedule_redraw();
+            }
+            _ => {}
         }
     }
 
@@ -129,6 +185,13 @@ impl App<'_> {
 
     pub(super) fn dispatch_paste_event(&mut self, pasted: String) {
         if self.is_app_server_replay_view_active() {
+            if let Some(thread_id) = self.active_thread_router.active_thread_id() {
+                self.app_server_replay_composers
+                    .entry(thread_id)
+                    .or_default()
+                    .push_str(&pasted);
+                self.schedule_redraw();
+            }
             return;
         }
         match &mut self.app_state {

@@ -239,6 +239,10 @@ pub(crate) enum AppEvent {
         replayable_items: usize,
         replay_thread: Option<code_app_server_protocol::Thread>,
     },
+    AppServerTurnStartFinished {
+        thread_id: code_protocol::ThreadId,
+        result: Result<code_app_server_protocol::Turn, String>,
+    },
 
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,

@@ -136,6 +136,8 @@ pub(crate) struct App<'a> {
     pub(super) app_server_thread_replays:
         HashMap<code_protocol::ThreadId, code_app_server_protocol::Thread>,
     pub(super) app_server_thread_subscriptions_pending: HashSet<code_protocol::ThreadId>,
+    pub(super) app_server_replay_composers: HashMap<code_protocol::ThreadId, String>,
+    pub(super) app_server_turns_pending: HashSet<code_protocol::ThreadId>,
     pub(super) _app_server_bridge: Option<AppServerSessionBridge>,
 
     /// Config is stored here so we can recreate `ChatWidgets` as needed.

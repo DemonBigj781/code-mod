@@ -304,6 +304,24 @@
                         }
                     }
                 }
+                AppEvent::AppServerTurnStartFinished { thread_id, result } => {
+                    self.app_server_turns_pending.remove(&thread_id);
+                    match result {
+                        Ok(turn) => {
+                            let _ = crate::app::app_server_replay_view::upsert_replay_turn(
+                                &mut self.app_server_thread_replays,
+                                &thread_id.to_string(),
+                                turn,
+                            );
+                            self.schedule_redraw();
+                        }
+                        Err(err) => {
+                            self.app_server_replay_composers
+                                .insert(thread_id, format!("[send failed: {err}] "));
+                            self.schedule_redraw();
+                        }
+                    }
+                }
                 AppEvent::ExitRequest => {
                     // Stop background threads and break the UI loop.
                     self.commit_anim_running.store(false, Ordering::Release);
