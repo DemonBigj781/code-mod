@@ -73,21 +73,13 @@ impl ConversationManager {
         // Our core `Codex::spawn_with_auth_manager` handles resume via
         // `config.experimental_resume`. For a fresh conversation we leave it as `None`.
         config.experimental_resume = None;
-        let CodexSpawnOk {
-            codex,
-            init_id: _,
-            session_id,
-        } = Codex::spawn_with_auth_manager(config, Some(auth_manager.clone())).await?;
-        let conversation_id: code_protocol::ConversationId = session_id.into();
-        self.finalize_spawn(codex, conversation_id).await
+        let CodexSpawnOk { codex, .. } =
+            Codex::spawn_with_auth_manager(config, Some(auth_manager.clone())).await?;
+        self.finalize_spawn(codex).await
     }
 
-    async fn finalize_spawn(
-        &self,
-        codex: Codex,
-        conversation_id: ConversationId,
-    ) -> CodexResult<NewConversation> {
-        // The first event must be `SessionInitialized`. Validate and forward it
+    async fn finalize_spawn(&self, codex: Codex) -> CodexResult<NewConversation> {
+        // The first event must be `SessionConfigured`. Validate and forward it
         // to the caller so that they can display it in the conversation
         // history.
         let event = codex.next_event().await?;
@@ -102,6 +94,9 @@ impl ConversationManager {
             }
         };
 
+        // Resume and fork replace the provisional spawn UUID during configuration.
+        // Register and route events using the confirmed rollout identity instead.
+        let conversation_id: ConversationId = session_configured.session_id.into();
         let conversation = Arc::new(CodexConversation::new(codex));
         self.conversations
             .write()
@@ -134,13 +129,9 @@ impl ConversationManager {
     ) -> CodexResult<NewConversation> {
         // Point the config at the rollout we want to resume.
         config.experimental_resume = Some(rollout_path);
-        let CodexSpawnOk {
-            codex,
-            init_id: _,
-            session_id,
-        } = Codex::spawn_with_auth_manager(config, Some(auth_manager.clone())).await?;
-        let conversation_id: code_protocol::ConversationId = session_id.into();
-        self.finalize_spawn(codex, conversation_id).await
+        let CodexSpawnOk { codex, .. } =
+            Codex::spawn_with_auth_manager(config, Some(auth_manager.clone())).await?;
+        self.finalize_spawn(codex).await
     }
 
     /// Removes the conversation from the manager's internal map, though the
@@ -260,13 +251,9 @@ impl ConversationManager {
 
         // Now spawn a conversation resuming from the newly created rollout.
         config.experimental_resume = Some(recorder.rollout_path.clone());
-        let CodexSpawnOk {
-            codex,
-            init_id: _,
-            session_id,
-        } = Codex::spawn_with_auth_manager(config, Some(self.auth_manager.clone())).await?;
-        let conversation_id: code_protocol::ConversationId = session_id.into();
-        self.finalize_spawn(codex, conversation_id).await
+        let CodexSpawnOk { codex, .. } =
+            Codex::spawn_with_auth_manager(config, Some(self.auth_manager.clone())).await?;
+        self.finalize_spawn(codex).await
     }
 }
 
