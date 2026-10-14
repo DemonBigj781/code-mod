@@ -8,6 +8,7 @@ mod conversions;
 mod json_schema;
 mod misc_tools;
 mod registry;
+mod session_history_tool;
 mod tools_json;
 mod types;
 
@@ -17,6 +18,7 @@ mod tests;
 const SEARCH_TOOL_DESCRIPTION_TEMPLATE: &str =
     include_str!("../templates/search_tool/tool_description.md");
 pub(crate) const SEARCH_TOOL_BM25_TOOL_NAME: &str = "search_tool_bm25";
+pub(crate) const SESSION_HISTORY_TOOL_NAME: &str = "session_history";
 pub(crate) const READ_FILE_TOOL_NAME: &str = "read_file";
 pub(crate) const LIST_DIR_TOOL_NAME: &str = "list_dir";
 pub(crate) const GREP_FILES_TOOL_NAME: &str = "grep_files";

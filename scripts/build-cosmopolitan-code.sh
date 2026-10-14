@@ -103,7 +103,7 @@ patch_config="patch.crates-io.rama-tls-rustls.path=\"$workspace/code-rs/vendor/r
         --no-default-features --features code-cli/cosmopolitan-ape --release
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-core \
-        --test conversation_identity --no-default-features \
+        --test conversation_identity --test session_history_native --no-default-features \
         --features code-core/cosmopolitan-ape --release -- --test-threads=1
 )
 

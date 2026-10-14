@@ -24,6 +24,7 @@ members = [
     "exec-server",
     "execpolicy",
     "message-history",
+    "session-history",
     "memories-state",
     "file-search",
     "git-tooling",
@@ -117,6 +118,7 @@ code-file-search = { path = "file-search" }
 code-git-tooling = { path = "git-tooling" }
 code-keyring-store = { path = "keyring-store" }
 code-secrets = { path = "secrets", package = "codex-secrets" }
+code-session-history = { path = "session-history" }
 code-git-apply = { path = "git-apply" }
 code-linux-sandbox = { path = "linux-sandbox" }
 code-login = { path = "login" }
@@ -269,6 +271,7 @@ tree-sitter = "0.25.9"
 tree-sitter-bash = "0.25.0"
 ts-rs = "11"
 unicode-segmentation = "1.12.0"
+unicase = "2.8.1"
 unicode-width = "0.2"
 url = "2"
 urlencoding = "2.1"

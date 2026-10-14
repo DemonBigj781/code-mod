@@ -121,6 +121,7 @@ impl ToolRouter {
         handlers.insert(crate::openai_tools::READ_FILE_TOOL_NAME.into(), read_file);
         handlers.insert(crate::openai_tools::LIST_DIR_TOOL_NAME.into(), list_dir);
         handlers.insert(crate::openai_tools::GREP_FILES_TOOL_NAME.into(), grep_files);
+        handlers.insert(crate::openai_tools::SESSION_HISTORY_TOOL_NAME.into(), Arc::new(handlers::session_history::SessionHistoryHandler));
         handlers.insert(crate::openai_tools::REPL_TOOL_NAME.into(), Arc::clone(&repl_handler));
         handlers.insert(crate::openai_tools::REPL_RESET_TOOL_NAME.into(), Arc::clone(&repl_reset_handler));
         // Register per-runtime REPL tool entries so the router can dispatch

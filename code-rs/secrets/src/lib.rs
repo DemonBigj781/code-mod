@@ -16,6 +16,7 @@ mod sanitizer;
 
 pub use local::LocalSecretsBackend;
 pub use sanitizer::redact_secrets;
+pub use sanitizer::redact_json;
 
 const KEYRING_SERVICE: &str = "Code Secrets";
 

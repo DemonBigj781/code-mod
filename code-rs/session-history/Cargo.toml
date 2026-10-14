@@ -1,0 +1,24 @@
+[package]
+name = "code-session-history"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+code-secrets = { workspace = true }
+dirs = { workspace = true }
+futures = { workspace = true }
+libc = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
+sqlx = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "net"] }
+walkdir = { workspace = true }
+unicase = { workspace = true }
+zip = { workspace = true }

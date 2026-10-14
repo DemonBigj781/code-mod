@@ -1745,6 +1745,7 @@ dependencies = [
  "code-otel",
  "code-protocol",
  "code-rmcp-client",
+ "code-session-history",
  "code-skills",
  "code-utils-json-to-toml",
  "code-version",
@@ -2194,6 +2195,26 @@ dependencies = [
  "urlencoding",
  "webbrowser",
  "which",
+]
+
+[[package]]
+name = "code-session-history"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "codex-secrets",
+ "dirs",
+ "futures",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "unicase",
+ "walkdir",
+ "zip 2.4.2",
 ]
 
 [[package]]
