@@ -2,6 +2,7 @@ use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 
+use super::app_server_replay_view;
 use super::app_server_replay_view::top_tab_thread_at_x;
 use super::loaded_threads::LoadedSubagentThread;
 use super::loaded_threads::find_loaded_subagent_threads_for_primary;
@@ -233,18 +234,76 @@ impl App<'_> {
             }
             ServerNotification::ThreadStatusChanged(notification) => {
                 self.register_app_server_thread_status_with_router(
-                    notification.thread_id,
-                    notification.status,
+                    notification.thread_id.clone(),
+                    notification.status.clone(),
                 );
+                if app_server_replay_view::update_replay_thread_status(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    notification.status,
+                ) {
+                    self.schedule_redraw();
+                }
             }
             ServerNotification::ThreadNameUpdated(notification) => {
                 self.register_app_server_thread_name_with_router(
-                    notification.thread_id,
-                    notification.thread_name,
+                    notification.thread_id.clone(),
+                    notification.thread_name.clone(),
                 );
+                if app_server_replay_view::update_replay_thread_name(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    notification.thread_name,
+                ) {
+                    self.schedule_redraw();
+                }
             }
             ServerNotification::ThreadClosed(notification) => {
-                self.register_app_server_thread_closed_with_router(notification.thread_id);
+                self.register_app_server_thread_closed_with_router(notification.thread_id.clone());
+                if app_server_replay_view::mark_replay_thread_closed(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::TurnStarted(notification) => {
+                if app_server_replay_view::upsert_replay_turn(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    notification.turn,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::TurnCompleted(notification) => {
+                if app_server_replay_view::upsert_replay_turn(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    notification.turn,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::ItemStarted(notification) => {
+                if app_server_replay_view::upsert_replay_item(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    notification.item,
+                ) {
+                    self.schedule_redraw();
+                }
+            }
+            ServerNotification::ItemCompleted(notification) => {
+                if app_server_replay_view::upsert_replay_item(
+                    &mut self.app_server_thread_replays,
+                    &notification.thread_id,
+                    &notification.turn_id,
+                    notification.item,
+                ) {
+                    self.schedule_redraw();
+                }
             }
             _ => {}
         }

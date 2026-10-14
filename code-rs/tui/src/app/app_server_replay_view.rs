@@ -1,5 +1,10 @@
+use std::collections::HashMap;
+
 use code_app_server_protocol::Thread;
 use code_app_server_protocol::ThreadItem;
+use code_app_server_protocol::ThreadStatus;
+use code_app_server_protocol::Turn;
+use code_app_server_protocol::TurnStatus;
 use code_app_server_protocol::UserInput;
 use code_protocol::ThreadId;
 use ratatui::buffer::Buffer;
@@ -136,6 +141,118 @@ pub(super) fn replay_text_lines(thread: &Thread) -> Vec<String> {
     }
 
     lines
+}
+
+pub(super) fn update_replay_thread_status(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    status: ThreadStatus,
+) -> bool {
+    let Some(thread) = replay_thread_mut(replays, thread_id) else {
+        return false;
+    };
+    thread.status = Some(status);
+    true
+}
+
+pub(super) fn update_replay_thread_name(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    name: Option<String>,
+) -> bool {
+    let Some(thread) = replay_thread_mut(replays, thread_id) else {
+        return false;
+    };
+    thread.name = name;
+    true
+}
+
+pub(super) fn mark_replay_thread_closed(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+) -> bool {
+    update_replay_thread_status(replays, thread_id, ThreadStatus::NotLoaded)
+}
+
+pub(super) fn upsert_replay_turn(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn: Turn,
+) -> bool {
+    let Some(thread) = replay_thread_mut(replays, thread_id) else {
+        return false;
+    };
+    if let Some(existing) = thread.turns.iter_mut().find(|existing| existing.id == turn.id) {
+        *existing = turn;
+    } else {
+        thread.turns.push(turn);
+    }
+    true
+}
+
+pub(super) fn upsert_replay_item(
+    replays: &mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+    turn_id: &str,
+    item: ThreadItem,
+) -> bool {
+    let Some(thread) = replay_thread_mut(replays, thread_id) else {
+        return false;
+    };
+    let item_id = thread_item_id(&item).to_owned();
+    let turn = if let Some(turn) = thread.turns.iter_mut().find(|turn| turn.id == turn_id) {
+        turn
+    } else {
+        thread.turns.push(Turn {
+            id: turn_id.to_owned(),
+            items: Vec::new(),
+            status: TurnStatus::InProgress,
+            error: None,
+        });
+        thread.turns.last_mut().expect("just pushed a turn")
+    };
+
+    if let Some(existing) = turn
+        .items
+        .iter_mut()
+        .find(|existing| thread_item_id(existing) == item_id)
+    {
+        *existing = item;
+    } else {
+        turn.items.push(item);
+    }
+    true
+}
+
+fn replay_thread_mut<'a>(
+    replays: &'a mut HashMap<ThreadId, Thread>,
+    thread_id: &str,
+) -> Option<&'a mut Thread> {
+    let Ok(thread_id) = ThreadId::from_string(thread_id) else {
+        tracing::warn!(%thread_id, "app-server replay notification thread id could not be parsed");
+        return None;
+    };
+    replays.get_mut(&thread_id)
+}
+
+fn thread_item_id(item: &ThreadItem) -> &str {
+    match item {
+        ThreadItem::UserMessage { id, .. }
+        | ThreadItem::HookPrompt { id, .. }
+        | ThreadItem::AgentMessage { id, .. }
+        | ThreadItem::Plan { id, .. }
+        | ThreadItem::Reasoning { id, .. }
+        | ThreadItem::CommandExecution { id, .. }
+        | ThreadItem::FileChange { id, .. }
+        | ThreadItem::McpToolCall { id, .. }
+        | ThreadItem::CollabAgentToolCall { id, .. }
+        | ThreadItem::WebSearch { id, .. }
+        | ThreadItem::ImageView { id, .. }
+        | ThreadItem::ImageGeneration { id, .. }
+        | ThreadItem::EnteredReviewMode { id, .. }
+        | ThreadItem::ExitedReviewMode { id, .. }
+        | ThreadItem::ContextCompaction { id } => id,
+    }
 }
 
 fn push_item_lines(lines: &mut Vec<String>, item: &ThreadItem) {
@@ -324,6 +441,11 @@ mod tests {
         }
     }
 
+    fn replay_cache(thread: Thread) -> HashMap<ThreadId, Thread> {
+        let thread_id = ThreadId::from_string(&thread.id).expect("valid thread id");
+        HashMap::from([(thread_id, thread)])
+    }
+
     #[test]
     fn replay_text_lines_include_title_and_messages() {
         let lines = replay_text_lines(&replay_thread()).join("\n");
@@ -361,5 +483,91 @@ mod tests {
         assert_eq!(top_tab_thread_at_x(&tabs, 0), Some(first));
         assert_eq!(top_tab_thread_at_x(&tabs, 8), None);
         assert_eq!(top_tab_thread_at_x(&tabs, 10), Some(second));
+    }
+
+    #[test]
+    fn replay_cache_updates_thread_metadata() {
+        let mut cache = replay_cache(replay_thread());
+        let thread_id = "00000000-0000-0000-0000-000000000001";
+
+        assert!(update_replay_thread_name(
+            &mut cache,
+            thread_id,
+            Some("Renamed".to_owned())
+        ));
+        assert!(update_replay_thread_status(
+            &mut cache,
+            thread_id,
+            ThreadStatus::Active {
+                active_flags: Vec::new(),
+            }
+        ));
+
+        let thread = cache.values().next().expect("cached thread");
+        assert_eq!(thread.name.as_deref(), Some("Renamed"));
+        assert!(matches!(thread.status, Some(ThreadStatus::Active { .. })));
+    }
+
+    #[test]
+    fn replay_cache_upserts_turns_by_id() {
+        let mut cache = replay_cache(replay_thread());
+        let thread_id = "00000000-0000-0000-0000-000000000001";
+        let replacement = Turn {
+            id: "turn-1".to_owned(),
+            status: TurnStatus::Failed,
+            error: None,
+            items: Vec::new(),
+        };
+        let appended = Turn {
+            id: "turn-2".to_owned(),
+            status: TurnStatus::InProgress,
+            error: None,
+            items: Vec::new(),
+        };
+
+        assert!(upsert_replay_turn(&mut cache, thread_id, replacement));
+        assert!(upsert_replay_turn(&mut cache, thread_id, appended));
+
+        let thread = cache.values().next().expect("cached thread");
+        assert_eq!(thread.turns.len(), 2);
+        assert_eq!(thread.turns[0].id, "turn-1");
+        assert_eq!(thread.turns[0].status, TurnStatus::Failed);
+        assert_eq!(thread.turns[1].id, "turn-2");
+    }
+
+    #[test]
+    fn replay_cache_upserts_items_by_id_and_creates_missing_turn() {
+        let mut cache = replay_cache(replay_thread());
+        let thread_id = "00000000-0000-0000-0000-000000000001";
+
+        assert!(upsert_replay_item(
+            &mut cache,
+            thread_id,
+            "turn-1",
+            ThreadItem::AgentMessage {
+                id: "agent-1".to_owned(),
+                text: "replacement".to_owned(),
+            },
+        ));
+        assert!(upsert_replay_item(
+            &mut cache,
+            thread_id,
+            "turn-2",
+            ThreadItem::AgentMessage {
+                id: "agent-2".to_owned(),
+                text: "new turn item".to_owned(),
+            },
+        ));
+
+        let thread = cache.values().next().expect("cached thread");
+        assert_eq!(thread.turns.len(), 2);
+        assert_eq!(thread.turns[0].items.len(), 2);
+        assert!(matches!(
+            &thread.turns[0].items[1],
+            ThreadItem::AgentMessage { text, .. } if text == "replacement"
+        ));
+        assert_eq!(thread.turns[1].id, "turn-2");
+        assert_eq!(thread.turns[1].status, TurnStatus::InProgress);
+        assert_eq!(thread.turns[1].items.len(), 1);
     }
 }
