@@ -166,6 +166,7 @@ mod tab_isolation_tests {
         let _env = crate::chatwidget::smoke_helpers::TEST_ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("CODE_TUI_TEST_MODE", "1"); }
         let home = tempfile::tempdir().unwrap();
+        code_login::login_with_api_key(home.path(), "test-tab-isolation-key").unwrap();
         let mut config = Config::load_from_base_config_with_overrides(
             ConfigToml::default(), ConfigOverrides::default(), home.path().to_path_buf(),
         ).unwrap();
