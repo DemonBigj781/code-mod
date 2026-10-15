@@ -7,6 +7,9 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+cosmopolitan-ape = ["dep:zstd", "zstd/no_asm"]
+
 [dependencies]
 chrono = { workspace = true }
 code-secrets = { workspace = true }
@@ -22,3 +25,4 @@ tokio = { workspace = true, features = ["rt", "time", "net"] }
 walkdir = { workspace = true }
 unicase = { workspace = true }
 zip = { workspace = true }
+zstd = { workspace = true, optional = true }

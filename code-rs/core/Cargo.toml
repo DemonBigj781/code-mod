@@ -13,7 +13,7 @@ workspace = true
 
 [features]
 browser-automation = ["dep:code-browser"]
-cosmopolitan-ape = ["dep:zstd", "zstd/no_asm"]
+cosmopolitan-ape = ["dep:zstd", "zstd/no_asm", "code-session-history/cosmopolitan-ape"]
 managed-network-proxy = ["dep:code-network-proxy"]
 
 [dependencies]

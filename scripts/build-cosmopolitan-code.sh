@@ -126,7 +126,7 @@ tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-t
         fallback_memory_watchdog -- --test-threads=1
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-session-history --lib \
-        --release -- --test-threads=1
+        --features code-session-history/cosmopolitan-ape --release -- --test-threads=1
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
         --no-default-features --features "$tui_features" --release \
