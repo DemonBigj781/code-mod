@@ -312,11 +312,36 @@ pub(crate) fn import_allowed(policy: &SandboxPolicy, cwd: &Path, target: &Path) 
 
 #[cfg(target_os = "linux")]
 fn linux_kernel() -> bool {
+    kernel_is(b"Linux")
+}
+
+#[cfg(unix)]
+fn kernel_is(name: &[u8]) -> bool {
     let mut info = std::mem::MaybeUninit::<libc::utsname>::uninit();
     unsafe {
         libc::uname(info.as_mut_ptr()) == 0
-            && std::ffi::CStr::from_ptr(info.assume_init().sysname.as_ptr()).to_bytes() == b"Linux"
+            && std::ffi::CStr::from_ptr(info.assume_init().sysname.as_ptr()).to_bytes() == name
     }
+}
+
+fn deadline_expired(receiver: std::sync::mpsc::Receiver<()>, deadline: Duration) -> bool {
+    matches!(
+        receiver.recv_timeout(deadline),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    )
+}
+
+fn enforce_deadline() -> std::io::Result<std::sync::mpsc::Sender<()>> {
+    let (cancel, receiver) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("history-worker-deadline".into())
+        .spawn(move || {
+            if deadline_expired(receiver, DEADLINE) {
+                std::process::exit(124);
+            }
+        })?;
+    // Keeping this sender alive arms the timer; dropping it cancels the wait.
+    Ok(cancel)
 }
 
 struct BoundedOutput(Vec<u8>);
@@ -335,7 +360,8 @@ impl Write for BoundedOutput {
 
 /// Entry point used only by the executable's early argument dispatcher.
 pub fn run_main() -> i32 {
-    let limits = enforce_limits();
+    let limits = enforce_limits()
+        .and_then(|limits| enforce_deadline().map(|deadline| (limits, deadline)));
     let result = match limits.as_ref() {
         Err(err) => error("resource_enforcement_unavailable", err),
         Ok(_) => {
@@ -376,14 +402,22 @@ pub fn run_main() -> i32 {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn enforce_limits() -> std::io::Result<()> {
-    for (resource, limit) in [
-        (libc::RLIMIT_AS, MEMORY_LIMIT),
-        (libc::RLIMIT_CPU, DEADLINE.as_secs()),
-        (libc::RLIMIT_CORE, 0),
+    // The pinned Cosmocc 4.0.2 enforces address space on Windows, but rejects
+    // CPU/core rlimits there. The mandatory worker-local wall timer enforces
+    // the time budget instead, even when this entry point is called directly.
+    let cosmopolitan_windows = cfg!(feature = "cosmopolitan-ape") && kernel_is(b"Windows");
+    for (name, resource, limit) in [
+        ("RLIMIT_AS", libc::RLIMIT_AS, MEMORY_LIMIT),
+        ("RLIMIT_CPU", libc::RLIMIT_CPU, DEADLINE.as_secs()),
+        ("RLIMIT_CORE", libc::RLIMIT_CORE, 0),
     ] {
+        if cosmopolitan_windows && resource != libc::RLIMIT_AS {
+            continue;
+        }
         let mut inherited = std::mem::MaybeUninit::<libc::rlimit>::uninit();
         if unsafe { libc::getrlimit(resource, inherited.as_mut_ptr()) } != 0 {
-            return Err(std::io::Error::last_os_error());
+            let error = std::io::Error::last_os_error();
+            return Err(std::io::Error::new(error.kind(), format!("getrlimit({name}): {error}")));
         }
         let inherited = unsafe { inherited.assume_init() };
         let limit = libc::rlimit {
@@ -391,7 +425,8 @@ fn enforce_limits() -> std::io::Result<()> {
             rlim_max: inherited.rlim_max.min(limit as libc::rlim_t),
         };
         if unsafe { libc::setrlimit(resource, &limit) } != 0 {
-            return Err(std::io::Error::last_os_error());
+            let error = std::io::Error::last_os_error();
+            return Err(std::io::Error::new(error.kind(), format!("setrlimit({name}): {error}")));
         }
     }
     #[cfg(target_os = "linux")]
@@ -459,6 +494,26 @@ fn enforce_limits() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_worker_deadline_expires_without_a_cancellation() {
+        let (_sender, receiver) = std::sync::mpsc::channel();
+        assert!(deadline_expired(receiver, Duration::ZERO));
+    }
+
+    #[test]
+    fn history_worker_deadline_is_cancelled_when_worker_finishes() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        drop(sender);
+        assert!(!deadline_expired(receiver, Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn history_worker_deadline_accepts_explicit_cancellation() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender.send(()).unwrap();
+        assert!(!deadline_expired(receiver, Duration::from_secs(1)));
+    }
 
     #[test]
     fn history_worker_output_writer_rejects_growth_at_the_boundary() {

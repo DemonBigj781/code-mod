@@ -29,6 +29,26 @@ def invoke(artifact, payload, env):
     return json.loads(result.stdout)
 
 
+def check_worker_deadline(artifact, env):
+    command = [str(artifact), "--code-session-history-worker"]
+    try:
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, env=env)
+    except OSError as error:
+        if os.name != "posix" or error.errno != errno.ENOEXEC:
+            raise
+        process = subprocess.Popen(["sh", *command], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    try:
+        # Keep stdin open: the worker itself must terminate a blocked request,
+        # rather than relying on this test or the normal parent supervisor.
+        assert process.wait(timeout=40) == 124, "worker did not enforce its own deadline"
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=5)
+
+
 def main():
     artifact = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="code-history-worker-") as temporary:
@@ -89,7 +109,8 @@ def main():
         assert not (data / "datasets/openai-memory-pressure").exists()
         assert heavy.stat().st_size == original_size
         assert call({"action": "list_stores"})["ok"] is True
-    print("Native history worker: retrieval, malformed/oversized input, write policy, and memory-pressure isolation passed")
+        check_worker_deadline(artifact, env)
+    print("Native history worker: retrieval, malformed/oversized input, write policy, memory-pressure isolation, and worker deadline passed")
 
 
 if __name__ == "__main__":

@@ -113,7 +113,9 @@ Other requests wait up to 30 seconds for that resource slot and then return
 
 The worker input is capped at 1 MiB and its complete serialized response at
 4 MiB. The parent imposes a 30-second work deadline and a short shutdown grace
-period. Cancellation or a deadline/output-limit failure terminates and reaps
+period. The worker also arms its own 30-second wall-clock deadline before reading
+input, including when invoked directly; inability to start that timer fails
+closed. Cancellation or a deadline/output-limit failure terminates and reaps
 the worker instead of abandoning an in-process scan. A worker crash returns an
 error; it never falls back to unbounded execution inside Code.
 
@@ -123,6 +125,10 @@ Memory enforcement is platform-specific:
   inside the worker, after exec. Inherited lower hard/soft limits are preserved.
   A CPU-time limit is also set where the runtime enforces it, and Unix core
   dumps are disabled to avoid writing private history into a crash dump.
+- The pinned Cosmocc 4.0.2 runtime rejects CPU/core limits on Windows. On that
+  host only, the APE worker retains its mandatory address-space limit and uses
+  the worker-local wall-clock deadline instead of the unavailable CPU limit.
+  It does not ignore address-space enforcement failures or allow unbounded work.
 - On Linux, delegated cgroups additionally apply memory and 32-task limits.
   If cgroup memory enforcement is unavailable, the existing process-group RSS
   watchdog provides an additional sampled memory check. Linux workers also
