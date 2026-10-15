@@ -991,7 +991,7 @@ pub enum EventMsg {
     SessionConfigured(SessionConfiguredEvent),
 
     /// The model chose a persistent title for this conversation.
-    SessionTitleUpdated { title: String },
+    ThreadNameUpdated(code_protocol::protocol::ThreadNameUpdatedEvent),
 
     /// The active config.toml changed on disk and should be reloaded by the client.
     ConfigChanged,
@@ -1835,6 +1835,17 @@ pub struct BrowserSnapshotEvent {
 mod tests {
     use super::*;
     use crate::model_provider_info::OPENAI_API_BASE_URL;
+
+    #[test]
+    fn tab_isolation_thread_names_round_trip_through_the_shared_protocol() {
+        let thread_id = code_protocol::ThreadId::new();
+        let original = EventMsg::ThreadNameUpdated(code_protocol::protocol::ThreadNameUpdatedEvent {
+            thread_id, thread_name: Some("Isolate tab callbacks".to_owned()),
+        });
+        let wire = event_msg_to_protocol(&original).expect("name update must reach the shared protocol");
+        let restored = event_msg_from_protocol(&wire).expect("name update must survive replay");
+        assert_eq!(serde_json::to_value(original).unwrap(), serde_json::to_value(restored).unwrap());
+    }
 
     /// Serialize Event to verify that its JSON representation has the expected
     /// amount of nesting.

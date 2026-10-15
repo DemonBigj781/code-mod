@@ -184,8 +184,9 @@ async fn ai_titles_follow_topic_changes_and_stay_session_local() {
                 let mut saw_title = false;
                 loop {
                     match session.conversation.next_event().await.unwrap().msg {
-                        EventMsg::SessionTitleUpdated { title } => {
-                            assert_eq!(title, expected);
+                        EventMsg::ThreadNameUpdated(update) => {
+                            assert_eq!(update.thread_id.to_string(), session.conversation_id.to_string());
+                            assert_eq!(update.thread_name.as_deref(), Some(expected.as_str()));
                             saw_title = true;
                         }
                         EventMsg::TaskComplete(_) => {

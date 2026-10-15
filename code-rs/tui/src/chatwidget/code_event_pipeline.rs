@@ -104,7 +104,7 @@ impl ChatWidget<'_> {
 
         let Event { id, msg, .. } = event.clone();
         match msg {
-            EventMsg::SessionTitleUpdated { .. } => {}
+            EventMsg::ThreadNameUpdated(_) => {}
             EventMsg::EnvironmentContextFull(ev) => {
                 self.handle_environment_context_full_event(&ev);
             }

@@ -50,8 +50,11 @@ impl ToolHandler for SessionTitleHandler {
             .await
         {
             Ok(true) => {
-                sess.send_ordered_from_ctx(&inv.ctx, EventMsg::SessionTitleUpdated { title })
-                    .await;
+                let thread_id = code_protocol::ThreadId::from_string(&sess.session_uuid().to_string())
+                    .expect("session UUID is a valid thread ID");
+                sess.send_ordered_from_ctx(&inv.ctx, EventMsg::ThreadNameUpdated(
+                    code_protocol::protocol::ThreadNameUpdatedEvent { thread_id, thread_name: Some(title) }
+                )).await;
                 tool_output(inv.ctx.call_id, "Session title updated")
             }
             Ok(false) => tool_error(inv.ctx.call_id, "Current session is not in the catalog yet"),

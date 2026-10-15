@@ -252,9 +252,10 @@ impl App<'_> {
                 if widget.event_sender().owner() == Some(owner))
         });
         let is_inactive = !owned_callback && self.inactive_chat_widgets.contains_key(&thread_id);
-        if let EventMsg::SessionTitleUpdated { title } = &event.msg {
-            if is_inactive || self.active_chat_thread_id() == Some(thread_id) {
-                self.register_app_server_thread_name_with_router(thread_id.to_string(), Some(title.clone()));
+        if let EventMsg::ThreadNameUpdated(update) = &event.msg {
+            if update.thread_id == thread_id
+                && (is_inactive || self.active_chat_thread_id() == Some(thread_id)) {
+                self.register_app_server_thread_name_with_router(thread_id.to_string(), update.thread_name.clone());
             }
             return;
         }
@@ -602,13 +603,7 @@ impl App<'_> {
             tracing::warn!(%thread_id, "app-server thread name id could not be parsed");
             return;
         };
-        self.active_thread_router.upsert_thread_metadata(
-            thread_id,
-            ThreadTabMetadata {
-                title: thread_name,
-                ..ThreadTabMetadata::default()
-            },
-        );
+        self.active_thread_router.update_thread_title(thread_id, thread_name);
         self.schedule_redraw();
     }
 

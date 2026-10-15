@@ -3726,6 +3726,16 @@ async fn run_thread_event_loop(
 
                 let turn_id = event.id.clone();
                 match event.msg {
+                    code_core::protocol::EventMsg::ThreadNameUpdated(update) => {
+                        if update.thread_id.to_string() == thread_id {
+                            broadcast_server_notification(
+                                outgoing.as_ref(), &thread_state,
+                                ServerNotification::ThreadNameUpdated(ThreadNameUpdatedNotification {
+                                    thread_id: thread_id.clone(), thread_name: update.thread_name,
+                                }),
+                            ).await;
+                        }
+                    }
                     code_core::protocol::EventMsg::TaskStarted => {
                         let turn = Turn { id: turn_id.clone(), items: Vec::new(), status: TurnStatus::InProgress, error: None };
                         broadcast_server_notification(

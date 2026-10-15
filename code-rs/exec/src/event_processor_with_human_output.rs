@@ -269,7 +269,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             | EventMsg::ListCustomPromptsResponse(_)
             | EventMsg::ListSkillsResponse(_)
             | EventMsg::ConfigChanged
-            | EventMsg::SessionTitleUpdated { .. }
+            | EventMsg::ThreadNameUpdated(_)
             | EventMsg::McpListToolsResponse(_)
             | EventMsg::ViewImageToolCall(_)
             | EventMsg::AutoContextCheck(_)

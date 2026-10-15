@@ -153,6 +153,13 @@ impl ActiveThreadRouter {
         }
     }
 
+    pub(crate) fn update_thread_title(&mut self, thread_id: ThreadId, title: Option<String>) {
+        if !self.thread_metadata.contains_key(&thread_id) {
+            self.upsert_thread_metadata(thread_id, ThreadTabMetadata::default());
+        }
+        self.thread_metadata.get_mut(&thread_id).expect("registered metadata").title = title;
+    }
+
     pub(crate) fn restore_order(&mut self, order: &[ThreadId]) {
         let mut seen = HashSet::new();
         self.order = order.iter().chain(self.order.iter()).copied()
@@ -308,6 +315,26 @@ pub(crate) struct ThreadTab {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn tab_isolation_title_changes_preserve_running_state_and_other_titles() {
+        let mut router = ActiveThreadRouter::default();
+        let first = thread_id(91);
+        let second = thread_id(92);
+        for id in [first, second] {
+            router.upsert_thread_metadata(id, ThreadTabMetadata { is_running: true, ..Default::default() });
+        }
+        router.update_thread_title(first, Some("Alpha".into()));
+        router.update_thread_title(second, Some("Bravo".into()));
+        router.update_thread_title(first, Some("New topic".into()));
+        let tabs = router.ordered_tabs();
+        assert_eq!(tabs[0].title, "New topic");
+        assert_eq!(tabs[1].title, "Bravo");
+        assert!(tabs.iter().all(|tab| tab.is_running));
+        router.update_thread_title(first, None);
+        assert_eq!(router.ordered_tabs()[0].title, "Main");
+        assert_eq!(router.ordered_tabs()[1].title, "Bravo");
+    }
 
     fn thread_id(suffix: u32) -> ThreadId {
         ThreadId::from_string(&format!("00000000-0000-0000-0000-{suffix:012}"))
