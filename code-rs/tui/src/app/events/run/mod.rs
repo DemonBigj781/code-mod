@@ -129,7 +129,11 @@ impl App<'_> {
         if let AppState::Chat { widget } = background_state {
             let id = widget.session_id()
                 .and_then(|id| code_protocol::ThreadId::from_string(&id.to_string()).ok())
-                .unwrap_or(target);
+                // An async fork may still be waiting for SessionConfigured.
+                // Keep it under its own temporary key, not its parent's key.
+                .unwrap_or_else(|| code_protocol::ThreadId::from_string(
+                    &widget.event_sender().owner().expect("widget owner").to_string()
+                ).expect("UUID is a valid thread id"));
             self.inactive_chat_widgets.insert(id, widget);
         }
         if let Some(selected) = selected {
@@ -220,6 +224,13 @@ mod tab_isolation_tests {
             owner: uuid::Uuid::new_v4(), event: Box::new(AppEvent::ExitRequest),
         }, &mut terminal).unwrap();
         assert_eq!(app.active_chat_thread_id(), before);
+        app.dispatch_app_event(AppEvent::WidgetEvent {
+            owner: second_owner,
+            event: Box::new(AppEvent::DispatchCommand(SlashCommand::New, "/new".into())),
+        }, &mut terminal).unwrap();
+        assert_eq!(app.active_chat_thread_id(), before);
+        assert!(app.inactive_chat_widgets.contains_key(&second_id));
+        assert_eq!(app.inactive_chat_widgets.len(), 2, "pending child must not replace its parent");
         app.commit_anim_running.store(false, Ordering::Release);
         #[cfg(unix)]
         app.clear_sigterm_guard();

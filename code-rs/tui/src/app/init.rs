@@ -412,8 +412,6 @@ impl App<'_> {
             commit_animation_owners: HashSet::new(),
             terminal_info,
             clear_on_first_frame: true,
-            pending_jump_back_ghost_state: None,
-            pending_jump_back_history_snapshot: None,
             theme_split_preview: None,
             last_frame_size: None,
             last_esc_time: None,

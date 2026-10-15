@@ -13,9 +13,8 @@ use ratatui::prelude::Size;
 
 use crate::app_event::{AppEvent, TerminalRunController};
 use crate::app_event_sender::AppEventSender;
-use crate::chatwidget::{ChatWidget, GhostState};
+use crate::chatwidget::ChatWidget;
 use crate::file_search::FileSearchManager;
-use crate::history::state::HistorySnapshot;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::tui::TerminalInfo;
 use super::app_server_session::AppServerSessionBridge;
@@ -203,10 +202,6 @@ pub(crate) struct App<'a> {
     /// profile defaults until all cells are explicitly painted.
     pub(super) clear_on_first_frame: bool,
 
-    /// Pending ghost snapshot state to apply after a conversation fork completes.
-    pub(super) pending_jump_back_ghost_state: Option<GhostState>,
-    /// Pending history snapshot to seed the next widget after a jump-back fork.
-    pub(super) pending_jump_back_history_snapshot: Option<HistorySnapshot>,
     /// When set, render the entire frame as a left/right split where each half
     /// is drawn using a different theme.
     pub(super) theme_split_preview: Option<ThemeSplitPreview>,

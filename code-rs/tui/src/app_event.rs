@@ -854,6 +854,8 @@ pub(crate) enum AppEvent {
         new_conv: Redacted<code_core::NewConversation>,
         prefix_items: Vec<ResponseItem>,
         prefill: String,
+        ghost_state: Redacted<crate::chatwidget::GhostState>,
+        history_snapshot: Option<HistorySnapshot>,
     },
 
     /// Register an image placeholder inserted by the composer with its backing path

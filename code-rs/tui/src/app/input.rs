@@ -220,7 +220,7 @@ impl App<'_> {
     }
 
     pub(super) fn dispatch_code_event(&mut self, event: Event) {
-        if self.event_deduper.is_duplicate(&event.id, event.event_seq) {
+        if self.event_deduper.is_duplicate(self.app_event_tx.owner(), &event.id, event.event_seq) {
             tracing::warn!(
                 event_id = %event.id,
                 event_seq = event.event_seq,

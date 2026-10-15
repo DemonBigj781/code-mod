@@ -53,9 +53,6 @@
                             items.iter().take(cut).cloned().collect::<Vec<_>>()
                         };
 
-                        self.pending_jump_back_ghost_state = Some(ghost_state);
-                        self.pending_jump_back_history_snapshot = history_snapshot;
-
                         // Perform the fork off the UI thread to avoid nested runtimes
                         let server = self._server.clone();
                         let tx = self.app_event_tx.clone();
@@ -81,7 +78,11 @@
                                 });
                                 match result {
                                     Ok(new_conv) => {
-                                        tx.send(AppEvent::JumpBackForked { cfg, new_conv: crate::app_event::Redacted(new_conv), prefix_items, prefill: prefill_clone });
+                                        tx.send(AppEvent::JumpBackForked {
+                                            cfg, new_conv: crate::app_event::Redacted(new_conv),
+                                            prefix_items, prefill: prefill_clone,
+                                            ghost_state: crate::app_event::Redacted(ghost_state), history_snapshot,
+                                        });
                                     }
                                     Err(e) => {
                                         tracing::error!("error forking conversation: {e:#}");
@@ -93,13 +94,11 @@
                         }
                     }
                 }
-                AppEvent::JumpBackForked { cfg, new_conv, prefix_items, prefill } => {
+                AppEvent::JumpBackForked { cfg, new_conv, prefix_items, prefill, ghost_state, history_snapshot } => {
                     // Replace widget with a new one bound to the forked conversation
                     let session_conf = new_conv.0.session_configured.clone();
                     let conv = new_conv.0.conversation.clone();
 
-                    let mut ghost_state = self.pending_jump_back_ghost_state.take();
-                    let history_snapshot = self.pending_jump_back_history_snapshot.take();
                     let emit_prefix = history_snapshot.is_none();
 
                     let auth_manager = self._server.auth_manager();
@@ -115,16 +114,13 @@
                             auth_manager,
                             show_welcome: false,
                         });
-                    if let Some(state) = ghost_state.take() {
-                        new_widget.adopt_ghost_state(state);
-                    } else {
-                        tracing::warn!("jump-back fork missing ghost snapshot state; redo may be unavailable");
-                    }
+                    new_widget.adopt_ghost_state(ghost_state.0);
                     if let Some(snapshot) = history_snapshot.as_ref() {
                         new_widget.restore_history_snapshot(snapshot);
                     }
                     new_widget.enable_perf(self.timing_enabled);
                     new_widget.check_for_initial_animations();
+                    let replay_tx = new_widget.event_sender();
                     self.replace_active_chat_widget(new_widget);
                     // Other tabs retain their terminal jobs and streaming animations.
                     self.last_esc_time = None;
@@ -144,7 +140,7 @@
                             ),
                             order: None,
                         };
-                        self.app_event_tx.send(AppEvent::codex_event(ev));
+                        replay_tx.send(AppEvent::codex_event(ev));
                     }
 
                     // Prefill composer with the edited text
