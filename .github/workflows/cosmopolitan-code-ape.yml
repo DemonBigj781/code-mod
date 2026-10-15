@@ -52,3 +52,5 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $artifact --help > $null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/cosmopolitan-code/check-history-worker.py $artifact
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

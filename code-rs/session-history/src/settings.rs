@@ -76,6 +76,12 @@ impl Settings {
             labels.insert(id.clone());
             stores.push(Store { id, root });
         }
+        Self { stores, data_dir: Self::data_dir(code_home) }
+    }
+
+    /// Resolve the import directory without enumerating or opening source stores.
+    pub fn data_dir(code_home: &Path) -> PathBuf {
+        let home = dirs::home_dir().unwrap_or_else(|| code_home.to_owned());
         let data_home = std::env::var_os("XDG_DATA_HOME")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
@@ -94,7 +100,7 @@ impl Settings {
             std::env::current_dir().unwrap_or(home).join(data_dir)
         };
         let data_dir = data_dir.canonicalize().unwrap_or(data_dir);
-        Self { stores, data_dir }
+        data_dir
     }
 }
 

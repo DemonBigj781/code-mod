@@ -36,3 +36,4 @@ Use these docs to install, configure, and operate Every Code (Code).
 | # | Change | Spec | Status | Depends On |
 |---|--------|------|--------|------------|
 | 0001 | [Code recovery and repository normalization](changes/0001-canonical-history-recovery.md) | — | in-progress | — |
+| 0002 | [Code feature parity and lost work recovery](changes/0002-code-feature-parity-roadmap.md) | — | in-progress | 0001 |

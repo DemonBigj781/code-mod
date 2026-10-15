@@ -55,6 +55,9 @@ where
     }
 
     let argv1 = args.next().unwrap_or_default();
+    if argv1 == code_core::session_history_worker::WORKER_ARG {
+        std::process::exit(code_core::session_history_worker::run_main());
+    }
     if argv1 == CODEX_APPLY_PATCH_ARG1 {
         let patch_arg = args.next().and_then(|s| s.to_str().map(str::to_owned));
         let exit_code = if let Some(patch_arg) = patch_arg {

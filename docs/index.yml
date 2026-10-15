@@ -15,6 +15,13 @@ changes:
     spec: null
     status: in-progress
     depends_on: []
+  - id: "0002"
+    name: code-feature-parity-roadmap
+    path: changes/0002-code-feature-parity-roadmap.md
+    description: Recover forward feature parity and contain command and history resource use.
+    spec: null
+    status: in-progress
+    depends_on: ["0001"]
   # - id: "NNNN"
   #   name: <change-name>
   #   path: changes/NNNN-<change-name>.md

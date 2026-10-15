@@ -96,6 +96,7 @@ pub mod git_worktree;
 pub mod slash_commands;
 pub mod parse_command;
 pub mod history;
+pub mod session_history_worker;
 mod mentions;
 mod truncate;
 mod user_instructions;

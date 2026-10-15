@@ -315,7 +315,7 @@ fn private_write(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn import_export(settings: &Settings, filename: &str, name: &str) -> Result<Value> {
+pub(crate) fn import_export(settings: &Settings, filename: &str, name: &str, staging_parent: Option<&Path>) -> Result<Value> {
     if filename.is_empty() || matches!(filename, "." | "..") || filename.contains(['/', '\\', ':'])
     {
         return Err(Error::new(
@@ -374,7 +374,7 @@ pub(crate) fn import_export(settings: &Settings, filename: &str, name: &str) -> 
     }
     let staging = tempfile::Builder::new()
         .prefix(".import-")
-        .tempdir_in(&datasets)?;
+        .tempdir_in(staging_parent.unwrap_or(&datasets))?;
     private_dir(&staging.path().join("sessions"))?;
     let mut counts = Counts::default();
     let mut seen = HashSet::new();

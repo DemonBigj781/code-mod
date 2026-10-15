@@ -1,6 +1,6 @@
 # Code Feature Parity and Lost Work Recovery
 
-**Status:** draft
+**Status:** in-progress
 
 ## Objective
 
@@ -8,6 +8,16 @@ Recover and plan Code-mod features that were discussed in prior sessions or in
 current operator direction but are not covered by the canonical recovery ledger.
 This document is a forward feature-parity roadmap, not a replacement for
 `docs/changes/0001-canonical-history-recovery.md`.
+
+## Current execution status
+
+2026-10-15: native `session_history` is implemented in commit `31b2ac3d5`;
+the original source-gap descriptions below are the earlier audit snapshot.
+The current next task is resource guarding for command/history execution.
+Tab-isolation and AI-selected session-title changes are a separate verification
+track and are not considered complete until their GitHub Actions run passes.
+The separate Cosmopolitan environment update remains deferred; its pinned
+revision is unchanged by this work.
 
 ## Evidence sources
 
@@ -246,6 +256,11 @@ This document is a forward feature-parity roadmap, not a replacement for
 
 - [ ] Re-verify and harden resource guarding around command/session-history
       execution.
+      In progress: supervise history in a resource-limited child of the native
+      executable, retain import write-policy checks, bound IPC and deadlines,
+      and clean owned import staging after worker termination. Remote tests are
+      required before checking off the subtasks below; host-specific validation
+      on the Steam Deck remains a separate gate.
   - [ ] Confirm current process-group memory watchdog behavior on this host.
   - [ ] Add focused tests for nested child processes and history scans that exceed
         memory or process limits.

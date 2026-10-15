@@ -2,6 +2,8 @@
 
 Code exposes `session_history` as a built-in Rust agent tool. It implements the
 prior-sessions operations without starting Python, an MCP server, or a proxy.
+The tool runs the Rust reader in a supervised child of the same executable;
+history scanning does not run on a blocking thread inside the parent agent.
 It reads existing Code/Codex history and the OpenAI datasets created by
 `code-session-mcp`; no migration or rewrite of those source stores is required.
 
@@ -102,6 +104,54 @@ unbounded allocation or silently truncating an imported dataset.
 The external prior-sessions MCP configuration is not automatically removed.
 It can remain available while a newly built native implementation is verified.
 
+## Resource containment
+
+Each native tool request uses a fresh worker with a private input/output pipe.
+At most one history worker runs per Code process, including across session tabs.
+Other requests wait up to 30 seconds for that resource slot and then return
+`resource_busy`; this shared budget does not share conversation data or results.
+
+The worker input is capped at 1 MiB and its complete serialized response at
+4 MiB. The parent imposes a 30-second work deadline and a short shutdown grace
+period. Cancellation or a deadline/output-limit failure terminates and reaps
+the worker instead of abandoning an in-process scan. A worker crash returns an
+error; it never falls back to unbounded execution inside Code.
+
+Memory enforcement is platform-specific:
+
+- Linux and the Cosmopolitan executable apply a 512 MiB address-space limit
+  inside the worker, after exec. Inherited lower hard/soft limits are preserved.
+  A CPU-time limit is also set where the runtime enforces it, and Unix core
+  dumps are disabled to avoid writing private history into a crash dump.
+- On Linux, delegated cgroups additionally apply memory and 32-task limits.
+  If cgroup memory enforcement is unavailable, the existing process-group RSS
+  watchdog provides an additional sampled memory check. Linux workers also
+  receive a parent-death signal.
+- Native Windows builds use a Job Object with a 512 MiB process-memory limit,
+  a CPU-time limit, and one active process. The Cosmopolitan executable uses
+  its own resource-limit implementation instead.
+- Native macOS builds fail explicitly with `resource_enforcement_unavailable`:
+  their address-space limit is not equivalent to the required enforcement.
+  This is distinct from Cosmopolitan's userspace address-space limit.
+
+These are worker limits, not a memory reservation or a cap on all of Code and
+its tools. Process-group RSS accounting can count shared pages more than once.
+The command watchdog covers children that remain in the group; it is not a
+replacement for delegated cgroups when descendants detach into other groups,
+and it does not supply an equivalent fallback process-count limit.
+
+Imports keep their original export untouched. The supervisor owns a private
+staging directory on the dataset filesystem and removes it after normal failure,
+timeout, or cancellation, including when the worker cannot unwind. A finished
+dataset is published atomically. If a request is interrupted just after that
+publication, the complete dataset can exist despite a missing response; inspect
+the store list before retrying with the same dataset name. A hard termination of
+the parent process itself can still leave staging files for manual inspection.
+
+The direct `code-session-history` library entry point remains blocking and is
+not an OS resource boundary by itself. Resource isolation belongs to the native
+tool's supervisor and early executable dispatcher.
+
 ## Compatibility and verification
 
 Imported-dataset discovery recognizes `code-session-mcp.openai-export.v1`.
@@ -116,3 +166,7 @@ pagination, and filesystem-boundary tests. The core integration test
 `session_history_native` exercises all seven operations without an MCP process.
 The manual Cosmopolitan build runs that integration test before packaging the
 artifact, alongside the conversation identity regression test.
+It also runs the worker supervisor and nested-child watchdog regressions. Both
+the Linux and Windows artifact checks exercise the hidden worker entry point
+against temporary stores, malformed/oversized requests, write-policy refusal,
+and a valid JSON import whose decoded allocations exceed the worker budget.

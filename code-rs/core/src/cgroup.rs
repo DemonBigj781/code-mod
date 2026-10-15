@@ -597,4 +597,33 @@ mod tests {
         assert_eq!(status.signal(), Some(libc::SIGKILL));
         assert!(watchdog.limit_exceeded());
     }
+
+    #[tokio::test]
+    async fn fallback_memory_watchdog_counts_nested_children_together() {
+        let mut command = tokio::process::Command::new("python3");
+        command.args(["-c", "import os,time\nfor _ in range(2):\n if os.fork() == 0:\n  payload = bytearray(24 * 1024 * 1024)\n  time.sleep(20)\n  os._exit(0)\ntime.sleep(20)"]);
+        command.kill_on_drop(true);
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let own_group = unsafe { libc::getpgrp() };
+        let mut child = command.spawn().expect("spawn nested memory fixture");
+        let pid = child.id().expect("fixture PID");
+        let watchdog = spawn_exec_memory_watchdog_if_needed(pid, 48 * 1024 * 1024)
+            .expect("fixture uses process-group fallback");
+        let result = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+        if result.is_err() {
+            unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL); }
+            let _ = child.wait().await;
+        }
+        let status = result.expect("combined child RSS must exceed limit").expect("reap fixture");
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        assert!(watchdog.limit_exceeded());
+        assert_eq!(unsafe { libc::getpgrp() }, own_group);
+    }
 }

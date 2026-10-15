@@ -111,6 +111,17 @@ patch_config="patch.crates-io.rama-tls-rustls.path=\"$workspace/code-rs/vendor/r
         --no-default-features --features code-core/cosmopolitan-ape --release \
         tab_isolation -- --test-threads=1
     bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-core --lib \
+        --no-default-features --features code-core/cosmopolitan-ape --release \
+        session_history_worker -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-core --lib \
+        --no-default-features --features code-core/cosmopolitan-ape --release \
+        fallback_memory_watchdog -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-session-history --lib \
+        --release -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-tui --lib \
         --no-default-features --features code-tui/cosmopolitan-ape,code-core/cosmopolitan-ape --release \
         tab_isolation -- --test-threads=1
@@ -162,6 +173,7 @@ pathlib.Path(manifest_path).write_text(
 PY
 
 sh "$support_dir/test-artifact.sh" "$artifact" "$manifest"
+python3 "$support_dir/check-history-worker.py" "$artifact"
 mkdir -p "$(dirname "$output_dir")"
 mv "$package_dir" "$output_dir"
 printf 'APE artifact: %s/%s\nManifest: %s/%s.json\n' \

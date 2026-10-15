@@ -100,12 +100,19 @@ fn required<'a>(value: &'a Option<String>, field: &str) -> Result<&'a str> {
 
 /// Blocking entry point. Call from a blocking worker, not a Tokio async executor thread.
 pub fn execute(settings: Settings, request: Request) -> Result<Value> {
+    execute_with_staging(settings, request, None)
+}
+
+/// Execute with a caller-owned import staging parent on the dataset filesystem.
+/// A supervising process can remove this directory after a worker is killed.
+pub fn execute_with_staging(settings: Settings, request: Request, staging_parent: Option<&std::path::Path>) -> Result<Value> {
     validate(&request)?;
     if request.action == Action::ImportOpenaiExport {
         return import::import_export(
             &settings,
             required(&request.file_name, "file_name")?,
             required(&request.dataset_name, "dataset_name")?,
+            staging_parent,
         );
     }
     let runtime = tokio::runtime::Builder::new_current_thread()

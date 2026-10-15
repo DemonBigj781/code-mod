@@ -21,6 +21,25 @@ fn settings(root: &Path) -> Settings {
         data_dir: root.join("data"),
     }
 }
+
+#[test]
+fn supervised_import_uses_owned_staging_and_keeps_source_untouched() {
+    let root = tempfile::tempdir().unwrap();
+    let settings = settings(root.path());
+    let datasets = settings.data_dir.join("datasets");
+    std::fs::create_dir(&datasets).unwrap();
+    let staging = tempfile::Builder::new().prefix(".history-worker-").tempdir_in(&datasets).unwrap();
+    let source = settings.data_dir.join("inbox/conversations.json");
+    let original = serde_json::to_vec(&vec![conversation()]).unwrap();
+    std::fs::write(&source, &original).unwrap();
+    let output = execute_with_staging(settings.clone(), request(json!({
+        "action":"import_openai_export","file_name":"conversations.json","dataset_name":"guarded"
+    })), Some(staging.path())).unwrap();
+    assert!(output["session_count"].as_u64().unwrap() > 0);
+    assert_eq!(std::fs::read_dir(staging.path()).unwrap().count(), 0);
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+    assert!(datasets.join("openai-guarded/openai-export.json").is_file());
+}
 fn request(value: Value) -> Request {
     serde_json::from_value(value).expect("test operation succeeds")
 }
