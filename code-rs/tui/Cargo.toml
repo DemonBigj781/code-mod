@@ -152,7 +152,7 @@ serial_test = "3.2.0"
 strip-ansi-escapes = "0.1"
 serde_bytes = "0.11"
 toml = { workspace = true }
-code-tui = { path = ".", features = ["test-helpers"] }
+code-tui = { path = ".", default-features = false, features = ["test-helpers"] }
 code-keyring-store = { workspace = true }
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }

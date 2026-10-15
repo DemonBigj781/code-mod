@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 import sys
+import tomllib
 import unittest
 from contextlib import redirect_stderr
 from unittest.mock import patch
@@ -18,6 +19,14 @@ import test_artifact_contract
 
 
 class CommandTests(unittest.TestCase):
+    def test_tui_self_dependency_does_not_reenable_native_picker(self):
+        manifest_path = Path(__file__).resolve().parents[3] / "code-rs/tui/Cargo.toml"
+        with manifest_path.open("rb") as stream:
+            manifest = tomllib.load(stream)
+        dependency = manifest["dev-dependencies"]["code-tui"]
+        self.assertFalse(dependency.get("default-features", True))
+        self.assertIn("test-helpers", dependency["features"])
+
     def test_build_jobs_are_one_except_on_github_hosted_runners(self):
         script = (Path(__file__).resolve().parents[2] / "build-cosmopolitan-code.sh").read_text()
         start = script.index("build_jobs=1\n")
