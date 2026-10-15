@@ -431,7 +431,7 @@ impl Runner<'_> {
             shell_args: hooks_shell_args,
         });
 
-        let mut new_session = Arc::new(Session {
+        let new_session = Arc::new_cyclic(|weak_handle| Session {
             id: self.session_id,
             background_exec_notify: Arc::new(Notify::new()),
             client,
@@ -511,7 +511,7 @@ impl Runner<'_> {
             hook_guard: AtomicBool::new(false),
             github: Arc::new(RwLock::new(config.github.clone())),
             validation: Arc::new(RwLock::new(config.validation.clone())),
-            self_handle: Weak::new(),
+            self_handle: weak_handle.clone(),
             active_review: Mutex::new(None),
             next_turn_text_format: Mutex::new(None),
             env_ctx_v2: config.env_ctx_v2,
@@ -528,10 +528,6 @@ impl Runner<'_> {
                 turn_allow_servers: HashSet::new(),
             }),
         });
-        let weak_handle = Arc::downgrade(&new_session);
-        if let Some(inner) = Arc::get_mut(&mut new_session) {
-            inner.self_handle = weak_handle;
-        }
         self.sess = Some(new_session);
         #[cfg(feature = "managed-network-proxy")]
         {

@@ -2,12 +2,11 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::{Context, Result};
 use code_protocol::protocol::SessionSource;
 use once_cell::sync::OnceCell;
-use tokio::task;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
@@ -36,14 +35,12 @@ pub struct SessionQuery {
 /// Public catalog facade used by TUI/CLI/Exec entrypoints.
 pub struct SessionCatalog {
     code_home: PathBuf,
-    cache: Arc<AsyncMutex<Option<rollout_catalog::SessionCatalog>>>,
 }
 
 impl SessionCatalog {
     /// Create a catalog facade for the provided code home directory.
     pub fn new(code_home: PathBuf) -> Self {
-        let cache = catalog_cache_handle(&code_home);
-        Self { code_home, cache }
+        Self { code_home }
     }
 
     /// Query the catalog with the provided filters, returning ordered entries.
@@ -127,9 +124,7 @@ impl SessionCatalog {
 
     /// Set or clear a nickname for the given session.
     pub async fn set_nickname(&self, session_id: Uuid, nickname: Option<String>) -> Result<bool> {
-        self.load_inner().await?;
-        let mut guard = self.cache.lock().await;
-        let catalog = guard.as_mut().context("session catalog was not loaded")?;
+        let mut catalog = self.load_inner().await?;
         let updated = catalog
             .set_nickname(session_id, nickname)
             .context("failed to update session nickname")?;
@@ -167,9 +162,6 @@ impl SessionCatalog {
             .upsert(entry.clone())
             .context("failed to persist updated catalog entry")?;
 
-        let mut guard = self.cache.lock().await;
-        *guard = Some(catalog);
-
         Ok(Some(entry))
     }
 
@@ -182,10 +174,6 @@ impl SessionCatalog {
         let updated = catalog
             .set_memory_mode(session_id, memory_mode)
             .context("failed to update session memory mode")?;
-        if updated {
-            let mut guard = self.cache.lock().await;
-            *guard = Some(catalog);
-        }
         Ok(updated)
     }
 
@@ -281,8 +269,6 @@ impl SessionCatalog {
             .upsert(entry)
             .context("failed to persist updated catalog entry")?;
 
-        let mut guard = self.cache.lock().await;
-        *guard = Some(catalog);
         Ok(true)
     }
 
@@ -367,38 +353,12 @@ impl SessionCatalog {
             .upsert(entry)
             .context("failed to persist updated catalog entry")?;
 
-        let mut guard = self.cache.lock().await;
-        *guard = Some(catalog);
-
         Ok(true)
     }
 
-    async fn load_inner(&self) -> Result<rollout_catalog::SessionCatalog> {
-        {
-            let mut guard = self.cache.lock().await;
-            if let Some(existing) = guard.as_mut() {
-                existing
-                    .reconcile(&self.code_home)
-                    .await
-                    .context("failed to reconcile session catalog")?;
-                return Ok(existing.clone());
-            }
-        }
-
-        let code_home = self.code_home.clone();
-        let mut catalog = task::spawn_blocking(move || rollout_catalog::SessionCatalog::load(&code_home))
-            .await
-            .context("catalog task panicked")?
-            .context("failed to load session catalog")?;
-
-        catalog
-            .reconcile(&self.code_home)
-            .await
-            .context("failed to reconcile session catalog")?;
-
-        let mut guard = self.cache.lock().await;
-        *guard = Some(catalog.clone());
-        Ok(catalog)
+    async fn load_inner(&self) -> Result<rollout_catalog::CatalogTransaction> {
+        rollout_catalog::catalog_transaction(&self.code_home, true).await
+            .context("failed to load and reconcile session catalog")
     }
 }
 
@@ -419,14 +379,18 @@ pub fn entry_to_rollout_path(code_home: &Path, entry: &SessionIndexEntry) -> Pat
     code_home.join(&entry.rollout_path)
 }
 
-type SharedCatalog = Arc<AsyncMutex<Option<rollout_catalog::SessionCatalog>>>;
+type SharedCatalogAccess = Arc<AsyncMutex<()>>;
 
-fn catalog_cache_handle(code_home: &Path) -> SharedCatalog {
-    static CACHE: OnceCell<Mutex<HashMap<PathBuf, SharedCatalog>>> = OnceCell::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    guard
-        .entry(code_home.to_path_buf())
-        .or_insert_with(|| Arc::new(AsyncMutex::new(None)))
-        .clone()
+pub(crate) fn catalog_access_handle(code_home: &Path) -> SharedCatalogAccess {
+    static ACCESS: OnceCell<Mutex<HashMap<PathBuf, Weak<AsyncMutex<()>>>>> = OnceCell::new();
+    let access = ACCESS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = access.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.retain(|_, access| access.strong_count() > 0);
+    let path = code_home.canonicalize().unwrap_or_else(|_| code_home.to_path_buf());
+    if let Some(access) = guard.get(&path).and_then(Weak::upgrade) {
+        return access;
+    }
+    let access = Arc::new(AsyncMutex::new(()));
+    guard.insert(path, Arc::downgrade(&access));
+    access
 }

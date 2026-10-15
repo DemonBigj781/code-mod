@@ -635,7 +635,7 @@ async fn rollout_writer(
                         &state.code_home,
                         state.session_id.into(),
                         memory_mode,
-                    ) {
+                    ).await {
                         warn!("failed to update session catalog memory mode: {err}");
                     }
                 }

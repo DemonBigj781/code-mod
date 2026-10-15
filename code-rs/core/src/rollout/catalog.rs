@@ -3,7 +3,7 @@
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use code_protocol::models::{ContentItem, ResponseItem};
@@ -17,6 +17,61 @@ use super::SESSIONS_SUBDIR;
 
 const INDEX_SUBDIR: &str = "sessions/index";
 const CATALOG_FILENAME: &str = "catalog.jsonl";
+
+/// Serializes read-modify-write operations across tabs and Code processes.
+/// The file lock is acquired off the async runtime, and the process mutex
+/// prevents local waiters from exhausting its blocking thread pool.
+pub(crate) struct CatalogTransaction {
+    catalog: SessionCatalog,
+    _file_lock: fs::File,
+    _process_lock: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl std::ops::Deref for CatalogTransaction {
+    type Target = SessionCatalog;
+    fn deref(&self) -> &Self::Target {
+        &self.catalog
+    }
+}
+
+impl std::ops::DerefMut for CatalogTransaction {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.catalog
+    }
+}
+
+pub(crate) async fn catalog_transaction(
+    code_home: &Path,
+    reconcile: bool,
+) -> io::Result<CatalogTransaction> {
+    let process_lock = crate::session_catalog::catalog_access_handle(code_home)
+        .lock_owned()
+        .await;
+    let home = code_home.to_path_buf();
+    let (catalog, file_lock) = tokio::task::spawn_blocking(move || -> io::Result<_> {
+        let directory = home.join(INDEX_SUBDIR);
+        fs::create_dir_all(&directory)?;
+        let file_lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(directory.join("catalog.lock"))?;
+        fs2::FileExt::lock_exclusive(&file_lock)?;
+        Ok((SessionCatalog::load(&home)?, file_lock))
+    })
+    .await
+    .map_err(io::Error::other)??;
+    let mut transaction = CatalogTransaction {
+        catalog,
+        _file_lock: file_lock,
+        _process_lock: process_lock,
+    };
+    if reconcile {
+        transaction.reconcile(code_home).await?;
+    }
+    Ok(transaction)
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -213,14 +268,15 @@ impl SessionCatalog {
         // Write all entries
         let mut lines = Vec::new();
         for entry in entries {
-            match serde_json::to_string(entry) {
-                Ok(json) => lines.push(json),
-                Err(e) => warn!("Failed to serialize catalog entry: {}", e),
-            }
+            lines.push(serde_json::to_string(entry).map_err(io::Error::other)?);
         }
 
         lines.push(String::new()); // trailing newline
-        fs::write(&self.catalog_path, lines.join("\n"))?;
+        let parent = self.catalog_path.parent().ok_or_else(|| io::Error::other("catalog path has no parent"))?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(lines.join("\n").as_bytes())?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(&self.catalog_path).map_err(|error| error.error)?;
         Ok(())
     }
 
@@ -661,7 +717,7 @@ pub async fn update_catalog_entry(
     last_timestamp: &str,
     memory_mode: Option<SessionMemoryMode>,
 ) -> io::Result<()> {
-    let mut catalog = SessionCatalog::load(code_home)?;
+    let mut catalog = catalog_transaction(code_home, false).await?;
 
     let sessions_root = code_home.join(SESSIONS_SUBDIR);
     let archived_root = code_home.join(ARCHIVED_SESSIONS_SUBDIR);
@@ -701,12 +757,12 @@ pub async fn update_catalog_entry(
     Ok(())
 }
 
-pub fn update_catalog_memory_mode(
+pub async fn update_catalog_memory_mode(
     code_home: &Path,
     session_id: Uuid,
     memory_mode: SessionMemoryMode,
 ) -> io::Result<()> {
-    let mut catalog = SessionCatalog::load(code_home)?;
+    let mut catalog = catalog_transaction(code_home, false).await?;
     if catalog.set_memory_mode(session_id, memory_mode)? {
         return Ok(());
     }
@@ -812,7 +868,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_catalog_set_nickname() -> io::Result<()> {
+    async fn tab_isolation_catalog_transactions_preserve_nicknames() -> io::Result<()> {
         let temp = TempDir::new()?;
         let code_home = temp.path();
 
@@ -842,13 +898,23 @@ mod tests {
         memory_mode: SessionMemoryMode::Enabled,
         };
 
-        let mut catalog = SessionCatalog::load(code_home)?;
+        let mut catalog = catalog_transaction(code_home, false).await?;
         catalog.upsert(entry)?;
+        let waiting = catalog_transaction(code_home, false);
+        tokio::pin!(waiting);
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(20), waiting.as_mut()).await.is_err());
         assert!(catalog.set_nickname(session_id, Some("Launch checklist".to_string()))?);
+        drop(catalog);
+        let mut next = tokio::time::timeout(std::time::Duration::from_secs(2), waiting)
+            .await.expect("next writer acquires the released lock")?;
+        assert_eq!(next.get(&session_id).unwrap().nickname.as_deref(), Some("Launch checklist"));
+        assert!(next.set_memory_mode(session_id, SessionMemoryMode::Disabled)?);
+        drop(next);
 
         let loaded = SessionCatalog::load(code_home)?;
         let retrieved = loaded.get(&session_id).expect("session entry");
         assert_eq!(retrieved.nickname.as_deref(), Some("Launch checklist"));
+        assert_eq!(retrieved.memory_mode, SessionMemoryMode::Disabled);
 
         Ok(())
     }
