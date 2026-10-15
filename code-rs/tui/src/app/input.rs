@@ -177,6 +177,7 @@ impl App<'_> {
         }
         let activated = self.active_thread_router.set_active_thread(target_thread_id);
         debug_assert!(activated, "target thread should remain registered");
+        self.config = widget.config_ref().clone();
         self.schedule_redraw();
         true
     }

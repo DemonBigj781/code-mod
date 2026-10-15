@@ -137,8 +137,10 @@
                     }
                 }
                 AppEvent::SetTerminalTitle { title } => {
-                    self.terminal_title_override = title;
-                    self.apply_terminal_title();
+                    if !background {
+                        self.terminal_title_override = title;
+                        self.apply_terminal_title();
+                    }
                 }
                 AppEvent::EmitTuiNotification { title, body } => {
                     if let Some(message) = Self::format_notification_message(&title, body.as_deref()) {

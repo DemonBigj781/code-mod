@@ -116,6 +116,9 @@ mod tab_isolation_tests {
         manager.event_senders.insert(second, second_tx);
         manager.agents.insert("alpha".into(), agent(first, "alpha"));
         manager.agents.insert("bravo".into(), agent(second, "bravo"));
+        for id in ["alpha", "bravo"] {
+            manager.handles.insert(id.into(), tokio::spawn(std::future::pending()));
+        }
         manager.send_agent_status_update();
         for (receiver, name) in [(&mut first_rx, "alpha"), (&mut second_rx, "bravo")] {
             let payload = receiver.try_recv().unwrap();

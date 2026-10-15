@@ -91,6 +91,7 @@ impl<'a> App<'a> {
     }
 
     pub(crate) fn replace_active_chat_widget(&mut self, new_widget: ChatWidget<'a>) {
+        self.config = new_widget.config_ref().clone();
         let AppState::Chat { widget } = &mut self.app_state else {
             self.app_state = AppState::Chat {
                 widget: Box::new(new_widget),

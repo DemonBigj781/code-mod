@@ -118,12 +118,14 @@ impl App<'_> {
             return Ok(true);
         };
         let widget = self.inactive_chat_widgets.remove(&target).expect("located widget");
+        let previous_config = std::mem::replace(&mut self.config, widget.config_ref().clone());
         let previous_sender = std::mem::replace(&mut self.app_event_tx, widget.event_sender());
         let previous_state = std::mem::replace(&mut self.app_state, AppState::Chat { widget });
         let selected = self.active_thread_router.active_thread_id();
         let result = self.dispatch_raw_app_event(*event, terminal, true);
         let background_state = std::mem::replace(&mut self.app_state, previous_state);
         self.app_event_tx = previous_sender;
+        self.config = previous_config;
         if let AppState::Chat { widget } = background_state {
             let id = widget.session_id()
                 .and_then(|id| code_protocol::ThreadId::from_string(&id.to_string()).ok())
