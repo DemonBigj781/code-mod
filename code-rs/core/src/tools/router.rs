@@ -108,6 +108,7 @@ impl ToolRouter {
         handlers.insert("shell".into(), Arc::clone(&shell));
         handlers.insert("container.exec".into(), Arc::clone(&shell));
         handlers.insert("update_plan".into(), plan);
+        handlers.insert("set_session_title".into(), Arc::new(handlers::session_title::SessionTitleHandler));
         handlers.insert("request_user_input".into(), request_user_input);
         handlers.insert("request_permissions".into(), request_permissions);
         handlers.insert("request_resources".into(), request_resources);

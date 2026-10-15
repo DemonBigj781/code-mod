@@ -15,7 +15,7 @@
                                 | KeyCode::End
                                 | KeyCode::Backspace
                                 | KeyCode::Delete => {}
-                                _ => continue,
+                                _ => return Ok(true),
                             }
                         }
                     }
@@ -32,7 +32,7 @@
                             }
                             KeyEventKind::Release => {
                                 if self.non_enhanced_pressed_keys.remove(&key_code) {
-                                    continue;
+                                    return Ok(true);
                                 }
 
                                 let mut release_handled = false;
@@ -55,7 +55,7 @@
                                 }
 
                                 if release_handled {
-                                    continue;
+                                    return Ok(true);
                                 }
 
                                 key_event = KeyEvent::new(
@@ -332,7 +332,7 @@
                     // Stop background threads and break the UI loop.
                     self.commit_anim_running.store(false, Ordering::Release);
                     self.input_running.store(false, Ordering::Release);
-                    break 'main;
+                    return Ok(false);
                 }
                 event => {
                     include!("terminal.rs")

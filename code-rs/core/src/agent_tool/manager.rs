@@ -17,6 +17,8 @@ pub enum AgentStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
     pub id: String,
+    #[serde(default)]
+    pub owner_session_id: Option<Uuid>,
     pub batch_id: Option<String>,
     pub model: String,
     #[serde(default)]
@@ -56,7 +58,7 @@ pub struct AgentManager {
     handles: HashMap<String, JoinHandle<()>>,
     // The process-wide AGENT_MANAGER shares these slots across all session tabs.
     worker_slots: Arc<tokio::sync::Semaphore>,
-    event_sender: Option<mpsc::UnboundedSender<AgentStatusUpdatePayload>>,
+    event_senders: HashMap<Uuid, mpsc::UnboundedSender<AgentStatusUpdatePayload>>,
     debug_log_root: Option<PathBuf>,
     watchdog_handle: Option<JoinHandle<()>>,
     inactivity_timeout: Duration,
@@ -71,6 +73,7 @@ pub struct AgentStatusUpdatePayload {
 
 #[derive(Clone, Debug)]
 pub struct AgentCreateRequest {
+    pub owner_session_id: Option<Uuid>,
     pub model: String,
     pub name: Option<String>,
     pub prompt: String,
@@ -86,6 +89,48 @@ pub struct AgentCreateRequest {
     pub reasoning_effort: code_protocol::config_types::ReasoningEffort,
 }
 
+#[cfg(test)]
+mod tab_isolation_tests {
+    use super::*;
+
+    fn agent(owner: Uuid, name: &str) -> Agent {
+        Agent {
+            id: name.into(), owner_session_id: Some(owner), batch_id: Some("shared-label".into()),
+            model: "test".into(), name: None, prompt: format!("{name}-task"),
+            context: Some(format!("{name}-context")), output_goal: None, files: vec![], read_only: true,
+            status: AgentStatus::Running, result: None, error: None,
+            created_at: Utc::now(), started_at: None, completed_at: None, progress: vec![],
+            worktree_path: None, branch_name: None, worktree_base: None, source_kind: None,
+            log_tag: None, reasoning_effort: Default::default(), last_activity: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn tab_isolation_agent_updates_and_cancellation_follow_the_owner() {
+        let mut manager = AgentManager::new();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let (first_tx, mut first_rx) = mpsc::unbounded_channel();
+        let (second_tx, mut second_rx) = mpsc::unbounded_channel();
+        manager.event_senders.insert(first, first_tx);
+        manager.event_senders.insert(second, second_tx);
+        manager.agents.insert("alpha".into(), agent(first, "alpha"));
+        manager.agents.insert("bravo".into(), agent(second, "bravo"));
+        manager.send_agent_status_update();
+        for (receiver, name) in [(&mut first_rx, "alpha"), (&mut second_rx, "bravo")] {
+            let payload = receiver.try_recv().unwrap();
+            assert_eq!(payload.agents.len(), 1);
+            assert_eq!(payload.agents[0].id, name);
+            assert_eq!(payload.context, Some(format!("{name}-context")));
+            assert_eq!(payload.task, Some(format!("{name}-task")));
+        }
+        assert_eq!(manager.cancel_session_batch(first, "shared-label").await, 1);
+        assert_eq!(manager.get_agent("bravo").unwrap().status, AgentStatus::Running);
+        assert_eq!(manager.cancel_session_batch(second, "shared-label").await, 1);
+        assert_eq!(manager.get_agent("alpha").unwrap().status, AgentStatus::Cancelled);
+    }
+}
+
 impl Default for AgentManager {
     fn default() -> Self {
         Self::new()
@@ -98,16 +143,28 @@ impl AgentManager {
             agents: HashMap::new(),
             handles: HashMap::new(),
             worker_slots: Arc::new(tokio::sync::Semaphore::new(MAX_RUNNING_SUBAGENTS)),
-            event_sender: None,
+            event_senders: HashMap::new(),
             debug_log_root: None,
             watchdog_handle: None,
             inactivity_timeout: Duration::minutes(30),
         }
     }
 
-    pub fn set_event_sender(&mut self, sender: mpsc::UnboundedSender<AgentStatusUpdatePayload>) {
-        self.event_sender = Some(sender);
+    pub fn set_event_sender(&mut self, owner: Uuid, sender: mpsc::UnboundedSender<AgentStatusUpdatePayload>) {
+        self.event_senders.retain(|_, sender| !sender.is_closed());
+        self.event_senders.insert(owner, sender);
         self.start_watchdog();
+    }
+
+    pub fn remove_event_sender(&mut self, owner: Uuid) {
+        self.event_senders.remove(&owner);
+    }
+
+    pub async fn cancel_session_batch(&mut self, owner: Uuid, batch: &str) -> usize {
+        let ids: Vec<_> = self.agents.values()
+            .filter(|agent| agent.owner_session_id == Some(owner) && agent.batch_id.as_deref() == Some(batch))
+            .map(|agent| agent.id.clone()).collect();
+        ids.iter().filter(|id| self.cancel_agent(id)).count()
     }
 
     fn start_watchdog(&mut self) {
@@ -197,11 +254,12 @@ impl AgentManager {
     }
 
     fn send_agent_status_update(&self) {
-        if let Some(ref sender) = self.event_sender {
+        for (owner, sender) in &self.event_senders {
             let now = Utc::now();
             let agents: Vec<AgentInfo> = self
                 .agents
                 .values()
+                .filter(|agent| agent.owner_session_id == Some(*owner))
                 .map(|agent| {
                     // Just show the model name - status provides the useful info
                     let name = agent
@@ -249,6 +307,7 @@ impl AgentManager {
             let (context, task) = self
                 .agents
                 .values()
+                .filter(|agent| agent.owner_session_id == Some(*owner))
                 .next()
                 .map_or((None, None), |agent| {
                     let context = agent
@@ -296,6 +355,7 @@ impl AgentManager {
         request: AgentCreateRequest,
     ) -> String {
         let AgentCreateRequest {
+            owner_session_id,
             model,
             name,
             prompt,
@@ -321,6 +381,7 @@ impl AgentManager {
 
         let agent = Agent {
             id: agent_id.clone(),
+            owner_session_id,
             batch_id,
             model,
             name: normalize_agent_name(name),

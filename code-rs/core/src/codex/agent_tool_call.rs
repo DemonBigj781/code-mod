@@ -957,6 +957,7 @@ pub(crate) async fn handle_run_agent(
                     let agent_id = manager
                         .create_agent_with_config(
                             crate::agent_tool::AgentCreateRequest {
+                                owner_session_id: Some(sess.id),
                                 model: model.clone(),
                                 name: agent_name.clone(),
                                 prompt: params.task.clone(),
@@ -1157,7 +1158,7 @@ async fn handle_check_agent_status(
         Ok(params) => {
             let manager = AGENT_MANAGER.read().await;
 
-            if let Some(agent) = manager.get_agent(&params.agent_id) {
+            if let Some(agent) = manager.get_agent(&params.agent_id).filter(|agent| agent.owner_session_id == Some(sess.id)) {
                 match agent.batch_id.as_deref() {
                     Some(batch) if batch == params.batch_id => {}
                     _ => {
@@ -1209,7 +1210,7 @@ async fn handle_check_agent_status(
                     };
                     // Re-acquire manager to get fresh progress after potential delay
                     let manager = AGENT_MANAGER.read().await;
-                    if let Some(agent) = manager.get_agent(&params.agent_id) {
+                    if let Some(agent) = manager.get_agent(&params.agent_id).filter(|agent| agent.owner_session_id == Some(sess.id)) {
                         let joined = agent.progress.join("\n");
                         match write_agent_file(&dir, "progress.log", &joined) {
                             Ok(p) => progress_file = Some(p.display().to_string()),
@@ -1292,7 +1293,7 @@ async fn handle_get_agent_result(
         Ok(params) => {
             let manager = AGENT_MANAGER.read().await;
 
-            if let Some(agent) = manager.get_agent(&params.agent_id) {
+            if let Some(agent) = manager.get_agent(&params.agent_id).filter(|agent| agent.owner_session_id == Some(sess.id)) {
                 match agent.batch_id.as_deref() {
                     Some(batch) if batch == params.batch_id => {}
                     _ => {
@@ -1429,7 +1430,8 @@ async fn handle_cancel_agent(
                             },
                         };
                     }
-                if manager.cancel_agent(&agent_id) {
+                if manager.get_agent(&agent_id).is_some_and(|agent| agent.owner_session_id == Some(sess.id))
+                    && manager.cancel_agent(&agent_id) {
                     ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
@@ -1447,7 +1449,7 @@ async fn handle_cancel_agent(
                     }
                 }
             } else if let Some(batch_id) = params.batch_id {
-                let count = manager.cancel_batch(&batch_id).await;
+                let count = manager.cancel_session_batch(sess.id, &batch_id).await;
                 ResponseInputItem::FunctionCallOutput {
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
@@ -1525,7 +1527,7 @@ async fn handle_wait_for_agent(
                         let manager = AGENT_MANAGER.read().await;
 
                         if let Some(agent_id) = &params.agent_id {
-                            if let Some(agent) = manager.get_agent(agent_id) {
+                            if let Some(agent) = manager.get_agent(agent_id).filter(|agent| agent.owner_session_id == Some(sess.id)) {
                                 match agent.batch_id.as_deref() {
                                     Some(batch) if batch == batch_id => {}
                                     _ => {
@@ -1598,7 +1600,7 @@ async fn handle_wait_for_agent(
                         }
                     }
                 } else {
-                    let agents = manager.list_agents(None, Some(batch_id.clone()), false);
+                    let agents: Vec<_> = manager.list_agents(None, Some(batch_id.clone()), false).into_iter().filter(|agent| agent.owner_session_id == Some(sess.id)).collect();
 
                     // Separate terminal vs non-terminal agents
                     let completed_agents: Vec<_> = agents
@@ -1901,7 +1903,7 @@ async fn handle_list_agents(
                 status_filter,
                 Some(batch_id.clone()),
                 params.recent_only.unwrap_or(false),
-            );
+            ).into_iter().filter(|agent| agent.owner_session_id == Some(sess.id)).collect::<Vec<_>>();
 
             // Count running agents for status update
             let running_count = agents
@@ -2216,6 +2218,7 @@ pub(super) async fn send_agent_status_update(sess: &Session) {
     let now = Utc::now();
     let agents: Vec<crate::protocol::AgentInfo> = manager
         .get_all_agents()
+        .filter(|agent| agent.owner_session_id == Some(sess.id))
         .map(|agent| {
             let start = agent.started_at.unwrap_or(agent.created_at);
             let end = agent.completed_at.unwrap_or(now);

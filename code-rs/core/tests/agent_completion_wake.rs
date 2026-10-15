@@ -75,11 +75,12 @@ event: response.completed\ndata: {completed}\n\n",
     config.model_provider = provider;
 
     let conversation_manager = ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
-    let codex = conversation_manager
+    let created = conversation_manager
         .new_conversation(config)
         .await
-        .expect("create conversation")
-        .conversation;
+        .expect("create conversation");
+    let session_id = Uuid::from(created.conversation_id);
+    let codex = created.conversation;
 
     codex
         .submit(Op::CancelAgents {
@@ -128,6 +129,7 @@ event: response.completed\ndata: {completed}\n\n",
         manager
             .create_agent_with_config(
                 code_core::AgentCreateRequest {
+                    owner_session_id: Some(session_id),
                     model: "echo".to_string(),
                     name: Some("echo-agent".to_string()),
                     prompt: "wake test".to_string(),

@@ -171,7 +171,7 @@
                 }
                 AppEvent::TerminalResize { id, rows, cols } => {
                     if rows == 0 || cols == 0 {
-                        continue;
+                        return Ok(true);
                     }
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.terminal_apply_resize(id, rows, cols);

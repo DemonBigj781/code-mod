@@ -103,8 +103,17 @@ patch_config="patch.crates-io.rama-tls-rustls.path=\"$workspace/code-rs/vendor/r
         --no-default-features --features code-cli/cosmopolitan-ape --release
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-core \
-        --test conversation_identity --test session_history_native --no-default-features \
+        --test conversation_identity --test session_history_native \
+        --test session_background_isolation --test agent_completion_wake --no-default-features \
         --features code-core/cosmopolitan-ape --release -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-core --lib \
+        --no-default-features --features code-core/cosmopolitan-ape --release \
+        tab_isolation -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j1 -p code-tui --lib \
+        --no-default-features --features code-tui/cosmopolitan-ape,code-core/cosmopolitan-ape --release \
+        tab_isolation -- --test-threads=1
 )
 
 debug_elf="$build_root/build/x86_64-unknown-linux-musl/release/code.com.dbg"

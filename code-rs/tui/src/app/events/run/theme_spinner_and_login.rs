@@ -143,7 +143,7 @@
                 AppEvent::LoginStartChatGpt => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if !widget.login_add_view_active() {
-                            continue 'main;
+                            return Ok(true);
                         }
 
                         if let Some(flow) = self.login_flow.take() {
@@ -185,7 +185,7 @@
                 AppEvent::LoginStartDeviceCode => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if !widget.login_add_view_active() {
-                            continue 'main;
+                            return Ok(true);
                         }
 
                         if let Some(flow) = self.login_flow.take() {

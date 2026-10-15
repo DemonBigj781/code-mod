@@ -155,7 +155,7 @@ pub(crate) struct App<'a> {
     /// Latest available release version (if detected) so new widgets can surface it.
     pub(super) latest_upgrade_version: Option<String>,
 
-    pub(super) file_search: FileSearchManager,
+    pub(super) file_search: HashMap<uuid::Uuid, FileSearchManager>,
 
     /// True when a redraw has been scheduled but not yet executed (debounce window).
     pub(super) pending_redraw: Arc<AtomicBool>,
@@ -188,6 +188,7 @@ pub(crate) struct App<'a> {
 
     /// Controls the animation thread that sends `CommitTick` events.
     pub(super) commit_anim_running: Arc<AtomicBool>,
+    pub(super) commit_animation_owners: HashSet<uuid::Uuid>,
 
     /// Terminal information queried at startup
     pub(super) terminal_info: TerminalInfo,

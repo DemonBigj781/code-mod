@@ -135,7 +135,7 @@ impl Runner<'_> {
         let mut manager = AGENT_MANAGER.write().await;
         let (agent_tx, mut agent_rx) =
             tokio::sync::mpsc::unbounded_channel::<AgentStatusUpdatePayload>();
-        manager.set_event_sender(agent_tx);
+        manager.set_event_sender(self.session_id, agent_tx);
         drop(manager);
 
         let Some(sess_for_agents) = self.sess.clone() else {

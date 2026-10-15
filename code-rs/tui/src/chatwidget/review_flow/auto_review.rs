@@ -263,8 +263,10 @@ impl ChatWidget<'_> {
         let base_snapshot_for_task = base_snapshot;
         let turn_context = self.turn_context_block();
         let prefer_fallback = had_notice || had_fixed_indicator;
+        let session_id = self.session_id;
         tokio::spawn(async move {
             run_background_review(
+                session_id,
                 config,
                 app_event_tx,
                 base_snapshot_for_task,

@@ -1,7 +1,14 @@
             match event {
                 AppEvent::StartFileSearch(query) => {
-                    if !query.is_empty() {
-                        self.file_search.on_user_query(&query);
+                    if !query.is_empty()
+                        && let AppState::Chat { widget } = &self.app_state
+                        && let Some(owner) = widget.event_sender().owner()
+                    {
+                        let cwd = widget.config_ref().cwd.clone();
+                        let sender = widget.event_sender();
+                        self.file_search.entry(owner)
+                            .or_insert_with(|| crate::file_search::FileSearchManager::new(cwd, sender))
+                            .on_user_query(&query);
                     }
                 }
                 AppEvent::FileSearchResult { query, matches } => {
@@ -119,9 +126,7 @@
                     new_widget.enable_perf(self.timing_enabled);
                     new_widget.check_for_initial_animations();
                     self.replace_active_chat_widget(new_widget);
-                    self.terminal_runs.clear();
-                    // Reset any transient state from the previous widget/session
-                    self.commit_anim_running.store(false, Ordering::Release);
+                    // Other tabs retain their terminal jobs and streaming animations.
                     self.last_esc_time = None;
                     // Force a clean repaint of the new UI state
                     self.clear_on_first_frame = true;

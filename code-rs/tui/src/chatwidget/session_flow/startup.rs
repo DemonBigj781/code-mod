@@ -24,6 +24,7 @@ impl ChatWidget<'_> {
             show_order_overlay,
             latest_upgrade_version,
         } = args;
+        let app_event_tx = app_event_tx.for_widget();
         let mapped_theme = crate::theme::map_theme_for_palette(
             config.tui.theme.name,
             config.tui.theme.is_dark,

@@ -486,6 +486,7 @@ include!("impl_chunks/submit_messages_and_usage.rs");
 include!("impl_chunks/help_system.rs");
 
 async fn run_background_review(
+    session_id: Option<uuid::Uuid>,
     config: Config,
     app_event_tx: AppEventSender,
     base_snapshot: Option<GhostCommit>,
@@ -493,6 +494,7 @@ async fn run_background_review(
     prefer_fallback: bool,
 ) {
     background_review::run_background_review_inner(
+        session_id,
         config,
         app_event_tx,
         base_snapshot,

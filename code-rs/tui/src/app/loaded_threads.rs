@@ -95,10 +95,6 @@ fn title_from_thread(thread: &Thread) -> Option<String> {
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned)
-        .or_else(|| {
-            let preview = thread.preview.trim();
-            (!preview.is_empty()).then(|| preview.to_owned())
-        })
 }
 
 fn thread_spawn_parent_thread_id(source: &SessionSource) -> Option<ThreadId> {
@@ -180,7 +176,7 @@ mod tests {
                 },
                 LoadedSubagentThread {
                     thread_id: grandchild_id,
-                    title: Some("Grandchild preview".to_string()),
+                    title: None,
                     agent_nickname: None,
                     agent_role: None,
                     agent_path: None,

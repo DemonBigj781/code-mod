@@ -132,7 +132,7 @@ pub(crate) async fn handle_wait(
                         },
                     };
                 };
-                let any_notify = crate::codex::any_bg_notify_or_panic();
+                let any_notify = Arc::clone(&sess.background_exec_notify);
 
                 let deadline = tokio::time::Instant::now()
                     + std::time::Duration::from_millis(timeout_ms);
@@ -411,9 +411,7 @@ pub(crate) async fn handle_kill(
             }
 
             notify.notify_waiters();
-            if let Some(global) = ANY_BG_NOTIFY.get() {
-                global.notify_waiters();
-            }
+            sess.background_exec_notify.notify_waiters();
 
             let end_msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
                 call_id: parsed.call_id.clone(),
@@ -1797,6 +1795,7 @@ pub(crate) async fn handle_container_exec_with_params(
     let tool_output_max_bytes = sess.tool_output_max_bytes;
     let artifact_code_home = sess.client.code_home().to_path_buf();
     let artifact_session_id = sess.id;
+    let background_exec_notify = Arc::clone(&sess.background_exec_notify);
     let managed_network_proxy = sess.managed_network_proxy();
     let network_approval = sess.network_approval();
     let zsh_fork_exec_config = compute_zsh_fork_exec_config(sess, sandbox_type, &params.command);
@@ -1956,7 +1955,7 @@ pub(crate) async fn handle_container_exec_with_params(
                 let ev = Event { id: sub_id_for_events.clone(), event_seq: 0, msg: bg_event, order: None };
                 let _ = tx_event.send(ev).await;
 
-                if let Some(tx) = TX_SUB_GLOBAL.get() {
+                if let Some(owner) = sess_for_hooks.as_ref() {
                     let header_label = if label.is_empty() {
                         format!("call_id={call_id_for_events}")
                     } else {
@@ -1973,12 +1972,13 @@ pub(crate) async fn handle_container_exec_with_params(
                         tool_output_max_bytes,
                     );
                     let dev_text = format!("{header}\n\n{body}");
-                    let _ = tx
-                        .send(Submission { id: uuid::Uuid::new_v4().to_string(), op: Op::AddPendingInputDeveloper { text: dev_text } })
-                        .await;
+                    owner.enqueue_out_of_turn_item_while_running(ResponseInputItem::Message {
+                        role: "developer".to_owned(),
+                        content: vec![ContentItem::InputText { text: dev_text }],
+                    });
                 }
             }
-            if let Some(n) = ANY_BG_NOTIFY.get() { n.notify_waiters(); }
+            background_exec_notify.notify_waiters();
         }
         notify_task.notify_waiters();
     });

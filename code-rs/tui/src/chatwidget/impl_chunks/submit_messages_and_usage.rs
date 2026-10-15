@@ -166,6 +166,10 @@ impl ChatWidget<'_> {
         self.session_id
     }
 
+    pub(crate) fn event_sender(&self) -> AppEventSender {
+        self.app_event_tx.clone()
+    }
+
     fn insert_resume_placeholder(&mut self) {
         if self.resume_placeholder_visible {
             return;

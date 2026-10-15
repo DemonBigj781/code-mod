@@ -28,6 +28,18 @@ using atomic writes and private file permissions on Unix. They are plaintext,
 not encrypted; image references require the referenced image files to remain
 available. A save/load failure is shown in the TUI.
 
+Background shell results, agent updates, and queued widget callbacks stay with
+their owning session, including while that tab is hidden. Switching tabs does
+not redirect pending output, approvals, or operations to the newly selected tab.
+Tabs still share the machine, workspace files, and explicitly shared external
+services; they are not filesystem or browser sandboxes.
+
+The AI can use `set_session_title` to choose a short title for the current topic
+and update it when the discussion materially changes. This tool can rename only
+its own session, and uses the same persistent nickname as `/rename`. Until a
+title is chosen, tabs use a neutral label rather than quoting an earlier user
+message. The title remains unchanged unless the AI or user explicitly updates it.
+
 - `/browser`: open internal browser.
 - `/chrome`: connect to your Chrome browser.
 - `/new` or `/tab new`: open a new session tab without cancelling work in other tabs.

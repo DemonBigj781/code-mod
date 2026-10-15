@@ -91,7 +91,7 @@
                             self.redraw_inflight.store(false, Ordering::Release);
                             self.app_event_tx
                                 .send(AppEvent::ScheduleFrameIn(crate::timing::ANIMATION_FRAME_INTERVAL));
-                            continue;
+                            return Ok(true);
                         }
 
                         used_nonblocking = true;
@@ -136,12 +136,13 @@
                     }
                 }
                 AppEvent::StartCommitAnimation => {
+                    self.commit_animation_owners.insert(self.app_event_tx.owner().unwrap_or_default());
                     if self
                         .commit_anim_running
                         .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
                         .is_ok()
                     {
-                        let tx = self.app_event_tx.clone();
+                        let tx = self.app_event_tx.unscoped();
                         let running = self.commit_anim_running.clone();
                         let running_for_thread = running.clone();
                         let tick_ms: u64 = self
@@ -164,7 +165,10 @@
                     }
                 }
                 AppEvent::StopCommitAnimation => {
-                    self.commit_anim_running.store(false, Ordering::Release);
+                    self.commit_animation_owners.remove(&self.app_event_tx.owner().unwrap_or_default());
+                    if self.commit_animation_owners.is_empty() {
+                        self.commit_anim_running.store(false, Ordering::Release);
+                    }
                 }
                 AppEvent::CommitTick => {
                     self.app_event_tx.mark_commit_tick_consumed();
@@ -175,6 +179,9 @@
                     // them can leave the UI appearing frozen even though input is
                     // still responsive.
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.on_commit_tick();
+                    }
+                    for widget in self.inactive_chat_widgets.values_mut() {
                         widget.on_commit_tick();
                     }
                 }

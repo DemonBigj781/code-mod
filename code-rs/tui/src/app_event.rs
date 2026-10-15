@@ -210,6 +210,8 @@ pub(crate) enum AgentUpdateIntent {
 
 #[derive(Debug)]
 pub(crate) enum AppEvent {
+    /// A widget callback keeps its owner even if the user changes tabs before delivery.
+    WidgetEvent { owner: Uuid, event: Box<AppEvent> },
     CodexEvent(Box<Event>),
 
     /// A core event emitted by a specific live conversation. Unlike synthetic

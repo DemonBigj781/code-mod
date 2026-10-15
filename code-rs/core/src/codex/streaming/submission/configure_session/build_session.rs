@@ -433,6 +433,7 @@ impl Runner<'_> {
 
         let mut new_session = Arc::new(Session {
             id: self.session_id,
+            background_exec_notify: Arc::new(Notify::new()),
             client,
             remote_models_manager,
             tools_config,

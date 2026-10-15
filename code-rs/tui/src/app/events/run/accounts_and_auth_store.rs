@@ -405,7 +405,7 @@
                                 self.app_event_tx.send(AppEvent::codex_op(Op::Compact));
                             }
                         }
-                        SlashCommand::Quit => { break 'main; }
+                        SlashCommand::Quit => { return Ok(false); }
                         SlashCommand::Login => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_login_command();
@@ -423,7 +423,7 @@
                         }
                         SlashCommand::Logout => {
                             if let Err(e) = code_login::logout(&self.config.code_home) { tracing::error!("failed to logout: {e}"); }
-                            break 'main;
+                            return Ok(false);
                         }
                         SlashCommand::Help => {
                             if let AppState::Chat { widget } = &mut self.app_state {
@@ -753,7 +753,6 @@
                         });
                         new_widget.enable_perf(self.timing_enabled);
                         self.replace_active_chat_widget(new_widget);
-                        self.terminal_runs.clear();
                         self.app_event_tx.send(AppEvent::RequestRedraw);
                     }
                 }

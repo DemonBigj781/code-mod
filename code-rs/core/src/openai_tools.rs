@@ -9,6 +9,7 @@ mod json_schema;
 mod misc_tools;
 mod registry;
 mod session_history_tool;
+mod session_title_tool;
 mod tools_json;
 mod types;
 

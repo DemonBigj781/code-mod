@@ -577,6 +577,7 @@ pub(crate) struct Session {
     /// Wakes deferred session reconfiguration after the active task releases
     /// ownership of the conversation state.
     pub(super) task_idle_notify: tokio::sync::Notify,
+    pub(super) background_exec_notify: Arc<Notify>,
     pub(super) code_linux_sandbox_exe: Option<PathBuf>,
     pub(super) user_shell: shell::Shell,
     pub(super) dangerous_command_detection_enabled: bool,

@@ -18,10 +18,18 @@ pub(crate) const TERMINAL_MAX_RAW: usize = 1_048_576;
 pub(crate) use crate::timing::{DEFAULT_PTY_ROWS as TERMINAL_PTY_ROWS, DEFAULT_PTY_COLS as TERMINAL_PTY_COLS};
 pub(crate) const TERMINAL_SCROLLBACK: usize = TERMINAL_MAX_LINES;
 
+#[cfg(test)]
+#[test]
+fn tab_isolation_terminal_job_ids_do_not_collide() {
+    let mut first = TerminalState::default();
+    let mut second = TerminalState::default();
+    let ids = [first.alloc_id(), second.alloc_id(), first.alloc_id(), second.alloc_id()];
+    assert_eq!(ids.into_iter().collect::<std::collections::HashSet<_>>().len(), 4);
+}
+
 #[derive(Default)]
 pub(crate) struct TerminalState {
     pub(crate) overlay: Option<TerminalOverlay>,
-    pub(crate) next_id: u64,
     pub(crate) after: Option<TerminalAfter>,
     pub(crate) last_visible_rows: Cell<u16>,
     pub(crate) last_visible_cols: Cell<u16>,
@@ -29,9 +37,8 @@ pub(crate) struct TerminalState {
 
 impl TerminalState {
     pub(crate) fn alloc_id(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id = self.next_id.saturating_add(1);
-        id
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub(crate) fn overlay(&self) -> Option<&TerminalOverlay> {
@@ -639,4 +646,3 @@ fn tint_stderr_line(line: &mut RtLine<'_>) {
         }
     }
 }
-

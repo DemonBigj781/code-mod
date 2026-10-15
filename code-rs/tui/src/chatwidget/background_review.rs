@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) async fn run_background_review_inner(
+    session_id: Option<uuid::Uuid>,
     config: Config,
     app_event_tx: AppEventSender,
     base_snapshot: Option<GhostCommit>,
@@ -150,6 +151,7 @@ pub(super) async fn run_background_review_inner(
         let mut manager = code_core::AGENT_MANAGER.write().await;
         let agent_id = manager
             .create_agent_with_options(code_core::AgentCreateRequest {
+                owner_session_id: session_id,
                 model: review_model,
                 name: Some("Auto Review".to_owned()),
                 prompt: review_prompt,

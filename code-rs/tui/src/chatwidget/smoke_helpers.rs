@@ -290,7 +290,13 @@ impl ChatWidgetHarness {
     pub(crate) fn drain_events(&self) -> Vec<AppEvent> {
         let mut out = Vec::new();
         while let Ok(ev) = self.events.try_recv() {
-            out.push(ev);
+            match ev {
+                AppEvent::WidgetEvent { owner, event } => {
+                    assert_eq!(self.chat.event_sender().owner(), Some(owner));
+                    out.push(*event);
+                }
+                event => out.push(event),
+            }
         }
         out
     }

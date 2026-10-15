@@ -19,7 +19,6 @@ use code_protocol::protocol::SessionSource;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::ChatWidget;
-use crate::file_search::FileSearchManager;
 use crate::get_login_status;
 use crate::onboarding::onboarding_screen::{OnboardingScreen, OnboardingScreenArgs};
 use crate::thread_spawner;
@@ -353,7 +352,7 @@ impl App<'_> {
             }
         };
 
-        let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
+        let file_search = HashMap::new();
         let start_in_alt = config.tui.alternate_screen;
         let app_server_bridge = if crate::chatwidget::is_test_mode() {
             None
@@ -410,6 +409,7 @@ impl App<'_> {
             _debug: debug,
             show_order_overlay,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
+            commit_animation_owners: HashSet::new(),
             terminal_info,
             clear_on_first_frame: true,
             pending_jump_back_ghost_state: None,

@@ -75,7 +75,7 @@ pub(in crate::codex) async fn submission_loop(
                     if !seen_batches.insert(trimmed.to_owned()) {
                         continue;
                     }
-                    cancelled += manager.cancel_batch(trimmed).await;
+                    cancelled += manager.cancel_session_batch(sess_arc.id, trimmed).await;
                 }
 
                 for agent_id in agent_ids {
@@ -86,7 +86,8 @@ pub(in crate::codex) async fn submission_loop(
                     if !seen_agents.insert(trimmed.to_owned()) {
                         continue;
                     }
-                    if manager.cancel_agent(trimmed) {
+                    if manager.get_agent(trimmed).is_some_and(|agent| agent.owner_session_id == Some(sess_arc.id))
+                        && manager.cancel_agent(trimmed) {
                         cancelled += 1;
                     }
                 }
@@ -698,6 +699,7 @@ pub(in crate::codex) async fn submission_loop(
             }
             Op::Shutdown => {
                 info!("Shutting down Codex instance");
+                AGENT_MANAGER.write().await.remove_event_sender(session_id);
 
                 // Ensure any running agent is aborted so streaming stops promptly.
                 if let Some(sess_arc) = sess.as_ref() {

@@ -12,6 +12,7 @@ impl ChatWidget<'_> {
             auth_manager,
             show_welcome,
         } = args;
+        let app_event_tx = app_event_tx.for_widget();
         remember_cwd_history(&config.cwd);
         let (code_op_tx, code_op_rx) = unbounded_channel::<Op>();
 

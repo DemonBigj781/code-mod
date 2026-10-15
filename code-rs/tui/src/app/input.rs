@@ -246,7 +246,17 @@ impl App<'_> {
             tracing::warn!(%thread_id, "conversation event thread id could not be parsed");
             return;
         };
-        let mut is_inactive = self.inactive_chat_widgets.contains_key(&thread_id);
+        let owned_callback = self.app_event_tx.owner().is_some_and(|owner| {
+            matches!(&self.app_state, AppState::Chat { widget }
+                if widget.event_sender().owner() == Some(owner))
+        });
+        let is_inactive = !owned_callback && self.inactive_chat_widgets.contains_key(&thread_id);
+        if let EventMsg::SessionTitleUpdated { title } = &event.msg {
+            if is_inactive || self.active_chat_thread_id() == Some(thread_id) {
+                self.register_app_server_thread_name_with_router(thread_id.to_string(), Some(title.clone()));
+            }
+            return;
+        }
         let active_thread_id = match &self.app_state {
             AppState::Chat { widget } => widget
                 .session_id()
@@ -254,12 +264,6 @@ impl App<'_> {
             AppState::Onboarding { .. } => None,
         };
         let is_session_configured = matches!(&event.msg, EventMsg::SessionConfigured(_));
-        if active_thread_id.is_none() && is_session_configured && is_inactive
-            && self.inactive_chat_widgets.get(&thread_id).is_some_and(|widget| widget.session_id().is_some())
-        {
-            self.inactive_chat_widgets.remove(&thread_id);
-            is_inactive = false;
-        }
         if let EventMsg::SessionConfigured(session) = &event.msg {
             self.register_session_configured_with_router(session);
             if !is_inactive {
@@ -688,8 +692,7 @@ fn title_from_app_server_thread(thread: &code_app_server_protocol::Thread) -> Op
         return Some(name.to_owned());
     }
 
-    let preview = thread.preview.trim();
-    (!preview.is_empty()).then(|| preview.to_owned())
+    None
 }
 
 fn thread_is_running(thread: &code_app_server_protocol::Thread) -> bool {
@@ -780,13 +783,13 @@ mod app_server_thread_metadata_tests {
     }
 
     #[test]
-    fn thread_title_falls_back_to_preview() {
+    fn thread_title_does_not_copy_previous_user_text() {
         let mut thread = test_thread();
         thread.preview = "Preview title".to_string();
 
         assert_eq!(
             title_from_app_server_thread(&thread).as_deref(),
-            Some("Preview title")
+            None
         );
     }
 

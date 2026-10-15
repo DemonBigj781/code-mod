@@ -386,6 +386,7 @@ async fn run_code_tool_session_inner(
                     | EventMsg::ListCustomPromptsResponse(_)
                     | EventMsg::ListSkillsResponse(_)
                     | EventMsg::ConfigChanged
+                    | EventMsg::SessionTitleUpdated { .. }
                     | EventMsg::AgentStatusUpdate(_)
                     | EventMsg::HookStarted(_)
                     | EventMsg::HookCompleted(_)

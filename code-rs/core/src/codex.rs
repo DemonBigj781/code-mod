@@ -962,7 +962,6 @@ use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
 use crate::protocol::Submission;
 use crate::protocol::TaskCompleteEvent;
-use std::sync::OnceLock;
 
 #[cfg(feature = "browser-automation")]
 use crate::protocol::{BrowserScreenshotUpdateEvent, BrowserSnapshotEvent};
@@ -986,18 +985,6 @@ pub struct Codex {
     next_id: AtomicU64,
     tx_sub: Sender<Submission>,
     rx_event: Receiver<Event>,
-}
-
-// Allow internal components to queue context for an active turn without
-// fabricating a visible user message.
-static TX_SUB_GLOBAL: OnceLock<Sender<Submission>> = OnceLock::new();
-static ANY_BG_NOTIFY: OnceLock<std::sync::Arc<Notify>> = OnceLock::new();
-
-pub(crate) fn any_bg_notify_or_panic() -> Arc<Notify> {
-    ANY_BG_NOTIFY
-        .get()
-        .cloned()
-        .unwrap_or_else(|| panic!("ANY_BG_NOTIFY not initialized"))
 }
 
 /// Wrapper returned by [`Codex::spawn`] containing the spawned [`Codex`],
@@ -1097,9 +1084,6 @@ impl Codex {
             tx_sub,
             rx_event,
         };
-        // Make a clone of tx_sub available for internal auto-turn triggers.
-        let _ = TX_SUB_GLOBAL.set(codex.tx_sub.clone());
-        let _ = ANY_BG_NOTIFY.set(std::sync::Arc::new(Notify::new()));
         let init_id = codex.submit(configure_session).await?;
 
         Ok(CodexSpawnOk {

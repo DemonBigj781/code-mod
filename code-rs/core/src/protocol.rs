@@ -990,6 +990,9 @@ pub enum EventMsg {
     /// Ack the client's configure message.
     SessionConfigured(SessionConfiguredEvent),
 
+    /// The model chose a persistent title for this conversation.
+    SessionTitleUpdated { title: String },
+
     /// The active config.toml changed on disk and should be reloaded by the client.
     ConfigChanged,
 

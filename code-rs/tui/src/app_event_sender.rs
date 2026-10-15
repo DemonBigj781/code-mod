@@ -17,6 +17,7 @@ pub(crate) struct AppEventSender {
     // The animation producer may run faster than the renderer. Keep at most one
     // commit tick queued so a stalled terminal cannot grow an unbounded backlog.
     commit_tick_pending: Arc<AtomicBool>,
+    owner: Option<uuid::Uuid>,
 }
 
 impl AppEventSender {
@@ -26,6 +27,7 @@ impl AppEventSender {
             high_tx,
             bulk_tx,
             commit_tick_pending: Arc::new(AtomicBool::new(false)),
+            owner: None,
         }
     }
     /// Backward‑compatible constructor for tests/fixtures that expect a single
@@ -35,7 +37,20 @@ impl AppEventSender {
             high_tx: app_event_tx.clone(),
             bulk_tx: app_event_tx,
             commit_tick_pending: Arc::new(AtomicBool::new(false)),
+            owner: None,
         }
+    }
+
+    pub(crate) fn for_widget(&self) -> Self {
+        Self { owner: Some(uuid::Uuid::new_v4()), ..self.clone() }
+    }
+
+    pub(crate) fn owner(&self) -> Option<uuid::Uuid> {
+        self.owner
+    }
+
+    pub(crate) fn unscoped(&self) -> Self {
+        Self { owner: None, ..self.clone() }
     }
 
     pub(crate) fn mark_commit_tick_consumed(&self) {
@@ -78,6 +93,18 @@ impl AppEventSender {
                 | AppEvent::StopCommitAnimation
         );
 
+        // Terminal scheduling and already-addressed core events are application-wide.
+        // Everything else emitted by a widget belongs to that widget, including
+        // callbacks created before SessionConfigured supplies a conversation UUID.
+        let event = match self.owner {
+            Some(owner) if !matches!(event,
+                AppEvent::WidgetEvent { .. }
+                | AppEvent::RequestRedraw | AppEvent::Redraw
+                | AppEvent::TerminalRefresh | AppEvent::ScheduleFrameIn(_)
+                | AppEvent::CommitTick
+            ) => AppEvent::WidgetEvent { owner, event: Box::new(event) },
+            _ => event,
+        };
         let tx = if is_high { &self.high_tx } else { &self.bulk_tx };
         match tx.send(event) {
             Ok(()) => true,
@@ -149,6 +176,30 @@ mod tests {
     use super::*;
     use std::sync::mpsc::channel;
     use std::time::Duration;
+
+    #[test]
+    fn tab_isolation_keeps_cloned_callbacks_owned_in_both_directions() {
+        let (tx, rx) = channel();
+        let root = AppEventSender::new(tx);
+        let first = root.for_widget();
+        let second = root.for_widget();
+        assert_ne!(first.owner(), second.owner());
+        for sender in [&first, &second, &first] {
+            sender.clone().send(AppEvent::CodexOp(Box::new(code_core::protocol::Op::Interrupt)));
+            let AppEvent::WidgetEvent { owner, event } = rx.try_recv().expect("scoped event") else {
+                panic!("session operation lost its owner");
+            };
+            assert_eq!(Some(owner), sender.owner());
+            assert!(matches!(*event, AppEvent::CodexOp(_)));
+            sender.send_background_event_with_placement_and_order("owned", BackgroundPlacement::Tail, None);
+            let AppEvent::WidgetEvent { owner, .. } = rx.try_recv().expect("scoped notice") else {
+                panic!("background notice lost its owner");
+            };
+            assert_eq!(Some(owner), sender.owner());
+        }
+        first.send(AppEvent::RequestRedraw);
+        assert!(matches!(rx.try_recv(), Ok(AppEvent::RequestRedraw)));
+    }
 
     #[test]
     fn auto_coordinator_countdown_bypasses_bulk_backlog() {
