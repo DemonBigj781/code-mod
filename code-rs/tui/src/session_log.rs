@@ -126,6 +126,9 @@ pub(crate) fn maybe_init(config: &Config) {
 }
 
 pub(crate) fn log_inbound_app_event(event: &AppEvent) {
+    if crate::sensitive_input::redact_event(event) {
+        return;
+    }
     // Log only if enabled
     if !LOGGER.is_enabled() {
         return;

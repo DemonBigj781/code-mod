@@ -188,6 +188,7 @@ pub mod seatbelt;
 pub mod shell;
 pub mod sandboxing;
 pub mod spawn;
+pub mod ssh_registry;
 pub(crate) mod terminal;
 pub mod otel_init;
 mod text_encoding;

@@ -112,7 +112,11 @@ impl AppEventSender {
                 if is_commit_tick {
                     self.commit_tick_pending.store(false, Ordering::Release);
                 }
-                tracing::error!(?event, "failed to send event: sending on a closed channel");
+                if crate::sensitive_input::redact_event(&event) {
+                    tracing::error!("failed to deliver protected input on a closed channel");
+                } else {
+                    tracing::error!(?event, "failed to send event: sending on a closed channel");
+                }
                 false
             }
         }

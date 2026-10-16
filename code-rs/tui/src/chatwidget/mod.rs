@@ -124,6 +124,7 @@ mod repo_workflow;
 mod review_flow;
 mod session_flow;
 mod shell_config_flow;
+mod ssh_registry_flow;
 mod session_tuning_flow;
 mod status_line_flow;
 mod streaming;

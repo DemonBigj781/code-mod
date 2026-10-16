@@ -111,6 +111,7 @@ pub mod public_widgets;
 mod render;
 // mod scroll_view; // Orphaned after trait-based HistoryCell migration
 mod session_log;
+mod sensitive_input;
 mod shimmer;
 mod slash_command;
 mod prompt_args;

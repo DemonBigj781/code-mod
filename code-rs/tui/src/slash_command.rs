@@ -88,6 +88,7 @@ pub(crate) enum SlashCommand {
     Settings,
     Memories,
     Shell,
+    Ssh,
     Mode,
     Model,
     Fast,
@@ -166,6 +167,7 @@ impl SlashCommand {
             SlashCommand::Settings => "manage all settings in one place",
             SlashCommand::Memories => "inspect, rebuild, clear, or configure Memories artifacts",
             SlashCommand::Shell => "configure the shell used for command execution",
+            SlashCommand::Ssh => "manage saved SSH PCs: list, add, show, update, rename, auth, remove",
             SlashCommand::Prompts => "manage custom prompts",
             SlashCommand::Skills => "manage skills",
             SlashCommand::Apps => "browse and use apps (connectors)",
@@ -372,6 +374,21 @@ pub(crate) enum ProcessedCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_registry_commands_never_become_model_prompts() {
+        for input in [
+            "/ssh list",
+            "/ssh add user@192.0.2.5 key desktop",
+            "/ssh remove desktop",
+        ] {
+            assert!(matches!(
+                process_slash_command_message(input),
+                ProcessedCommand::RegularCommand(command, text)
+                    if command.command() == "ssh" && !command.is_prompt_expanding() && text == input
+            ));
+        }
+    }
 
     #[test]
     fn tab_commands_are_ui_commands_not_model_prompts() {

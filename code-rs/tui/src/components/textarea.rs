@@ -587,7 +587,9 @@ impl TextArea {
             }
             _o => {
                 #[cfg(feature = "debug-logs")]
-                tracing::debug!("Unhandled key event in TextArea: {:?}", _o);
+                if !crate::sensitive_input::active() {
+                    tracing::debug!("Unhandled key event in TextArea: {:?}", _o);
+                }
             }
         }
     }

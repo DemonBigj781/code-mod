@@ -13,6 +13,7 @@ Use these docs to install, configure, and operate Every Code (Code).
 - [Execution policy](execpolicy.md)
 - [Slash commands](slash-commands.md)
 - [Native session-history](session-history.md)
+- [SSH connections](ssh-connections.md)
 - [Auto Drive](auto-drive.md)
 - [Agents & Subagents](agents.md)
 - [Settings overlay](settings.md)

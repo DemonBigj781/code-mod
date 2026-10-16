@@ -71,11 +71,11 @@ fi
 
 build_jobs=1
 if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then
-    build_jobs=2
+    build_jobs=$(getconf _NPROCESSORS_ONLN)
 fi
 export CARGO_BUILD_JOBS="$build_jobs"
-export CMAKE_BUILD_PARALLEL_LEVEL=1
-export MAKEFLAGS=-j1
+export CMAKE_BUILD_PARALLEL_LEVEL="$build_jobs"
+export MAKEFLAGS="-j$build_jobs"
 export CARGO_PROFILE_RELEASE_LTO=off
 export CARGO_PROFILE_RELEASE_OPT_LEVEL=2
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
@@ -125,12 +125,20 @@ tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-t
         --no-default-features --features "$core_features" --release \
         fallback_memory_watchdog -- --test-threads=1
     bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \
+        --no-default-features --features "$core_features" --release \
+        ssh_registry -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-session-history --lib \
         --features code-session-history/cosmopolitan-ape --release -- --test-threads=1
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
         --no-default-features --features "$tui_features" --release \
         tab_isolation -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
+        --no-default-features --features "$tui_features" --release \
+        ssh_ -- --test-threads=1
 )
 
 debug_elf="$build_root/build/x86_64-unknown-linux-musl/release/code.com.dbg"

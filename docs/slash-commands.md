@@ -75,6 +75,8 @@ message. The title remains unchanged unless the AI or user explicitly updates it
   arguments, shows the current shell. With arguments, sets the shell path and
   any flags. Use `/shell -` to clear the setting and use auto-detection.
   Examples: `/shell /bin/bash`, `/shell /bin/bash -l`, `/shell /usr/local/bin/fish --interactive`.
+- `/ssh`: manage the dynamic saved-PC registry. See [SSH connections](ssh-connections.md).
+  Registration is local configuration only; this command does not connect to a host.
 
 ## Workspace & Git
 

@@ -30,17 +30,18 @@ class CommandTests(unittest.TestCase):
     def test_build_jobs_are_one_except_on_github_hosted_runners(self):
         script = (Path(__file__).resolve().parents[2] / "build-cosmopolitan-code.sh").read_text()
         start = script.index("build_jobs=1\n")
-        end = script.index("export CMAKE_BUILD_PARALLEL_LEVEL", start)
+        end = script.index("export CARGO_PROFILE_RELEASE_LTO", start)
         # Exercise only the resource-policy block, never the build commands.
-        policy = script[start:end] + '\nprintf "%s" "$CARGO_BUILD_JOBS"\n'
+        policy = 'getconf() { printf "7"; }\n' + script[start:end]
+        policy += '\nprintf "%s,%s,%s" "$CARGO_BUILD_JOBS" "$CMAKE_BUILD_PARALLEL_LEVEL" "$MAKEFLAGS"\n'
         for actions, runner, expected in [
             ("", "", "1"), ("true", "self-hosted", "1"),
-            ("false", "github-hosted", "1"), ("true", "github-hosted", "2"),
+            ("false", "github-hosted", "1"), ("true", "github-hosted", "7"),
         ]:
             with self.subTest(actions=actions, runner=runner):
                 result = subprocess.run(["sh", "-c", policy], capture_output=True, text=True,
                                         check=True, env={"GITHUB_ACTIONS": actions, "RUNNER_ENVIRONMENT": runner})
-                self.assertEqual(result.stdout, expected)
+                self.assertEqual(result.stdout, f"{expected},{expected},-j{expected}")
 
     def setUp(self):
         fixture = test_artifact_contract.ArtifactContractTests()

@@ -5,4 +5,5 @@ pub(crate) mod cloud_tasks;
 pub(crate) mod custom_prompt;
 pub(crate) mod request_user_input;
 pub(crate) mod resume_selection;
+pub(crate) mod ssh_credentials;
 pub(crate) mod undo_timeline;
