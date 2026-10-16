@@ -42,7 +42,10 @@ def check_worker_deadline(artifact, env):
     try:
         # Keep stdin open: the worker itself must terminate a blocked request,
         # rather than relying on this test or the normal parent supervisor.
-        assert process.wait(timeout=40) == 124, "worker did not enforce its own deadline"
+        status = process.wait(timeout=40)
+        # Cosmocc 4.0.2's _Exit exposes a POSIX wait status to native Windows callers.
+        expected = 124 << 8 if os.name == "nt" else 124
+        assert status == expected, f"worker did not enforce its own deadline: expected {expected}, got {status}"
     finally:
         if process.poll() is None:
             process.kill()

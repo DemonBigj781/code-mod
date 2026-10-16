@@ -15,6 +15,31 @@ spec.loader.exec_module(smoke)
 
 
 class HistoryWorkerSmokeTests(unittest.TestCase):
+    def test_deadline_check_uses_cosmopolitan_windows_wait_status(self):
+        artifact = Path("code.com")
+        process = Mock()
+        process.wait.return_value = 124 << 8
+        process.poll.return_value = 124 << 8
+        with patch.object(smoke.os, "name", "nt"), patch.object(
+            smoke.subprocess, "Popen", return_value=process
+        ) as launch:
+            smoke.check_worker_deadline(artifact, {})
+        launch.assert_called_once()
+        process.kill.assert_not_called()
+        process.communicate.assert_called_once_with(timeout=5)
+
+    def test_deadline_check_rejects_unencoded_exit_on_windows(self):
+        artifact = Path("code.com")
+        process = Mock()
+        process.wait.return_value = 124
+        process.poll.return_value = 124
+        with patch.object(smoke.os, "name", "nt"), patch.object(
+            smoke.subprocess, "Popen", return_value=process
+        ):
+            with self.assertRaisesRegex(AssertionError, "expected 31744, got 124"):
+                smoke.check_worker_deadline(artifact, {})
+        process.communicate.assert_called_once_with(timeout=5)
+
     def test_deadline_check_waits_with_stdin_open(self):
         process = Mock()
         process.wait.return_value = 124
