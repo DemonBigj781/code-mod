@@ -1,4 +1,13 @@
 impl ChatWidget<'_> {
+    pub(super) fn build_ssh_settings_view(&self) -> crate::bottom_pane::settings_pages::ssh::SshSettingsView {
+        crate::bottom_pane::settings_pages::ssh::SshSettingsView::new(
+            self.config.code_home.clone(), self.config.cwd.clone(), self.app_event_tx.clone())
+    }
+
+    pub(super) fn build_ssh_settings_content(&self) -> crate::chatwidget::settings_overlay::SshSettingsContent {
+        crate::chatwidget::settings_overlay::SshSettingsContent::new(self.build_ssh_settings_view())
+    }
+
     pub(super) fn build_model_settings_view(&self) -> ModelSelectionView {
         let presets = self.available_model_presets_for_role(ModelRole::Session);
         let current_model = self.config.model.clone();

@@ -146,6 +146,11 @@ impl ChatWidget<'_> {
         })
     }
 
+    fn open_ssh_settings_section(&mut self) -> bool {
+        let view = self.build_ssh_settings_view();
+        self.open_bottom_pane_settings(move |this| this.bottom_pane.show_settings_view(view))
+    }
+
     fn open_shell_settings_section(&mut self) -> bool {
         self.open_bottom_pane_settings(move |this| {
             this.bottom_pane
@@ -213,6 +218,7 @@ impl ChatWidget<'_> {
             SettingsSection::Theme                              => self.open_theme_settings_section(),
             SettingsSection::Interface                          => self.open_interface_settings_section(),
             SettingsSection::Shell                              => self.open_shell_settings_section(),
+            SettingsSection::Ssh                                => self.open_ssh_settings_section(),
             SettingsSection::ShellEscalation                    => self.open_shell_escalation_settings_section(),
             SettingsSection::ShellProfiles                       => self.open_shell_profiles_settings_section(),
             SettingsSection::ExecLimits                         => self.open_exec_limits_settings_section(),
@@ -288,6 +294,7 @@ impl ChatWidget<'_> {
             | SettingsSection::Theme
             | SettingsSection::Interface
             | SettingsSection::Shell
+            | SettingsSection::Ssh
             | SettingsSection::ShellEscalation
             | SettingsSection::ShellProfiles
             | SettingsSection::ExecLimits

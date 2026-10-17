@@ -421,6 +421,7 @@ pub(crate) enum AppEvent {
 
     /// Session nickname update finished
     SessionRenameCompleted { message: String },
+    SshRegistryResult { result: Result<Vec<String>, String> },
 
     /// Signal that agents are about to start (triggered when /plan, /solve, /code commands are entered)
     PrepareAgents,

@@ -1,37 +1,7 @@
 use super::*;
 use crate::bottom_pane::panes::ssh_credentials::SshCredentialView;
-use code_core::ssh_registry::{Connection, HELP, Registry, RegistryCommand};
-
-fn describe(connection: &Connection) -> String {
-    let endpoints = connection
-        .ordered_endpoints()
-        .iter()
-        .map(|e| e.display())
-        .collect::<Vec<_>>()
-        .join(" → ");
-    format!(
-        "{} [{}] — {}",
-        connection.name,
-        connection.default_auth.label(),
-        endpoints
-    )
-}
-
-fn run_registry_job(
-    tx: AppEventSender,
-    job: impl FnOnce() -> anyhow::Result<Vec<String>> + Send + 'static,
-) {
-    tokio::spawn(async move {
-        let lines = match tokio::task::spawn_blocking(job).await {
-            Ok(Ok(lines)) => lines,
-            Ok(Err(error)) => vec![format!("SSH registry: {error:#}")],
-            Err(_) => vec!["SSH registry worker failed; no connection was attempted.".into()],
-        };
-        tx.send(AppEvent::InsertHistory(
-            lines.into_iter().map(Line::from).collect(),
-        ));
-    });
-}
+use crate::ssh_registry::{describe, run_registry_job};
+use code_core::ssh_registry::{HELP, Registry, RegistryCommand};
 
 #[cfg(test)]
 mod tests {
@@ -45,16 +15,35 @@ mod tests {
         });
         let event = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                if let Ok(event) = receiver.try_recv() { break event; }
+                if let Ok(event) = receiver.try_recv() {
+                    break event;
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
-        }).await.expect("registry job must return its result");
-        assert!(!matches!(event, AppEvent::InsertHistory(_)),
-            "registry output must be a notice, not an assistant stream update");
+        })
+        .await
+        .expect("registry job must return its result");
+        assert!(
+            !matches!(event, AppEvent::InsertHistory(_)),
+            "registry output must be a notice, not an assistant stream update"
+        );
     }
 }
 
 impl ChatWidget<'_> {
+    pub(crate) fn on_ssh_registry_result(&mut self, result: Result<Vec<String>, String>) {
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.apply_ssh_registry_result(&result);
+        }
+        self.bottom_pane.apply_ssh_registry_result(&result);
+        let lines = match result {
+            Ok(lines) => lines,
+            Err(error) => vec![format!("SSH registry: {error}")],
+        };
+        self.history_push_plain_paragraphs(crate::history::state::PlainMessageKind::Notice, lines);
+        self.request_redraw();
+    }
+
     pub(crate) fn handle_ssh_command(&mut self, args: String) {
         if matches!(args.trim(), "help" | "?") {
             self.debug_notice(HELP.to_owned());

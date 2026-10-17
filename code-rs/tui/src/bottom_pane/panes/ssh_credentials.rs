@@ -85,7 +85,7 @@ impl SshCredentialView {
         self.complete = true;
     }
 
-    fn key(&mut self, key: KeyEvent) {
+    pub(crate) fn key(&mut self, key: KeyEvent) {
         if self.complete {
             return;
         }
@@ -117,7 +117,7 @@ impl SshCredentialView {
         }
     }
 
-    fn paste(&mut self, text: String) {
+    pub(crate) fn paste(&mut self, text: String) {
         if text.chars().any(char::is_control) || self.field().text().len() + text.len() > 4096 {
             self.error = Some("Paste must be one line and at most 4096 bytes.".into());
             return;

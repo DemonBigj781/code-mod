@@ -5,6 +5,23 @@ pre-registered. This command manages local configuration; remote execution,
 SCP project folders, and the agent-facing SSH/shell aliases are separate work
 and are not implemented by the registry command.
 
+## Settings menu
+
+Open `/settings ssh`, or choose **SSH** in the settings overview. The same
+registry view works in the full overlay and the compact bottom pane.
+
+- **N** adds a PC; **E** or Enter edits its name and endpoints.
+- **P** configures password authentication; **K** configures a key or SSH agent.
+- **D** opens a removal confirmation; **R** reloads the saved registry.
+- Use Up/Down or the mouse wheel to select a PC. Click a row to select it.
+- Forms use Tab to move fields and Enter or Ctrl+S to submit. Escape cancels.
+
+An empty registry explicitly shows **No PCs registered**. Malformed-registry
+errors are shown rather than silently displaying an empty list. Edits and
+removal confirmations reject changes made against stale profile snapshots.
+Both slash-command and menu results are local notices, not assistant-stream
+updates; they must not replace or disappear behind an existing model answer.
+
 ## Commands
 
 - `/ssh` or `/ssh list`: list all registered PCs in case-insensitive name order.

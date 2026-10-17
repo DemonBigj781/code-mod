@@ -18,6 +18,7 @@ impl SettingsSection {
             "theme" | "themes" => Some(SettingsSection::Theme),
             "ui" | "interface" | "layout" | "settings-ui" => Some(SettingsSection::Interface),
             "shell" | "shells" => Some(SettingsSection::Shell),
+            "ssh" => Some(SettingsSection::Ssh),
             "shell-escalation" | "shell_escalation" | "escalation" | "zsh-fork" | "zsh_fork"
             | "shell-zsh-fork" | "shell_zsh_fork" => Some(SettingsSection::ShellEscalation),
             "shell-profiles" | "shell-profile" | "profiles" | "profile" => {

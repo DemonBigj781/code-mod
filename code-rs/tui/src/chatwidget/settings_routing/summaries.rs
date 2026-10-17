@@ -19,6 +19,7 @@ impl ChatWidget<'_> {
                     SettingsSection::Theme         => self.settings_summary_theme(),
                     SettingsSection::Interface     => self.settings_summary_interface(),
                     SettingsSection::Shell         => self.settings_summary_shell(),
+                    SettingsSection::Ssh           => Some("Manage saved PCs".to_owned()),
                     SettingsSection::ShellEscalation => self.settings_summary_shell_escalation(),
                     SettingsSection::ShellProfiles => self.settings_summary_shell_profiles(),
                     SettingsSection::ExecLimits    => self.settings_summary_exec_limits(),

@@ -7,6 +7,7 @@ impl SettingsSection {
             SettingsSection::Theme => "Theme",
             SettingsSection::Interface => "Interface",
             SettingsSection::Shell => "Shell",
+            SettingsSection::Ssh => "SSH",
             SettingsSection::ShellEscalation => "Shell escalation",
             SettingsSection::ShellProfiles => "Shell profiles",
             SettingsSection::ExecLimits => "Exec limits",
@@ -41,6 +42,7 @@ impl SettingsSection {
             SettingsSection::Theme => "Switch between preset color palettes and adjust contrast.",
             SettingsSection::Interface => "Control Settings UI routing and other layout preferences.",
             SettingsSection::Shell => "Select the shell used for tool execution.",
+            SettingsSection::Ssh => "Manage saved PCs, endpoints, and SSH authentication.",
             SettingsSection::ShellEscalation => {
                 "Configure zsh-fork shell escalation (interactive approvals for blocked subcommands)."
             }
@@ -95,6 +97,7 @@ impl SettingsSection {
             SettingsSection::Theme => "Theme Settings",
             SettingsSection::Interface => "Interface",
             SettingsSection::Shell => "Shell Selection",
+            SettingsSection::Ssh => "SSH Connections",
             SettingsSection::ShellEscalation => "Shell Escalation",
             SettingsSection::ShellProfiles => "Shell Profiles",
             SettingsSection::ExecLimits => "Exec Limits",
@@ -129,6 +132,7 @@ impl SettingsSection {
             SettingsSection::Theme => "Theme settings coming soon.",
             SettingsSection::Interface => "Control Settings UI routing (overlay vs bottom pane).",
             SettingsSection::Shell => "Select the shell used for tool execution.",
+            SettingsSection::Ssh => "Manage saved PCs, endpoints, and SSH authentication.",
             SettingsSection::ShellEscalation => {
                 "Configure zsh-fork shell escalation for sandboxed shell tool calls."
             }

@@ -17,6 +17,12 @@ use super::settings_pages;
 use super::{ActiveViewKind, BottomPane, BottomPaneParams, BottomPaneView, ChatComposer};
 
 impl<'a> BottomPane<'a> {
+    pub(crate) fn apply_ssh_registry_result(&mut self, result: &Result<Vec<String>, String>) {
+        if let Some(view) = self.active_view_as::<settings_pages::ssh::SshSettingsView>() {
+            view.apply_result(result);
+        }
+    }
+
     pub fn new(params: BottomPaneParams) -> Self {
         let mut composer = ChatComposer::new(
             params.has_input_focus,

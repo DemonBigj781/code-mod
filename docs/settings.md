@@ -16,6 +16,9 @@ Full-screen settings panel for Every Code’s TUI. Use it to change models, them
 - **Model**: pick the default chat model and reasoning effort, or add an
   OpenAI-compatible `/v1` endpoint.
 - **Theme**: choose a theme and spinner; applies immediately.
+- **SSH**: manage saved PCs, endpoint order, and authentication through
+  `/settings ssh`. See [SSH connections](ssh-connections.md). Registry metadata
+  lives in `CODE_HOME/ssh-connections.json`; secrets stay in the credential store.
 - **Updates**: view upgrade channel/status. `/update` opens here before running installers.
 - **Agents**: see built-in/custom agents, enable/disable, force read-only, add per-agent instructions. Open the Subagent editor to configure `/plan`/`/solve`/`/code` or custom slash commands.
 - **Prompts**: edit saved prompt snippets.

@@ -741,6 +741,11 @@
                         widget.debug_notice(message);
                     }
                 }
+                AppEvent::SshRegistryResult { result } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.on_ssh_registry_result(result);
+                    }
+                }
                 AppEvent::ResumeFrom(path) => {
                     // Replace the current chat widget with a new one configured to resume
                     let mut cfg = self.config.clone();

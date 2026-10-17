@@ -241,6 +241,13 @@ impl SettingsOverlayView {
                 }
                 self.render_placeholder(area, buf, SettingsSection::Shell.placeholder());
             }
+            SettingsSection::Ssh => {
+                if let Some(content) = self.ssh_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::Ssh.placeholder());
+            }
             SettingsSection::ShellEscalation => {
                 if let Some(content) = self.shell_escalation_content.as_ref() {
                     content.render(area, buf);

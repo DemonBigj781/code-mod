@@ -38,6 +38,7 @@ pub(crate) use self::contents::{
     ReviewSettingsContent,
     SecretsSettingsContent,
     ShellSettingsContent,
+    SshSettingsContent,
     ShellEscalationSettingsContent,
     ShellProfilesSettingsContent,
     SkillsSettingsContent,
@@ -70,6 +71,7 @@ pub(crate) struct SettingsOverlayView {
     theme_content: Option<ThemeSettingsContent>,
     interface_content: Option<InterfaceSettingsContent>,
     shell_content: Option<ShellSettingsContent>,
+    ssh_content: Option<SshSettingsContent>,
     shell_escalation_content: Option<ShellEscalationSettingsContent>,
     shell_profiles_content: Option<ShellProfilesSettingsContent>,
     exec_limits_content: Option<ExecLimitsSettingsContent>,
@@ -146,6 +148,7 @@ impl SettingsOverlayView {
             theme_content: None,
             interface_content: None,
             shell_content: None,
+            ssh_content: None,
             shell_escalation_content: None,
             shell_profiles_content: None,
             exec_limits_content: None,
@@ -340,6 +343,14 @@ impl SettingsOverlayView {
 
     pub(crate) fn set_shell_content(&mut self, content: ShellSettingsContent) {
         self.shell_content = Some(content);
+    }
+
+    pub(crate) fn set_ssh_content(&mut self, content: SshSettingsContent) {
+        self.ssh_content = Some(content);
+    }
+
+    pub(crate) fn apply_ssh_registry_result(&mut self, result: &Result<Vec<String>, String>) {
+        if let Some(content) = self.ssh_content.as_mut() { content.apply_result(result); }
     }
 
     pub(crate) fn set_shell_escalation_content(&mut self, content: ShellEscalationSettingsContent) {
@@ -553,6 +564,10 @@ impl SettingsOverlayView {
                 .shell_content
                 .as_ref()
                 .map(|content| content as &dyn SettingsContent),
+            SettingsSection::Ssh => self
+                .ssh_content
+                .as_ref()
+                .map(|content| content as &dyn SettingsContent),
             SettingsSection::ShellEscalation => self
                 .shell_escalation_content
                 .as_ref()
@@ -670,6 +685,10 @@ impl SettingsOverlayView {
                 .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::Shell => self
                 .shell_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::Ssh => self
+                .ssh_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::ShellEscalation => self

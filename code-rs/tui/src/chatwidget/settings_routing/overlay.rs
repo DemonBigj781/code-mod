@@ -63,6 +63,7 @@ impl ChatWidget<'_> {
         overlay.set_theme_content(self.build_theme_settings_content());
         overlay.set_interface_content(self.build_interface_settings_content());
         overlay.set_shell_content(self.build_shell_settings_content());
+        overlay.set_ssh_content(self.build_ssh_settings_content());
         overlay.set_shell_escalation_content(self.build_shell_escalation_settings_content());
         overlay.set_shell_profiles_content(self.build_shell_profiles_settings_content());
         overlay.set_exec_limits_content(self.build_exec_limits_settings_content());

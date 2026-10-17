@@ -203,6 +203,10 @@ fn name_key(name: &str) -> Result<String> {
     Ok(name.to_lowercase())
 }
 
+pub fn validate_connection_name(name: &str) -> Result<()> {
+    name_key(name).map(|_| ())
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct KeyAuthentication {
@@ -598,6 +602,36 @@ impl Registry {
         self.write(&registry)
     }
 
+    pub fn edit(
+        &self,
+        expected: &Connection,
+        new_name: &str,
+        endpoints: Vec<Endpoint>,
+    ) -> Result<()> {
+        let old_key = name_key(&expected.name)?;
+        let new_key = name_key(new_name)?;
+        let (_lock, mut registry) = self.locked()?;
+        let current = registry
+            .connections
+            .get(&old_key)
+            .context("SSH connection is not registered")?;
+        ensure!(
+            current == expected,
+            "SSH connection changed while editing; refresh and retry"
+        );
+        ensure!(
+            old_key == new_key || !registry.connections.contains_key(&new_key),
+            "SSH connection name already exists"
+        );
+        let mut edited = current.clone();
+        edited.name = new_name.to_owned();
+        edited.endpoints = endpoints;
+        edited.validate()?;
+        registry.connections.remove(&old_key);
+        registry.connections.insert(new_key, edited);
+        self.write(&registry)
+    }
+
     pub fn set_auth(&self, expected: &Connection, credentials: Credentials) -> Result<()> {
         let (_lock, mut registry) = self.locked()?;
         let connection = registry
@@ -627,7 +661,21 @@ impl Registry {
     }
 
     pub fn remove(&self, name: &str) -> Result<()> {
+        self.remove_inner(name, None)
+    }
+
+    pub fn remove_expected(&self, expected: &Connection) -> Result<()> {
+        self.remove_inner(&expected.name, Some(expected))
+    }
+
+    fn remove_inner(&self, name: &str, expected: Option<&Connection>) -> Result<()> {
         let (_lock, mut registry) = self.locked()?;
+        if let Some(expected) = expected {
+            ensure!(
+                registry.connections.get(&name_key(name)?) == Some(expected),
+                "SSH connection changed while confirming removal; refresh and retry"
+            );
+        }
         let connection = registry
             .connections
             .remove(&name_key(name)?)
@@ -646,6 +694,31 @@ mod tests {
     use super::*;
     use code_keyring_store::CredentialStoreError;
     use std::sync::Mutex;
+
+    #[test]
+    fn settings_edits_are_atomic_and_stale_removal_is_rejected() {
+        let (_directory, registry, _) = fixture();
+        let original = registry.add("first", endpoints(), agent()).unwrap();
+        registry.add("second", endpoints(), agent()).unwrap();
+        assert!(
+            registry
+                .edit(&original, "second", parse_endpoints("u@new-host").unwrap())
+                .is_err()
+        );
+        assert_eq!(registry.get("first").unwrap(), original);
+        registry
+            .edit(&original, "renamed", parse_endpoints("u@new-host").unwrap())
+            .unwrap();
+        assert_eq!(registry.get("renamed").unwrap().id, original.id);
+        assert!(registry.remove_expected(&original).is_err());
+        let edited = registry.get("renamed").unwrap();
+        registry.update_endpoints("renamed", endpoints()).unwrap();
+        assert!(registry.remove_expected(&edited).is_err());
+        registry
+            .remove_expected(&registry.get("renamed").unwrap())
+            .unwrap();
+        assert_eq!(registry.list().unwrap().len(), 1);
+    }
 
     #[derive(Debug, Default)]
     struct Keyring(Mutex<BTreeMap<String, String>>);

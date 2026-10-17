@@ -63,7 +63,7 @@ message. The title remains unchanged unless the AI or user explicitly updates it
   `code secrets set OPENAI_API_KEY` to store your key in `CODE_HOME` (encrypted
   at rest). Use `--scope env` for per-repo secrets.
 - `/settings [section]`: open the settings panel. Optional section argument
-  jumps directly to `model`, `theme`, `interface`, `shell`, `shell-escalation`,
+  jumps directly to `model`, `theme`, `interface`, `shell`, `ssh`, `shell-escalation`,
   `shell-profiles`, `exec`, `updates`, `accounts`, `secrets`, `apps`, `agents`,
   `memories`, `prompts`, `personality`, `skills`, `plugins`, `auto`, `review`,
   `planning`, `validation`, `limits`, `chrome`, `mcp`, `repl`, `network`,
