@@ -273,6 +273,23 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn agent_shortlist_accepts_one_model_choice() {
+        assert!(serde_json::from_value::<AgentCreateOptions>(json!({
+            "task": "Inspect the requested source files", "model": "configured-model"
+        })).is_ok());
+        assert!(serde_json::from_value::<RunAgentParams>(json!({
+            "task": "Inspect the requested source files", "model": "configured-model"
+        })).is_ok());
+    }
+
+    #[test]
+    fn agent_shortlist_schema_advertises_only_the_supplied_choices() {
+        let candidates = vec!["first".to_owned(), "second".to_owned()];
+        let schema = serde_json::to_value(create_agent_tool(&candidates)).unwrap();
+        assert_eq!(schema.pointer("/parameters/properties/create/properties/model/enum"), Some(&json!(candidates)));
+    }
+
+    #[test]
     fn create_schema_exposes_only_the_operator_task() {
         let schema = serde_json::to_value(create_agent_tool(&["configured-model".to_owned()]))
             .expect("agent tool should serialize");
