@@ -1,5 +1,15 @@
 use super::SettingsSection;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssh_settings_hint_is_discoverable() {
+        assert!(SettingsSection::from_hint("ssh").is_some());
+    }
+}
+
 impl SettingsSection {
     pub(crate) fn from_hint(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {

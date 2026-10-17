@@ -33,6 +33,27 @@ fn run_registry_job(
     });
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ssh_registry_results_do_not_use_the_assistant_stream_channel() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        run_registry_job(AppEventSender::new(sender), || {
+            Ok(vec!["SSH PC registry: 0 saved connection(s).".into()])
+        });
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(event) = receiver.try_recv() { break event; }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.expect("registry job must return its result");
+        assert!(!matches!(event, AppEvent::InsertHistory(_)),
+            "registry output must be a notice, not an assistant stream update");
+    }
+}
+
 impl ChatWidget<'_> {
     pub(crate) fn handle_ssh_command(&mut self, args: String) {
         if matches!(args.trim(), "help" | "?") {
