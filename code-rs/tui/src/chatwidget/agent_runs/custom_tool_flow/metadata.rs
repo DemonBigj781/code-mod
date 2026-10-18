@@ -32,3 +32,21 @@ impl InvocationMetadata {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn agent_shortlist_metadata_tracks_single_model_in_both_directions() {
+        for params in [
+            json!({"action":"create","create":{"task":"Inspect the requested source files","model":"chosen-reader"}}),
+            json!({"agent_id":"one-agent","model":"chosen-reader"}),
+            json!({"model":"chosen-reader","create":{"model":"chosen-reader"}}),
+        ] {
+            let metadata = InvocationMetadata::from("agent", Some(&params));
+            assert_eq!(metadata.models, vec!["chosen-reader".to_owned()]);
+        }
+    }
+}

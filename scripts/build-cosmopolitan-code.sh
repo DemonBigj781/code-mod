@@ -142,6 +142,10 @@ tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-t
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
         --no-default-features --features "$tui_features" --release \
+        agent_shortlist -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
+        --no-default-features --features "$tui_features" --release \
         settings -- --test-threads=1
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \

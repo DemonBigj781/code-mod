@@ -30,6 +30,9 @@ fn populate_from_map(meta: &mut InvocationMetadata, map: &Map<String, Value>) {
 }
 
 fn apply_root_fields(meta: &mut InvocationMetadata, map: &Map<String, Value>) {
+    if let Some(model) = map.get("model").and_then(Value::as_str) {
+        meta.models.push(model.to_owned());
+    }
     if let Some(action) = map.get("action").and_then(Value::as_str) {
         meta.action = Some(action.to_owned());
     }
@@ -109,6 +112,9 @@ fn apply_create(meta: &mut InvocationMetadata, map: &Map<String, Value>) {
     let Some(create) = map.get("create").and_then(Value::as_object) else {
         return;
     };
+    if let Some(model) = create.get("model").and_then(Value::as_str) {
+        meta.models.push(model.to_owned());
+    }
 
     if meta.task.is_none()
         && let Some(task) = create.get("task").and_then(Value::as_str)
