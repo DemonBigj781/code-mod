@@ -20,7 +20,7 @@ jobs:
           rustup toolchain install 1.93.0 --profile minimal
           jobs=1
           if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then jobs=$(getconf _NPROCESSORS_ONLN); fi
-          CARGO_BUILD_JOBS="$jobs" cargo +1.93.0 test --locked --manifest-path scripts/agent-contract-check/Cargo.toml -j"$jobs" -- --test-threads=1
+          CARGO_TARGET_DIR="$RUNNER_TEMP/code-agent-contract-target" CARGO_BUILD_JOBS="$jobs" cargo +1.93.0 test --locked --manifest-path scripts/agent-contract-check/Cargo.toml -j"$jobs" -- --test-threads=1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: DemonBigj781/cosmopolitan
