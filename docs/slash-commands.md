@@ -87,8 +87,10 @@ message. The title remains unchanged unless the AI or user explicitly updates it
   Normal approvals, sandbox restrictions, and disabled-tool controls still
   apply. A running foreground task must finish or be cancelled first.
   Provider-native tools such as web search cannot be called this way.
-  Results appear as bounded local notices; image results are identified rather
-  than sent to a model. This command does not add an SSH execution transport.
+  Results appear as bounded local notices, with returned image payloads identified
+  in text. Tools retain their normal side effects: for example, `image_view`
+  attaches an image for the next model turn. Direct invocation is not an image
+  privacy gate and does not add an SSH execution transport.
   Registration is local configuration only; this command does not connect to a host.
 
 ## Workspace & Git
