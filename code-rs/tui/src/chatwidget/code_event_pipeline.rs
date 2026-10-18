@@ -626,9 +626,12 @@ impl ChatWidget<'_> {
             EventMsg::ExitedReviewMode(review_event) => {
                 self.handle_exited_review_mode_event(review_event);
             }
-            EventMsg::TaskLifecycle(_) => {
-                // Task lifecycle events are used for internal bookkeeping;
-                // the TUI doesn't render them directly yet.
+            EventMsg::TaskLifecycle(lifecycle) => {
+                if lifecycle.phase == code_core::protocol::TaskLifecyclePhase::Started
+                    && lifecycle.origin == code_core::protocol::TaskOriginKind::OperatorTool
+                {
+                    self.pending_turn_origin = Some(TurnOrigin::OperatorTool);
+                }
             }
         }
     }

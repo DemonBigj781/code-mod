@@ -53,7 +53,7 @@ impl AgentTask {
             sub_id,
             handle,
             kind: AgentTaskKind::OperatorTool,
-            _origin: TaskOriginKind::User,
+            _origin: TaskOriginKind::OperatorTool,
             _visible_to_user: true,
         }, start)
     }

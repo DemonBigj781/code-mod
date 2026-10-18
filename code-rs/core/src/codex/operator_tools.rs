@@ -294,6 +294,14 @@ pub(super) async fn run(
         id: sub_id.clone(),
     };
     let _mcp_permissions = super::mcp_access::McpTurnAllowGuard::new(sess.clone(), sub_id.clone());
+    sess.send_event(sess.make_event(&sub_id, EventMsg::TaskLifecycle(
+        crate::protocol::TaskLifecycleEvent {
+            phase: crate::protocol::TaskLifecyclePhase::Started,
+            origin: crate::protocol::TaskOriginKind::OperatorTool,
+            visible_to_user: true,
+            last_agent_message: None,
+        },
+    ))).await;
     sess.send_event(sess.make_event(&sub_id, EventMsg::TaskStarted))
         .await;
     let catalog = catalog(&sess);

@@ -639,6 +639,7 @@ struct AutoReviewNotice {
 pub(crate) enum TurnOrigin {
     User,
     Developer,
+    OperatorTool,
 }
 
 #[derive(Clone, Debug)]

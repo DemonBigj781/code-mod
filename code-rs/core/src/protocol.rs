@@ -1150,6 +1150,7 @@ pub enum TaskLifecyclePhase {
 #[serde(rename_all = "snake_case")]
 pub enum TaskOriginKind {
     User,
+    OperatorTool,
     QueuedUser,
     PendingInput,
     PostTurn,

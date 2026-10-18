@@ -64,15 +64,22 @@ impl ChatWidget<'_> {
         // Reset per-turn UI indicators; ordering is now global-only.
         self.reasoning_index.clear();
         self.bottom_pane.set_task_running(true);
-        self.bottom_pane
-            .update_status_text("waiting for model");
+        self.bottom_pane.update_status_text(
+            if self.current_turn_origin == Some(TurnOrigin::OperatorTool) {
+                "running operator tool"
+            } else {
+                "waiting for model"
+            },
+        );
         self.ensure_spinner_for_activity("task-started");
         tracing::info!("[order] EventMsg::TaskStarted id={}", id);
 
         // Capture a baseline snapshot for this turn so background auto review only
         // covers changes made during the turn, not pre-existing local edits.
         self.auto_review_baseline = None;
-        if self.config.tui.auto_review_enabled {
+        if self.config.tui.auto_review_enabled
+            && self.current_turn_origin != Some(TurnOrigin::OperatorTool)
+        {
             self.spawn_auto_review_baseline_capture();
         }
 
@@ -121,7 +128,7 @@ impl ChatWidget<'_> {
             self.mid_turn_answer_ids_in_turn.remove(&last_id);
             self.maybe_clear_mid_turn_for_last_answer(&last_id);
         }
-        if self.auto_resolve_enabled() {
+        if self.current_turn_origin != Some(TurnOrigin::OperatorTool) && self.auto_resolve_enabled() {
             self.auto_resolve_on_task_complete(last_agent_message.clone());
         }
         // Defensive: mark any lingering agent state as complete so the spinner can quiesce.
@@ -156,8 +163,10 @@ impl ChatWidget<'_> {
         self.stream_state.current_kind = None;
         // Final re-check for idle state.
         self.maybe_hide_spinner();
-        self.maybe_trigger_auto_review();
-        self.emit_turn_complete_notification(last_agent_message.clone());
+        if self.current_turn_origin != Some(TurnOrigin::OperatorTool) {
+            self.maybe_trigger_auto_review();
+            self.emit_turn_complete_notification(last_agent_message.clone());
+        }
         self.suppress_next_agent_hint = false;
         self.mark_needs_redraw();
         self.flush_history_snapshot_if_needed(true);
