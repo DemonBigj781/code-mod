@@ -12,3 +12,6 @@ mod openai_tools {
 
 #[path = "../../../code-rs/core/src/agent_tool/tool_schema.rs"]
 mod tool_schema;
+
+#[path = "../../../code-rs/tui/src/tool_command.rs"]
+mod tool_command;
