@@ -110,7 +110,8 @@ fn edit_mode_tab_switches_focus_and_enter_activates_back_action() {
     assert_eq!(view.edit_focus, EditFocus::Actions);
 
     // Move selection to Back.
-    for _ in 0..5 {
+    for _ in 0..view.edit_action_items().len() {
+        if view.selected_action == EditAction::Back { break; }
         assert!(view.handle_key_event_direct(KeyEvent::from(KeyCode::Right)));
     }
     assert_eq!(view.selected_action, EditAction::Back);
