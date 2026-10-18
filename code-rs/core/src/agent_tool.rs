@@ -42,6 +42,7 @@ pub use tool_schema::ListAgentsParams;
 pub use tool_schema::RunAgentParams;
 pub use tool_schema::WaitForAgentParams;
 pub use tool_schema::create_agent_tool;
+pub(crate) use tool_schema::select_agent_model;
 
 // Track nested agent spawns so external agent CLIs can detect runaway recursion.
 pub(crate) const CODE_AGENT_SPAWN_DEPTH_ENV: &str = "CODE_AGENT_SPAWN_DEPTH";

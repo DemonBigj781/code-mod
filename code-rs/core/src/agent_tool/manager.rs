@@ -105,6 +105,26 @@ mod tab_isolation_tests {
         }
     }
 
+    #[test]
+    fn agent_id_lookup_and_unfiltered_listing_preserve_session_ownership() {
+        let mut manager = AgentManager::new();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        manager.agents.insert("alpha".into(), agent(first, "alpha"));
+        manager.agents.insert("bravo".into(), agent(second, "bravo"));
+        for (owner, own, other) in [(first, "alpha", "bravo"), (second, "bravo", "alpha")] {
+            assert!(manager.session_agent(owner, own, None).is_some());
+            assert!(manager.session_agent(owner, other, None).is_none());
+            assert!(manager.session_agent(owner, own, Some("wrong-batch")).is_none());
+            assert!(manager.session_agent(owner, "missing", None).is_none());
+            let listed = manager.list_session_agents(owner, None, None, false);
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].id, own);
+        }
+        manager.agents.get_mut("alpha").unwrap().batch_id = None;
+        assert!(manager.session_agent(first, "alpha", None).is_some());
+    }
+
     #[tokio::test]
     async fn tab_isolation_agent_updates_and_cancellation_follow_the_owner() {
         let mut manager = AgentManager::new();
@@ -433,6 +453,13 @@ impl AgentManager {
         self.agents.get(agent_id).cloned()
     }
 
+    pub fn session_agent(&self, owner: Uuid, agent_id: &str, batch: Option<&str>) -> Option<&Agent> {
+        self.agents.get(agent_id).filter(|agent| {
+            agent.owner_session_id == Some(owner)
+                && batch.is_none_or(|batch| agent.batch_id.as_deref() == Some(batch))
+        })
+    }
+
     pub fn get_all_agents(&self) -> impl Iterator<Item = &Agent> {
         self.agents.values()
     }
@@ -443,11 +470,20 @@ impl AgentManager {
         batch_id: Option<String>,
         recent_only: bool,
     ) -> Vec<Agent> {
+        self.list_agents_scoped(None, status_filter, batch_id, recent_only)
+    }
+
+    pub fn list_session_agents(&self, owner: Uuid, status: Option<AgentStatus>, batch: Option<String>, recent: bool) -> Vec<Agent> {
+        self.list_agents_scoped(Some(owner), status, batch, recent)
+    }
+
+    fn list_agents_scoped(&self, owner: Option<Uuid>, status_filter: Option<AgentStatus>, batch_id: Option<String>, recent_only: bool) -> Vec<Agent> {
         let cutoff = recent_only.then(|| Utc::now() - Duration::hours(2));
 
         self.agents
             .values()
             .filter(|agent| {
+                if owner.is_some_and(|owner| agent.owner_session_id != Some(owner)) { return false; }
                 if let Some(ref filter) = status_filter
                     && agent.status != *filter {
                         return false;

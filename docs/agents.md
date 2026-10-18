@@ -38,7 +38,37 @@ agent_instructions = "Preamble added to each spawned agent"
 - `orchestrator_instructions`: appended to the Code-side prompt before issuing `agent.create`.
 - `agent_instructions`: appended to each spawned agent prompt.
 
-The orchestrator fans out agents, waits for results, and merges reasoning according to your `hide_agent_reasoning` / `show_raw_agent_reasoning` settings.
+## Reader-agent selection
+
+Each session advertises a random shortlist of **up to five operator-enabled,
+authentication-eligible models**. The shortlist is stable for that session and
+settings snapshot, including provider prompt rebuilds. A new session gets a new
+sample; changing eligibility rebuilds the shortlist. The model guide describes
+only those candidates, rather than the full catalog.
+
+The calling AI chooses one `create.model`. **One create request launches one
+agent**, not every candidate. The master read-agent switch and per-model settings
+remain authoritative. Missing or out-of-shortlist choices return the candidate
+list without launching anything. If only one model is eligible, omitting the
+choice selects that sole model. Permissions, instructions, and read-only policy
+still come from the operator's configuration, not tool arguments.
+
+Example: `agent({"action":"create","create":{"task":"Inspect the requested files for regressions","model":"<advertised-candidate>"}})`.
+Use the returned `agent_id` for `status`, `result`, or `wait`; no hidden batch ID
+is required. `wait` and `cancel` also accept a batch ID. `list` without filters
+lists only the current session's agents. Explicit batch filters remain supported,
+and no lookup, listing, or cancellation may cross session ownership.
+
+Multiple deliberately separate tasks may still be submitted, subject to the
+shared process limit below. The shortlist is not an instruction to fan out the
+same task. Result rendering honors `hide_agent_reasoning` and
+`show_raw_agent_reasoning` settings.
+
+Parent handoff remains capped at 64 KiB and prioritizes recent conversation.
+Preparing it borrows history instead of cloning the entire transcript, including
+large image payloads. Unknown agent IDs fail promptly rather than waiting for
+the normal timeout. These changes do not establish live latency for external
+providers; their startup, service queues, and inference time remain separate.
 
 ## Shared process limit
 

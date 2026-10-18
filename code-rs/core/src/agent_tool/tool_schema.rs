@@ -6,14 +6,15 @@ use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
 use crate::openai_tools::ResponsesApiTool;
 
-pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
+pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
     properties.insert(
         "action".to_owned(),
         JsonSchema::String {
             description: Some(
-                "Required: choose one of ['create','status','wait','result','cancel','list']".to_owned(),
+                "Required: choose one of ['create','status','wait','result','cancel','list']"
+                    .to_owned(),
             ),
             allowed_values: Some(
                 ["create", "status", "wait", "result", "cancel", "list"]
@@ -28,15 +29,26 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
     create_properties.insert(
         "task".to_owned(),
         JsonSchema::String {
-            description: Some("Task prompt to execute".to_owned()),
+            description: Some("Task to execute, described in at least four words".to_owned()),
             allowed_values: None,
+        },
+    );
+    create_properties.insert(
+        "model".to_owned(),
+        JsonSchema::String {
+            description: Some("Choose ONE model from this session's random shortlist of up to five operator-enabled candidates. Only that agent is launched.".to_owned()),
+            allowed_values: (!allowed_models.is_empty()).then(|| allowed_models.to_vec()),
         },
     );
     properties.insert(
         "create".to_owned(),
         JsonSchema::Object {
             properties: create_properties,
-            required: Some(vec!["task".to_owned()]),
+            required: Some(if allowed_models.len() > 1 {
+                vec!["task".to_owned(), "model".to_owned()]
+            } else {
+                vec!["task".to_owned()]
+            }),
             additional_properties: Some(false.into()),
         },
     );
@@ -46,6 +58,13 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
         "agent_id".to_owned(),
         JsonSchema::String {
             description: Some("Agent identifier to inspect".to_owned()),
+            allowed_values: None,
+        },
+    );
+    status_properties.insert(
+        "batch_id".to_owned(),
+        JsonSchema::String {
+            description: Some("Optional batch filter; agent_id alone is sufficient".to_owned()),
             allowed_values: None,
         },
     );
@@ -63,6 +82,13 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
         "agent_id".to_owned(),
         JsonSchema::String {
             description: Some("Agent identifier whose result should be fetched".to_owned()),
+            allowed_values: None,
+        },
+    );
+    result_properties.insert(
+        "batch_id".to_owned(),
+        JsonSchema::String {
+            description: Some("Optional batch filter; agent_id alone is sufficient".to_owned()),
             allowed_values: None,
         },
     );
@@ -117,14 +143,17 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
     wait_properties.insert(
         "timeout_seconds".to_owned(),
         JsonSchema::Number {
-            description: Some("Optional timeout before giving up (default 300, max 600)".to_owned()),
+            description: Some(
+                "Optional timeout before giving up (default 300, max 600)".to_owned(),
+            ),
         },
     );
     wait_properties.insert(
         "return_all".to_owned(),
         JsonSchema::Boolean {
             description: Some(
-                "When waiting on a batch, return all completed agents instead of the first".to_owned(),
+                "When waiting on a batch, return all completed agents instead of the first"
+                    .to_owned(),
             ),
         },
     );
@@ -142,7 +171,8 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
         "status_filter".to_owned(),
         JsonSchema::String {
             description: Some(
-                "Optional status filter (pending, running, completed, failed, cancelled)".to_owned(),
+                "Optional status filter (pending, running, completed, failed, cancelled)"
+                    .to_owned(),
             ),
             allowed_values: None,
         },
@@ -174,7 +204,7 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
     OpenAiTool::Function(ResponsesApiTool {
         name: "agent".to_owned(),
         description:
-            "Unified agent manager for launching, monitoring, and collecting results from asynchronous agents.".to_owned(),
+            "Launch one selected agent per create request, or monitor and retrieve agents owned by this session. Never launch the full candidate shortlist.".to_owned(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -188,12 +218,35 @@ pub fn create_agent_tool(_allowed_models: &[String]) -> OpenAiTool {
 #[serde(deny_unknown_fields)]
 pub struct RunAgentParams {
     pub task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentCreateOptions {
     pub task: Option<String>,
+    pub model: Option<String>,
+}
+
+pub(crate) fn select_agent_model(
+    candidates: &[String],
+    requested: Option<&str>,
+) -> Result<String, &'static str> {
+    if candidates.is_empty() {
+        return Err("no_enabled_agents");
+    }
+    if let Some(requested) = requested {
+        return candidates
+            .iter()
+            .find(|candidate| candidate.eq_ignore_ascii_case(requested.trim()))
+            .cloned()
+            .ok_or("model_not_in_shortlist");
+    }
+    if candidates.len() == 1 {
+        return Ok(candidates[0].clone());
+    }
+    Err("model_selection_required")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,7 +269,7 @@ pub struct AgentWaitOptions {
     pub return_all: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentListOptions {
     pub status_filter: Option<String>,
     pub batch_id: Option<String>,
@@ -237,13 +290,13 @@ pub struct AgentToolRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckAgentStatusParams {
     pub agent_id: String,
-    pub batch_id: String,
+    pub batch_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetAgentResultParams {
     pub agent_id: String,
-    pub batch_id: String,
+    pub batch_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,24 +326,46 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn agent_identifier_contract_does_not_require_a_hidden_batch_id() {
+        let input = json!({"agent_id": "example"});
+        assert!(serde_json::from_value::<CheckAgentStatusParams>(input.clone()).is_ok());
+        assert!(serde_json::from_value::<GetAgentResultParams>(input).is_ok());
+        let schema = serde_json::to_value(create_agent_tool(&[])).unwrap();
+        for action in ["status", "result"] {
+            let path = format!("/parameters/properties/{action}/required");
+            assert_eq!(schema.pointer(&path), Some(&json!(["agent_id"])));
+        }
+        assert!(serde_json::from_value::<AgentListOptions>(json!({})).is_ok());
+    }
+
+    #[test]
     fn agent_shortlist_accepts_one_model_choice() {
-        assert!(serde_json::from_value::<AgentCreateOptions>(json!({
-            "task": "Inspect the requested source files", "model": "configured-model"
-        })).is_ok());
-        assert!(serde_json::from_value::<RunAgentParams>(json!({
-            "task": "Inspect the requested source files", "model": "configured-model"
-        })).is_ok());
+        assert!(
+            serde_json::from_value::<AgentCreateOptions>(json!({
+                "task": "Inspect the requested source files", "model": "configured-model"
+            }))
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_value::<RunAgentParams>(json!({
+                "task": "Inspect the requested source files", "model": "configured-model"
+            }))
+            .is_ok()
+        );
     }
 
     #[test]
     fn agent_shortlist_schema_advertises_only_the_supplied_choices() {
         let candidates = vec!["first".to_owned(), "second".to_owned()];
         let schema = serde_json::to_value(create_agent_tool(&candidates)).unwrap();
-        assert_eq!(schema.pointer("/parameters/properties/create/properties/model/enum"), Some(&json!(candidates)));
+        assert_eq!(
+            schema.pointer("/parameters/properties/create/properties/model/enum"),
+            Some(&json!(candidates))
+        );
     }
 
     #[test]
-    fn create_schema_exposes_only_the_operator_task() {
+    fn create_schema_exposes_task_and_one_bounded_model_choice() {
         let schema = serde_json::to_value(create_agent_tool(&["configured-model".to_owned()]))
             .expect("agent tool should serialize");
         let create_properties = schema
@@ -303,7 +378,7 @@ mod tests {
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
-            vec!["task"],
+            vec!["model", "task"],
         );
     }
 
@@ -311,6 +386,7 @@ mod tests {
     fn run_params_serialize_only_the_task() {
         let params = RunAgentParams {
             task: "Inspect the configured project state".to_owned(),
+            model: None,
         };
         assert_eq!(
             serde_json::to_value(params).expect("run params should serialize"),
@@ -319,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn create_options_reject_all_non_task_overrides() {
+    fn create_options_reject_privilege_context_and_multi_model_overrides() {
         for forbidden in [
             json!({"task": "Inspect the configured project state", "name": "override"}),
             json!({"task": "Inspect the configured project state", "context": "override"}),
@@ -331,8 +407,33 @@ mod tests {
         ] {
             assert!(
                 serde_json::from_value::<AgentCreateOptions>(forbidden).is_err(),
-                "agent creation must reject every non-task field"
+                "agent creation must reject privilege, context, and multi-model overrides"
             );
         }
+    }
+
+    #[test]
+    fn agent_shortlist_requires_exactly_one_valid_choice() {
+        let candidates = vec!["first".into(), "second".into()];
+        assert_eq!(
+            select_agent_model(&candidates, None),
+            Err("model_selection_required")
+        );
+        assert_eq!(
+            select_agent_model(&candidates, Some("SECOND")),
+            Ok("second".into())
+        );
+        assert_eq!(
+            select_agent_model(&candidates, Some("outside")),
+            Err("model_not_in_shortlist")
+        );
+        assert_eq!(
+            select_agent_model(&candidates[..1], None),
+            Ok("first".into())
+        );
+        assert_eq!(
+            select_agent_model(&[], Some("first")),
+            Err("no_enabled_agents")
+        );
     }
 }

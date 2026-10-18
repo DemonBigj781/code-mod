@@ -109,7 +109,7 @@ tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-t
         --no-default-features --features code-cli/cosmopolitan-ape --release
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core \
-        --test conversation_identity --test session_history_native \
+        --test conversation_identity --test session_history_native --test agent_tool_contract \
         --test session_background_isolation --test agent_completion_wake --no-default-features \
         --features "$core_features" --release -- --test-threads=1
     bash "$run_script" cargo --config "$patch_config" test \

@@ -16,7 +16,7 @@
     }
 
     fn apply_default_agent_models(config: &mut ToolsConfig) {
-        config.set_agent_models(test_agent_models());
+        config.set_agent_models(test_agent_models(), uuid::Uuid::nil());
     }
 
     fn model_family_or_panic(slug: &str) -> crate::model_family::ModelFamily {

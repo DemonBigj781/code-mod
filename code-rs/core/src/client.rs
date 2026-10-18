@@ -559,7 +559,7 @@ impl ModelClient {
             .as_ref()
             .is_some_and(|manager| manager.supports_pro_only_models());
 
-        let mut agent_models = if self.config.subagents_enabled {
+        let agent_models = if self.config.subagents_enabled {
             subagent_model_names_for_auth(
                 &self.config.agents,
                 auth_mode,
@@ -568,9 +568,7 @@ impl ModelClient {
         } else {
             Vec::new()
         };
-        agent_models.sort_by_key(|a| a.to_ascii_lowercase());
-        agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-        tools_config.set_agent_models(agent_models);
+        tools_config.set_agent_models(agent_models, self.session_id);
 
         let base_shell_type = tools_config.shell_type.clone();
         let base_uses_native_shell = matches!(

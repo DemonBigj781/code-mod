@@ -204,6 +204,9 @@ async fn run_turn_attempts(
             tc.sandbox_policy.clone(),
             effective_family,
         );
+        prompt.model_descriptions = Some(crate::agent_defaults::model_guide_markdown_for_candidates(
+            &sess.agents, tools_config.agent_models(),
+        ));
         let mcp_access = sess.mcp_access_snapshot();
         let allowed_mcp_tools = crate::mcp::policy::filter_tools_for_turn(
             &sess.mcp_connection_manager,

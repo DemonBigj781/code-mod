@@ -3,6 +3,9 @@ use crate::model_family::ModelFamily;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::tool_apply_patch::ApplyPatchToolType;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::IndexedRandom;
 
 #[derive(Debug, Clone)]
 pub enum ConfigShellToolType {
@@ -52,17 +55,16 @@ impl ToolsConfig {
             use_streamable_shell_tool,
             include_view_image_tool,
         } = params;
-        let shell_type = if matches!(approval_policy, AskForApproval::OnRequest)
-            && !use_streamable_shell_tool
-        {
-            ConfigShellToolType::ShellWithRequest { sandbox_policy }
-        } else if use_streamable_shell_tool {
-            ConfigShellToolType::StreamableShell
-        } else if model_family.uses_local_shell_tool {
-            ConfigShellToolType::LocalShell
-        } else {
-            ConfigShellToolType::DefaultShell
-        };
+        let shell_type =
+            if matches!(approval_policy, AskForApproval::OnRequest) && !use_streamable_shell_tool {
+                ConfigShellToolType::ShellWithRequest { sandbox_policy }
+            } else if use_streamable_shell_tool {
+                ConfigShellToolType::StreamableShell
+            } else if model_family.uses_local_shell_tool {
+                ConfigShellToolType::LocalShell
+            } else {
+                ConfigShellToolType::DefaultShell
+            };
 
         let apply_patch_tool_type = if include_apply_patch_tool {
             // On Windows, grammar-based apply_patch invocations rely on heredocs
@@ -97,11 +99,91 @@ impl ToolsConfig {
         }
     }
 
-    pub fn set_agent_models(&mut self, models: Vec<String>) {
-        self.agent_model_allowed_values = models;
+    pub fn set_agent_models(&mut self, mut models: Vec<String>, session_id: uuid::Uuid) {
+        models = models
+            .into_iter()
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .collect();
+        models.sort_by(|a, b| {
+            a.to_ascii_lowercase()
+                .cmp(&b.to_ascii_lowercase())
+                .then_with(|| a.cmp(b))
+        });
+        models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        // Both session dispatch and provider tool schemas use the same session seed.
+        // Rebuilding a prompt must not invalidate the choices just advertised to it.
+        let mut seed = [0_u8; 32];
+        seed[..16].copy_from_slice(session_id.as_bytes());
+        seed[16..].copy_from_slice(session_id.as_bytes());
+        self.agent_model_allowed_values = if models.len() > 5 {
+            models
+                .choose_multiple(&mut StdRng::from_seed(seed), 5)
+                .cloned()
+                .collect()
+        } else {
+            models
+        };
     }
 
     pub fn agent_models(&self) -> &[String] {
         &self.agent_model_allowed_values
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> ToolsConfig {
+        let family = crate::model_family::derive_default_model_family("gpt-5.1-codex");
+        ToolsConfig::new(ToolsConfigParams {
+            model_family: &family,
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::ReadOnly,
+            include_plan_tool: false,
+            include_apply_patch_tool: false,
+            include_web_search_request: false,
+            use_streamable_shell_tool: false,
+            include_view_image_tool: false,
+        })
+    }
+
+    #[test]
+    fn agent_shortlist_is_bounded_stable_and_derived_only_from_allowed_models() {
+        let names = (0..46).map(|n| format!("model-{n}")).collect::<Vec<_>>();
+        let id = uuid::Uuid::from_u128(42);
+        let mut session = config();
+        let mut prompt = config();
+        session.set_agent_models(names.clone(), id);
+        let mut reversed = names.clone();
+        reversed.reverse();
+        prompt.set_agent_models(reversed, id);
+        assert_eq!(session.agent_models(), prompt.agent_models());
+        assert_eq!(session.agent_models().len(), 5);
+        let unique = session
+            .agent_models()
+            .iter()
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(unique.len(), 5);
+        assert!(session.agent_models().iter().all(|m| names.contains(m)));
+        let original = session.agent_models().to_vec();
+        assert!((43..53).any(|n| {
+            prompt.set_agent_models(names.clone(), uuid::Uuid::from_u128(n));
+            prompt.agent_models() != original.as_slice()
+        }));
+    }
+
+    #[test]
+    fn agent_shortlist_respects_disabled_small_and_duplicate_pools() {
+        let mut config = config();
+        let id = uuid::Uuid::nil();
+        config.set_agent_models(vec![], id);
+        assert!(config.agent_models().is_empty());
+        config.set_agent_models(
+            vec!["one".into(), "ONE".into(), "two".into(), " ".into()],
+            id,
+        );
+        assert_eq!(config.agent_models().len(), 2);
     }
 }

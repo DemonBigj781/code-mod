@@ -7,7 +7,7 @@
 use crate::config_types::{AgentConfig, ModelRole};
 use code_app_server_protocol::AuthMode;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 const CLAUDE_ALLOWED_TOOLS: &str = "Bash(ls:*), Bash(cat:*), Bash(grep:*), Bash(git status:*), Bash(git log:*), Bash(find:*), Read, Grep, Glob, LS, WebFetch, TodoRead, TodoWrite, WebSearch";
@@ -620,42 +620,19 @@ pub fn model_guide_markdown() -> String {
         .join("\n")
 }
 
-pub fn model_guide_markdown_with_custom(configured_agents: &[AgentConfig]) -> Option<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut positions: HashMap<String, usize> = HashMap::new();
-
-    for spec in agent_model_specs().iter().filter(|spec| spec.is_enabled()) {
-        let idx = lines.len();
-        positions.insert(spec.slug.to_ascii_lowercase(), idx);
-        lines.push(model_guide_line(spec));
+pub fn model_guide_markdown_for_candidates(configured_agents: &[AgentConfig], candidates: &[String]) -> String {
+    if candidates.is_empty() {
+        return "Read-agent creation is disabled in Settings > Agents; continue inline.".to_owned();
     }
-
-    let mut saw_custom = false;
-    for agent in configured_agents {
-        if !agent.enabled {
-            continue;
-        }
-        let Some(description) = agent.description.as_deref() else { continue };
-        let trimmed = description.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let slug = agent.name.trim();
-        if slug.is_empty() {
-            continue;
-        }
-        saw_custom = true;
-        let line = custom_model_guide_line(slug, trimmed);
-        let key = slug.to_ascii_lowercase();
-        if let Some(idx) = positions.get(&key).copied() {
-            lines[idx] = line;
-        } else {
-            positions.insert(key, lines.len());
-            lines.push(line);
-        }
-    }
-
-    saw_custom.then(|| lines.join("\n"))
+    candidates.iter().map(|name| {
+        let description = agent_config_for_model(configured_agents, name)
+            .and_then(|agent| agent.description.as_deref())
+            .filter(|text| !text.trim().is_empty())
+            .or_else(|| agent_model_spec(name).map(|spec| spec.description))
+            .unwrap_or("Operator-enabled agent candidate.");
+        let description = description.chars().take(512).collect::<String>().replace(['\r', '\n'], " ");
+        custom_model_guide_line(name, &description)
+    }).collect::<Vec<_>>().join("\n")
 }
 
 pub fn default_agent_configs() -> Vec<AgentConfig> {
@@ -710,6 +687,21 @@ pub fn default_params_for(name: &str, read_only: bool) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_shortlist_guide_omits_unselected_models_and_bounds_descriptions() {
+        let mut configs = default_agent_configs();
+        let name = configs[0].name.clone();
+        configs[0].enabled = true;
+        configs[0].description = Some("x".repeat(20_000));
+        let guide = model_guide_markdown_for_candidates(&configs, &[name.clone()]);
+        assert_eq!(guide.lines().count(), 1);
+        assert!(guide.contains(&name));
+        assert!(guide.len() < name.len() + 600);
+        let disabled = model_guide_markdown_for_candidates(&configs, &[]);
+        assert!(disabled.contains("disabled"));
+        assert!(!disabled.contains(&name));
+    }
 
     #[test]
     fn cloud_defaults_are_empty_both_modes() {

@@ -17,6 +17,11 @@ impl ConversationHistory {
         self.items.clone()
     }
 
+    /// Borrow history for bounded readers that do not need an owned snapshot.
+    pub(crate) fn as_slice(&self) -> &[ResponseItem] {
+        &self.items
+    }
+
     /// Drains and returns the contents of the transcript.
     ///
     /// This avoids cloning large history items (e.g., base64 screenshots) when
@@ -104,6 +109,14 @@ fn user_message_submission_id(message: &ResponseItem) -> Option<&str> {
 mod tests {
     use super::*;
     use code_protocol::models::ContentItem;
+
+    #[test]
+    fn agent_handoff_can_borrow_history_without_cloning_payloads() {
+        let mut history = ConversationHistory::new();
+        history.replace(vec![assistant_msg("bounded reader")]);
+        assert!(std::ptr::eq(history.as_slice().as_ptr(), history.items.as_ptr()));
+        assert_eq!(history.as_slice(), history.contents().as_slice());
+    }
 
     fn assistant_msg(text: &str) -> ResponseItem {
         ResponseItem::Message {

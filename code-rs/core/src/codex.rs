@@ -863,7 +863,7 @@ fn should_include_browser_screenshot(
 use crate::agent_tool::AGENT_MANAGER;
 use crate::agent_tool::AgentStatus;
 use crate::agent_tool::AgentToolRequest;
-use crate::agent_defaults::model_guide_markdown_with_custom;
+use crate::agent_defaults::model_guide_markdown_for_candidates;
 use crate::agent_tool::CancelAgentParams;
 use crate::agent_tool::CheckAgentStatusParams;
 use crate::agent_tool::GetAgentResultParams;

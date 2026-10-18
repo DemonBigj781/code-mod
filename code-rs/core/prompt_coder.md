@@ -51,23 +51,25 @@ A local Sentry-like bridge for development environments: add `@just-every/code-b
 Use `web.run` when you need multi-step browsing—search, opens, clicks, screenshots, or specialized lookups. Use `browser {"action":"fetch","url":"https://example.com"}` when you already know the URL and just need its Markdown content in a single fetch.
 
 ## Agent tools
-Your agents are like having a team of expert peers at your disposal at any time. Use them for non-trivial work.
-Example;
-agent {
-  "action": "create",
-  "create": {
-    "name": "jwt-middleware",
-    "task": "Implement JWT middleware (RS256) with key rotation and unit/integration tests. Preserve existing OAuth flows. Provide README usage snippet.",
-    "context": "Service: services/api (Rust Axum). Secrets via env. CI: `cargo test --all`.",
-    "files": ["services/api", "services/api/src", "services/api/Cargo.toml"],
-    "models": ["code-gpt-5.4","claude-sonnet-4.5","gemini-3-flash"],
-    "output": "Middleware + passing tests + README snippet",
-    "write": true // Allow changes - will launch every agent in a separate worktree
-  }
-}
-agent {"action":"wait","wait":{"batch_id":"<batch_id>","return_all":true,"timeout_seconds":600}} // Long timeout or you can do separate work and check back later.
+Use read agents for suitable delegated tasks when enabled by the operator. Each
+session advertises a random shortlist of up to five eligible models. Select ONE
+candidate using `create.model`; a create request launches only that agent, never
+the entire shortlist. The shortlist stays stable for the session/settings
+snapshot so tool schemas and dispatch agree. Disabled agents stay disabled.
 
-##  Model Guide for `agent.create.models`
+Example (replace `<candidate>` with one of the advertised choices):
+agent {"action":"create","create":{"task":"Inspect the authentication middleware and report concrete defects","model":"<candidate>"}}
+agent {"action":"wait","wait":{"agent_id":"<agent_id>","timeout_seconds":300}}
+agent {"action":"result","result":{"agent_id":"<agent_id>"}}
+
+The operator's settings control permissions and instructions. Do not submit
+`models` arrays, write overrides, separate context, filenames, or output overrides
+in the create object. Include necessary task details in `task`. Status and result
+accept `agent_id` alone; wait/cancel accept `agent_id` or `batch_id`. Listing without
+a batch shows only this session's agents. If disabled, work inline rather than
+trying to enable or substitute agents.
+
+## Model Guide for `agent.create.model`
 {MODEL_DESCRIPTIONS}
 
 # WARNING (using git)

@@ -276,7 +276,7 @@ impl Runner<'_> {
             .as_ref()
             .is_some_and(|mgr| mgr.supports_pro_only_models());
 
-        let mut agent_models = if config.subagents_enabled {
+        let agent_models = if config.subagents_enabled {
             crate::agent_defaults::subagent_model_names_for_auth(
                 &config.agents,
                 auth_mode,
@@ -285,11 +285,9 @@ impl Runner<'_> {
         } else {
             Vec::new()
         };
-        agent_models.sort_by_key(|a| a.to_ascii_lowercase());
-        agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-        tools_config.set_agent_models(agent_models);
+        tools_config.set_agent_models(agent_models, self.session_id);
 
-        let model_descriptions = model_guide_markdown_with_custom(&config.agents);
+        let model_descriptions = Some(model_guide_markdown_for_candidates(&config.agents, tools_config.agent_models()));
         let remote_models_manager = self.auth_manager.as_ref().map(|mgr| {
             Arc::new(RemoteModelsManager::new_for_provider(
                 Arc::clone(mgr),
