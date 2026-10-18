@@ -29,12 +29,14 @@ fn apply_emits_global_memories_settings_event() {
 
     view.handle_key_event_direct(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     view.handle_key_event_direct(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-    for _ in 0..18 {
+    for _ in 0..MemoriesSettingsView::rows().len() {
+        if view.selected_row() == RowKind::Apply { break; }
         view.handle_key_event_direct(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
+    assert_eq!(view.selected_row(), RowKind::Apply);
     view.handle_key_event_direct(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    match rx.recv().expect("app event") {
+    match rx.recv_timeout(std::time::Duration::from_secs(2)).expect("Apply must emit a settings event") {
         AppEvent::SetMemoriesSettings { scope, settings } => {
             assert_eq!(scope, MemoriesSettingsScope::Global);
             assert_eq!(settings.generate_memories, Some(false));
@@ -53,12 +55,14 @@ fn apply_can_target_project_scope() {
     view.handle_key_event_direct(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     view.handle_key_event_direct(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     view.handle_key_event_direct(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-    for _ in 0..18 {
+    for _ in 0..MemoriesSettingsView::rows().len() {
+        if view.selected_row() == RowKind::Apply { break; }
         view.handle_key_event_direct(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     }
+    assert_eq!(view.selected_row(), RowKind::Apply);
     view.handle_key_event_direct(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    match rx.recv().expect("app event") {
+    match rx.recv_timeout(std::time::Duration::from_secs(2)).expect("Apply must emit a settings event") {
         AppEvent::SetMemoriesSettings { scope, settings } => {
             assert_eq!(
                 scope,
