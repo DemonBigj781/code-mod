@@ -3,6 +3,7 @@ use super::*;
 mod developer_message;
 mod review;
 mod run;
+pub(in crate::codex) use run::resume_queued_work;
 
 pub(super) async fn spawn_review_thread(
     sess: Arc<Session>,
@@ -18,6 +19,7 @@ enum AgentTaskKind {
     Regular,
     Review,
     Compact,
+    OperatorTool,
 }
 
 /// A series of Turns in response to user input.
@@ -31,6 +33,31 @@ pub(in crate::codex) struct AgentTask {
 }
 
 impl AgentTask {
+    pub(in crate::codex) fn operator_tool(
+        sess: Arc<Session>,
+        sub_id: String,
+        name: String,
+        arguments: Option<serde_json::Value>,
+    ) -> (Self, tokio::sync::oneshot::Sender<()>) {
+        let (start, ready) = tokio::sync::oneshot::channel();
+        let session = Arc::clone(&sess);
+        let id = sub_id.clone();
+        let handle = tokio::spawn(async move {
+            // Register ownership before a fast tool can finish and remove itself.
+            if ready.await.is_ok() {
+                super::super::operator_tools::run(session, id, name, arguments).await;
+            }
+        }).abort_handle();
+        (Self {
+            sess,
+            sub_id,
+            handle,
+            kind: AgentTaskKind::OperatorTool,
+            _origin: TaskOriginKind::User,
+            _visible_to_user: true,
+        }, start)
+    }
+
     pub(in crate::codex) fn spawn(
         sess: Arc<Session>,
         turn_context: Arc<TurnContext>,

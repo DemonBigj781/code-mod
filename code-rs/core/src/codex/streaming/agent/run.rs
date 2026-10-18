@@ -599,6 +599,10 @@ pub(super) async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>
     }
     sess.tx_event.send(event).await.ok();
 
+    resume_queued_work(sess);
+}
+
+pub(in crate::codex) fn resume_queued_work(sess: Arc<Session>) {
     if let Some(compact_sub_id) = sess.dequeue_manual_compact() {
         let turn_context = sess.make_turn_context();
         let prompt_text = sess.compact_prompt_text();

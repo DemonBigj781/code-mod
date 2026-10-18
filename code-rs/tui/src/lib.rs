@@ -113,6 +113,7 @@ mod render;
 mod session_log;
 mod sensitive_input;
 mod ssh_registry;
+mod tool_command;
 mod shimmer;
 mod slash_command;
 mod prompt_args;

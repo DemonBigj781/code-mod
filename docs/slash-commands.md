@@ -76,6 +76,19 @@ message. The title remains unchanged unless the AI or user explicitly updates it
   any flags. Use `/shell -` to clear the setting and use auto-detection.
   Examples: `/shell /bin/bash`, `/shell /bin/bash -l`, `/shell /usr/local/bin/fish --interactive`.
 - `/ssh`: manage the dynamic saved-PC registry. See [SSH connections](ssh-connections.md).
+- `/tool list` (or `/tool`): list the current native, client, and loaded MCP tools,
+  including unavailable handlers and disabled MCP tools. MCP names are qualified;
+  copy the exact name shown in the inventory.
+- `/tool use <name> [JSON arguments]`: invoke one tool directly, without a model
+  request or automatic assistant follow-up. For example,
+  `/tool use list_mcp_resources` or `/tool use list_dir {"dir_path":"."}`.
+  Arguments may be omitted only when the tool has no required arguments.
+  Function tools accept a JSON object; freeform tools accept a JSON string.
+  Normal approvals, sandbox restrictions, and disabled-tool controls still
+  apply. A running foreground task must finish or be cancelled first.
+  Provider-native tools such as web search cannot be called this way.
+  Results appear as bounded local notices; image results are identified rather
+  than sent to a model. This command does not add an SSH execution transport.
   Registration is local configuration only; this command does not connect to a host.
 
 ## Workspace & Git

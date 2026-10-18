@@ -341,6 +341,16 @@ pub enum Op {
     /// Reply is delivered via `EventMsg::McpListToolsResponse`.
     ListMcpTools,
 
+    /// List loaded native and MCP tool inventory without a model request.
+    ListTools,
+
+    /// Run one operator-selected tool through the normal dispatcher.
+    InvokeTool {
+        name: String,
+        #[serde(default)]
+        arguments: Option<Value>,
+    },
+
     /// Refresh MCP tool inventory and exclusions, then return updated tool lists.
     /// Reply is delivered via `EventMsg::McpListToolsResponse`.
     RefreshMcpTools,
@@ -735,7 +745,7 @@ pub fn unbounded_event_channel() -> (async_channel::Sender<Event>, async_channel
 
 pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<code_protocol::protocol::EventMsg> {
     match msg {
-        EventMsg::ReplayHistory(_) => None,
+        EventMsg::ReplayHistory(_) | EventMsg::OperatorToolResponse { .. } => None,
         EventMsg::TaskLifecycle(_) => None,
         EventMsg::TokenCount(payload) => {
             let info = convert_value(&payload.info)?;
@@ -1066,6 +1076,9 @@ pub enum EventMsg {
 
     /// List of MCP tools available to the agent.
     McpListToolsResponse(McpListToolsResponseEvent),
+
+    /// A bounded, local operator-tool notice; not an assistant answer.
+    OperatorToolResponse { message: String, success: Option<bool> },
 
     /// List of custom prompts available to the agent.
     ListCustomPromptsResponse(ListCustomPromptsResponseEvent),

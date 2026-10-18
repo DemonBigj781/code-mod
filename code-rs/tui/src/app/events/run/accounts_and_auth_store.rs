@@ -516,6 +516,11 @@
                                 widget.handle_ssh_command(command_args);
                             }
                         }
+                        SlashCommand::Tool => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_tool_command(command_args);
+                            }
+                        }
                         SlashCommand::Notifications => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_notifications_command(command_args);

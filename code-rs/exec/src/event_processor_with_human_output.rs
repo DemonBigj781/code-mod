@@ -286,6 +286,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             | EventMsg::AgentStatusUpdate(_)
             | EventMsg::CustomToolCallUpdate(_)
             | EventMsg::TaskLifecycle(_) => {}
+            EventMsg::OperatorToolResponse { message, .. } => {
+                ts_println!(self, "{message}");
+            }
             EventMsg::TaskStarted => {
                 // Reset per-turn diff cache so we only print new diffs once.
                 self.last_turn_diff = None;

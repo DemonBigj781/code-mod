@@ -84,6 +84,7 @@ use chrono::Utc;
 pub mod compact;
 pub mod compact_remote;
 pub(crate) mod agent_tool_call;
+pub(crate) mod operator_tools;
 mod events;
 mod exec;
 pub(crate) mod exec_tool;

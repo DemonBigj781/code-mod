@@ -39,6 +39,7 @@ mod turn;
 mod tests;
 
 pub(super) use agent::AgentTask;
+pub(super) use agent::resume_queued_work;
 pub(super) use submission::submission_loop;
 
 use attempt_recovery::{

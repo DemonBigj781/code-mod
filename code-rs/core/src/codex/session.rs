@@ -1425,6 +1425,23 @@ impl Session {
         state.current_task = Some(agent);
     }
 
+    pub(super) fn start_operator_tool(
+        self: &Arc<Self>,
+        sub_id: String,
+        name: String,
+        arguments: Option<serde_json::Value>,
+    ) -> bool {
+        let mut state = crate::codex::lock_or_panic!(self.state);
+        if state.current_task.is_some() {
+            return false;
+        }
+        let (task, start) = AgentTask::operator_tool(Arc::clone(self), sub_id, name, arguments);
+        state.current_task = Some(task);
+        drop(state);
+        let _ = start.send(());
+        true
+    }
+
     pub(super) async fn start_internal_pending_only_turn(
         self: &Arc<Self>,
         sentinel: &str,

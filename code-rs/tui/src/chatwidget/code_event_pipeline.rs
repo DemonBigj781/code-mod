@@ -559,6 +559,9 @@ impl ChatWidget<'_> {
                 debug!("received {len} custom prompts");
                 self.bottom_pane.set_custom_prompts(ev.custom_prompts);
             }
+            EventMsg::OperatorToolResponse { message, .. } => {
+                self.on_operator_tool_response(message);
+            }
             EventMsg::McpListToolsResponse(ev) => {
                 let mut protocol_tools: HashMap<String, code_protocol::mcp::Tool> =
                     HashMap::with_capacity(ev.tools.len());

@@ -367,6 +367,7 @@ async fn run_code_tool_session_inner(
                     | EventMsg::McpToolCallBegin(_)
                     | EventMsg::McpToolCallEnd(_)
                     | EventMsg::McpListToolsResponse(_)
+                    | EventMsg::OperatorToolResponse { .. }
                     | EventMsg::ExecCommandBegin(_)
                     | EventMsg::ExecCommandOutputDelta(_)
                     | EventMsg::ExecCommandEnd(_)

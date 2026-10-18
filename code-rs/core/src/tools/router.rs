@@ -52,6 +52,10 @@ pub(crate) struct ToolRouter {
 }
 
 impl ToolRouter {
+    pub(crate) fn registered_names(&self) -> Vec<String> {
+        self.registry.names()
+    }
+
     pub(crate) fn global() -> &'static Self {
         static ROUTER: OnceLock<ToolRouter> = OnceLock::new();
         ROUTER.get_or_init(Self::new)

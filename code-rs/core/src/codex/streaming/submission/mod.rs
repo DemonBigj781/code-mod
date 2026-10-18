@@ -424,6 +424,24 @@ pub(in crate::codex) async fn submission_loop(
                 };
                 send_mcp_tools_snapshot(&sess, &tx_event, &sub.id).await;
             }
+            Op::ListTools => {
+                let Some(sess) = sess.as_ref() else {
+                    send_no_session_event(sub.id).await;
+                    continue;
+                };
+                super::super::operator_tools::list(sess, &sub.id).await;
+            }
+            Op::InvokeTool { name, arguments } => {
+                let Some(sess) = sess.as_ref() else {
+                    send_no_session_event(sub.id).await;
+                    continue;
+                };
+                if !sess.start_operator_tool(sub.id.clone(), name, arguments) {
+                    super::super::operator_tools::respond(sess, &sub.id,
+                        "Busy: wait for the foreground task to finish or cancel it before /tool use.".into(),
+                        Some(false)).await;
+                }
+            }
             Op::RefreshMcpTools => {
                 let sess = if let Some(sess) = sess.as_ref() { Arc::clone(sess) } else {
                     send_no_session_event(sub.id).await;

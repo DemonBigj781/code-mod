@@ -100,6 +100,7 @@ pub async fn run_conversation_loop(
                     | EventMsg::AgentReasoningRawContentDelta(_)
                     | EventMsg::TaskLifecycle(_)
                     | EventMsg::TaskStarted
+                    | EventMsg::OperatorToolResponse { .. }
                     | EventMsg::TokenCount(_)
                     | EventMsg::AgentReasoning(_)
                     | EventMsg::AgentReasoningSectionBreak(_)

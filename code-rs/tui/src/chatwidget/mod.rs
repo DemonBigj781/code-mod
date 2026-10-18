@@ -125,6 +125,9 @@ mod review_flow;
 mod session_flow;
 mod shell_config_flow;
 mod ssh_registry_flow;
+mod operator_tool_flow;
+#[cfg(test)]
+mod operator_tool_flow_tests;
 mod session_tuning_flow;
 mod status_line_flow;
 mod streaming;

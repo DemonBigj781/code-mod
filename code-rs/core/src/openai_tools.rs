@@ -62,6 +62,10 @@ pub(crate) fn runtime_from_repl_reset_tool_name(name: &str) -> Option<crate::con
 }
 
 pub use registry::get_openai_tools;
+
+pub(crate) fn operator_shell_tool() -> OpenAiTool {
+    builtin_tools::create_shell_tool()
+}
 pub use tools_json::create_tools_json_for_responses_api;
 pub(crate) use tools_json::create_tools_json_for_chat_completions_api;
 pub(crate) use json_schema::JsonSchema;

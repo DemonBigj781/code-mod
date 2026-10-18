@@ -79,6 +79,10 @@ impl ToolRegistry {
         self.handlers.get(name).map(Arc::clone)
     }
 
+    pub(crate) fn names(&self) -> Vec<String> {
+        self.handlers.keys().cloned().collect()
+    }
+
     pub(crate) async fn dispatch(
         &self,
         sess: &Session,
