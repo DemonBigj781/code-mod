@@ -98,6 +98,13 @@ not evidence of a completed Windows runtime check.
 
 ## Supported scope and limitations
 
+- Source-built fork integration is not yet release-ready. Run `39187360744`
+  built the fork and passed C/TLS and C++ smoke tests, but Code linking exposed
+  incompatibilities with the Rust-APE snapshot's 4.0.2-specific internals.
+  The early compatibility check in run `39190004384` found 38 failing shim
+  sources, including descriptor/process state, path APIs, and constant tables.
+  Those sources require an explicit port; stock headers, dummy globals, or
+  disabling checks are not valid substitutes for the source-built runtime.
 - The artifact architecture is x86-64. ARM64 is not included in this build.
 - The Rust-APE SDK is experimental; this CLI port is an experimental
   pre-release, not a production support claim.
