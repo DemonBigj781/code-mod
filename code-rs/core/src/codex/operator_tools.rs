@@ -1,7 +1,7 @@
 //! Model-free operator calls using the same handlers and policies as model calls.
 
 use super::Session;
-use crate::openai_tools::{OpenAiTool, get_openai_tools};
+use crate::openai_tools::{JsonSchema, OpenAiTool, get_openai_tools};
 use crate::protocol::{EventMsg, TaskCompleteEvent};
 use crate::tools::router::{ToolDispatchMeta, ToolRouter};
 use crate::turn_diff_tracker::TurnDiffTracker;
@@ -28,7 +28,7 @@ struct Tool {
     name: String,
     source: String,
     kind: Kind,
-    schema: Option<Value>,
+    required: Option<Vec<String>>,
     reason: Option<String>,
 }
 
@@ -51,21 +51,12 @@ impl Tool {
         let Some(object) = arguments.as_object() else {
             return Err("Function-tool arguments must be a JSON object.".into());
         };
-        let Some(schema) = self.schema.as_ref().and_then(Value::as_object) else {
+        let Some(required) = &self.required else {
             return Err("The loaded tool has no usable input schema.".into());
         };
-        if let Some(required) = schema.get("required").and_then(Value::as_array) {
-            let missing = required
-                .iter()
-                .filter_map(Value::as_str)
-                .filter(|key| !object.contains_key(*key))
-                .collect::<Vec<_>>();
-            if !missing.is_empty() {
-                return Err(format!(
-                    "Missing required arguments: {}",
-                    missing.join(", ")
-                ));
-            }
+        let missing = required.iter().filter(|key| !object.contains_key(key.as_str())).cloned().collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(format!("Missing required arguments: {}", missing.join(", ")));
         }
         let arguments = arguments.to_string();
         if arguments.len() > MAX_ARGUMENT_BYTES {
@@ -78,6 +69,15 @@ impl Tool {
             arguments,
             call_id,
         })
+    }
+}
+
+fn native_required_fields(schema: &JsonSchema) -> Option<Vec<String>> {
+    match schema {
+        // Provider serialization promotes optional properties to required ones.
+        // Operator calls use the original handler contract instead.
+        JsonSchema::Object { required, .. } => Some(required.clone().unwrap_or_default()),
+        _ => None,
     }
 }
 
@@ -107,11 +107,11 @@ fn catalog(sess: &Session) -> BTreeMap<String, Tool> {
         } else {
             spec
         };
-        let (name, kind, schema) = match spec {
+        let (name, kind, required) = match spec {
             OpenAiTool::Function(spec) => (
                 spec.name,
                 Kind::Function,
-                serde_json::to_value(spec.parameters).ok(),
+                native_required_fields(&spec.parameters),
             ),
             OpenAiTool::Freeform(spec) => (spec.name, Kind::Freeform, None),
             OpenAiTool::WebSearch(_) => ("web_search".into(), Kind::Provider, None),
@@ -124,7 +124,7 @@ fn catalog(sess: &Session) -> BTreeMap<String, Tool> {
                 name,
                 source,
                 kind,
-                schema,
+                required,
                 reason: None,
             },
         );
@@ -145,7 +145,10 @@ fn catalog(sess: &Session) -> BTreeMap<String, Tool> {
                 name,
                 source: "client".into(),
                 kind,
-                schema: Some(spec.input_schema.clone()),
+                required: spec.input_schema.as_object().map(|schema| {
+                    schema.get("required").and_then(Value::as_array).into_iter().flatten()
+                        .filter_map(Value::as_str).map(str::to_owned).collect()
+                }),
                 reason,
             },
         );
@@ -155,7 +158,7 @@ fn catalog(sess: &Session) -> BTreeMap<String, Tool> {
             name,
             source: "native".into(),
             kind: Kind::Unavailable,
-            schema: None,
+            required: None,
             reason: Some("Registered handler is not enabled/exposed for this session.".into()),
         });
     }
@@ -169,7 +172,7 @@ fn catalog(sess: &Session) -> BTreeMap<String, Tool> {
                 name,
                 source: format!("MCP {server}"),
                 kind: Kind::Function,
-                schema: serde_json::to_value(tool.input_schema).ok(),
+                required: Some(tool.input_schema.required.unwrap_or_default()),
                 reason: None,
             },
         );
@@ -326,9 +329,9 @@ pub(super) async fn run(
             let result = ToolRouter::global()
                 .dispatch_response_item(&sess, &mut tracker, meta, item)
                 .await;
-            let (success, output) = match result {
-                Some(ResponseInputItem::FunctionCallOutput { output, .. })
-                | Some(ResponseInputItem::CustomToolCallOutput { output, .. }) => {
+            let (success, output) = match result.map(ResponseItem::from) {
+                Some(ResponseItem::FunctionCallOutput { output, .. })
+                | Some(ResponseItem::CustomToolCallOutput { output, .. }) => {
                     let mut text = String::new();
                     let mut budget = MAX_NOTICE_BYTES - 256;
                     let complete = match &output.body {
@@ -395,7 +398,7 @@ mod tests {
             name: "example".into(),
             source: "native".into(),
             kind: Kind::Function,
-            schema: Some(json!({"type":"object","required":required})),
+            required: Some(required.into_iter().map(str::to_owned).collect()),
             reason: None,
         }
     }
@@ -419,6 +422,21 @@ mod tests {
                 .prepare(Some(json!("not an object")), "call".into())
                 .is_err()
         );
+    }
+
+    #[test]
+    fn operator_tool_optional_fields_are_not_provider_requirements() {
+        let schema = JsonSchema::Object {
+            properties: BTreeMap::from([("server".into(), JsonSchema::String {
+                description: None, allowed_values: None,
+            })]),
+            required: None, additional_properties: None,
+        };
+        assert_eq!(serde_json::to_value(&schema).unwrap()["required"], json!(["server"]));
+        assert_eq!(native_required_fields(&schema), Some(vec![]));
+        let mut tool = function(vec![]);
+        tool.required = native_required_fields(&schema);
+        assert!(tool.prepare(None, "call".into()).is_ok());
     }
 
     #[test]

@@ -22,7 +22,12 @@ for line in sys.stdin:
             }} for name in ["echo", "disabled_echo"]
         ]}
     elif method == "tools/call":
-        result = {"content": [{"type": "text", "text": request["params"]["arguments"]["text"]}]}
+        text = request["params"]["arguments"]["text"]
+        result = {"content": [{"type": "text", "text": text}]}
+        if text == "fixture-error":
+            result["isError"] = True
+        elif text == "fixture-structured":
+            result["structuredContent"] = {"message": text}
     else:
         result = {}
     print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)

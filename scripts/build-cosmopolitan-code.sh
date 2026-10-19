@@ -117,9 +117,6 @@ tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-t
 (
     cd "$workspace/code-rs"
     sh "$support_dir/check-tls-backends.sh" "$PWD"
-    bash "$run_script" cargo --config "$patch_config" build \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-cli --bin code \
-        --no-default-features --features code-cli/cosmopolitan-ape --release
     bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core \
         --test conversation_identity --test session_history_native --test agent_tool_contract --test operator_tools \
@@ -172,6 +169,9 @@ tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-t
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \
         --no-default-features --features "$core_features" --release \
         agent_ -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" build \
+        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-cli --bin code \
+        --no-default-features --features code-cli/cosmopolitan-ape --release
 )
 
 debug_elf="$build_root/build/x86_64-unknown-linux-musl/release/code.com.dbg"
