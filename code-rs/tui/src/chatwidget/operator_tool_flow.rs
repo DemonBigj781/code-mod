@@ -15,7 +15,7 @@ impl ChatWidget<'_> {
     pub(crate) fn on_operator_tool_response(&mut self, message: String) {
         self.history_push_plain_paragraphs(
             crate::history::state::PlainMessageKind::Notice,
-            message.lines().map(str::to_owned).collect(),
+            message.lines(),
         );
         self.request_redraw();
     }

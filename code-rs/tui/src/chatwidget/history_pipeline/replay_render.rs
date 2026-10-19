@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use super::*;
 
 impl ChatWidget<'_> {

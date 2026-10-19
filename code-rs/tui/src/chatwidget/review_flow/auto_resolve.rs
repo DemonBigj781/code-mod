@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use super::super::*;
 use code_protocol::protocol::ReviewTarget;
 
