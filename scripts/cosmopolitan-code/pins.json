@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "cosmopolitan_commit": "ad82b6534306ebac8485004a08ccca58adc0cf46",
+  "cosmopolitan_commit": "c929496a7ae420a3a8fc1ca12cd4b687e80d653d",
   "cosmopolitan_repository": "https://github.com/DemonBigj781/cosmopolitan.git",
   "rust_ape_commit": "0e2d0a89f4c089c7f21377a9c7ce51a6e82c2791",
   "target_architectures": ["x86_64"],
