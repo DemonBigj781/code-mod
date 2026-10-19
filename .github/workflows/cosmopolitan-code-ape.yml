@@ -70,6 +70,8 @@ jobs:
           $manifest = (Resolve-Path 'o/cosmopolitan-code/code.com.json').Path
           python scripts/cosmopolitan-code/artifact_contract.py $artifact $manifest --source-commit $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Resolve-Path 'o/cosmopolitan-code/runtime-smoke.com').Path --native-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $artifact --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $artifact --help > $null

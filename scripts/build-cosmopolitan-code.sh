@@ -96,6 +96,13 @@ tmp_dir=$(mktemp -d "$repo_root/o/cosmopolitan-code-build.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 workspace="$tmp_dir/source"
 mkdir -p "$workspace"
+cp -R "$support_dir/fixtures/runtime-smoke" "$tmp_dir/runtime-smoke"
+bash "$run_script" cargo build --manifest-path "$tmp_dir/runtime-smoke/Cargo.toml" \
+    -j"$build_jobs" --release
+runtime_smoke="$tmp_dir/runtime-smoke.com"
+"$sdk_bin/apelink" -l "$sdk_bin/ape-x86_64.elf" -o "$runtime_smoke" \
+    "$build_root/build/x86_64-unknown-linux-musl/release/cosmo-runtime-smoke.com.dbg"
+sh "$runtime_smoke"
 git -C "$repo_root" archive --format=tar "$source_commit" \
     code-rs codex-rs/models-manager/models.json announcement_tip.toml >"$tmp_dir/source.tar"
 tar -xf "$tmp_dir/source.tar" -C "$workspace"
@@ -175,6 +182,7 @@ fi
 
 package_dir="$tmp_dir/package"
 mkdir -p "$package_dir"
+cp "$runtime_smoke" "$package_dir/runtime-smoke.com"
 artifact="$package_dir/$artifact_name"
 manifest="$package_dir/$artifact_name.json"
 "$sdk_bin/apelink" -l "$sdk_bin/ape-x86_64.elf" -o "$artifact" "$debug_elf"
