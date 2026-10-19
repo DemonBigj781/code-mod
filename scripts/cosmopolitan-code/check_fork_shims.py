@@ -20,8 +20,6 @@ def check_shims(sdk: Path) -> None:
             for line in source.read_text().splitlines():
                 if line.startswith("// cflags:"):
                     flags.extend(shlex.split(line.removeprefix("// cflags:")))
-            if source.name == "dlmalloc.c":
-                flags = ["-D_COSMO_SOURCE", "-ffreestanding", "-fdata-sections", "-ffunction-sections", "-O3", "-mgeneral-regs-only"]
             if "-D_COSMO_SOURCE" in flags:
                 flags.append("-DSYSDEBUG=1")
             result = subprocess.run([

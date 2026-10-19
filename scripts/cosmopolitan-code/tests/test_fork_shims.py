@@ -27,6 +27,7 @@ class ForkShimTests(unittest.TestCase):
     def test_checks_shims_before_compiling_code(self):
         script = (Path(__file__).resolve().parents[2] / "build-cosmopolitan-code.sh").read_text()
         self.assertLess(script.index('"$support_dir/check_fork_shims.py"'), script.index('bash "$run_script" cargo'))
+        self.assertLess(script.index('bash "$run_script" gen-shim'), script.index('"$support_dir/check_fork_shims.py"'))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
+#include "libc/nt/struct/sid.h"
 
 static _Thread_local int value = 7;
 

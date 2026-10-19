@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: DemonBigj781/cosmopolitan
-          ref: c2a7b3f8c871e44ae1e3fc8db36759c7b1829326
+          ref: ad82b6534306ebac8485004a08ccca58adc0cf46
           path: o/cosmopolitan-source
       - name: Enable APE for source-built fork helpers
         run: |
@@ -39,7 +39,9 @@ jobs:
             printf '%s\n' ':APE-jart:M::jartsr::/usr/bin/ape:' | sudo tee /proc/sys/fs/binfmt_misc/register >/dev/null
           fi
       - name: Test artifact and command contracts
-        run: python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s o/cosmopolitan-source/third_party/rust_ape/tests -p 'test_*.py'
       - name: Build and smoke-test the x86-64 APE on Linux
         run: sh scripts/build-cosmopolitan-code.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
