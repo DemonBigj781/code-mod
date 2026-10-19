@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: DemonBigj781/cosmopolitan
-          ref: c929496a7ae420a3a8fc1ca12cd4b687e80d653d
+          ref: 234cd347c3c6780e006bc099f8d63c0b05e509c8
           path: o/cosmopolitan-source
       - name: Enable APE for source-built fork helpers
         run: |

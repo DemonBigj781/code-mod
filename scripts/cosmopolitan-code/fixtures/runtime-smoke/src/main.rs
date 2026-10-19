@@ -1,4 +1,5 @@
 use std::env;
+use std::ffi::{c_char, c_int, c_void};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -6,6 +7,20 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Scratch(PathBuf);
+
+#[repr(C)]
+struct DlInfo {
+    filename: *const c_char,
+    base: *mut c_void,
+    symbol_name: *const c_char,
+    symbol_address: *mut c_void,
+}
+
+unsafe extern "C" {
+    fn dladdr(address: *const c_void, info: *mut DlInfo) -> c_int;
+    fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+}
 
 impl Drop for Scratch {
     fn drop(&mut self) {
@@ -27,6 +42,20 @@ fn main() {
     assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
     assert_eq!(fs::read(directory.0.join("missing")).unwrap_err().kind(), ErrorKind::NotFound);
     assert_eq!(std::thread::spawn(|| 42).join().unwrap(), 42);
+
+    let mut info = DlInfo {
+        filename: std::ptr::null(), base: std::ptr::null_mut(),
+        symbol_name: std::ptr::null(), symbol_address: std::ptr::null_mut(),
+    };
+    // Exercise the address adapter together with the runtime's loader stubs.
+    unsafe {
+        if dladdr(main as *const () as *const c_void, &mut info) != 0 {
+            assert!(!info.filename.is_null());
+        }
+        assert!(dlopen(std::ptr::null(), 0).is_null());
+        assert!(dlsym(std::ptr::null_mut(), c"missing".as_ptr()).is_null());
+    }
+    assert_eq!(Command::new(directory.0.join("missing-child")).output().unwrap_err().kind(), ErrorKind::NotFound);
 
     let child = Command::new(env::current_exe().expect("executable path"))
         .arg("--child")
