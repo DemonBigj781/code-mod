@@ -11,7 +11,7 @@ jobs:
     name: Build APE on Linux
     if: github.ref == 'refs/heads/Main'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check agent tool schema contracts
@@ -26,7 +26,18 @@ jobs:
           repository: DemonBigj781/cosmopolitan
           ref: c2a7b3f8c871e44ae1e3fc8db36759c7b1829326
           path: o/cosmopolitan-source
-          sparse-checkout: third_party/rust_ape
+      - name: Enable APE for source-built fork helpers
+        run: |
+          sudo install -m 0755 o/cosmopolitan-source/build/bootstrap/ape.elf /usr/bin/ape
+          if [ ! -e /proc/sys/fs/binfmt_misc/register ]; then
+            sudo mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
+          fi
+          if [ ! -e /proc/sys/fs/binfmt_misc/APE ]; then
+            printf '%s\n' ':APE:M::MZqFpD::/usr/bin/ape:' | sudo tee /proc/sys/fs/binfmt_misc/register >/dev/null
+          fi
+          if [ ! -e /proc/sys/fs/binfmt_misc/APE-jart ]; then
+            printf '%s\n' ':APE-jart:M::jartsr::/usr/bin/ape:' | sudo tee /proc/sys/fs/binfmt_misc/register >/dev/null
+          fi
       - name: Test artifact and command contracts
         run: python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'
       - name: Build and smoke-test the x86-64 APE on Linux

@@ -32,6 +32,12 @@ class ArtifactContractTests(unittest.TestCase):
             "source_clean": True,
             "cosmopolitan_commit": PINS["cosmopolitan_commit"],
             "rust_ape_commit": PINS["rust_ape_commit"],
+            "cosmopolitan_runtime": {
+                "source_built": True, "source_commit": PINS["cosmopolitan_commit"], "mode": "x86_64",
+                "hashes": {name: "d" * 64 for name in (
+                    "libraries_sha256", "headers_sha256", "libcosmo_sha256", "libcxx_sha256", "loader_sha256", "apelink_sha256",
+                )},
+            },
             "target_architectures": PINS["target_architectures"],
             "build_profile": PINS["build_profile"],
             "release_opt_level": PINS["release_opt_level"],
@@ -65,6 +71,17 @@ class ArtifactContractTests(unittest.TestCase):
     def test_rejects_missing_artifact(self):
         with self.assertRaisesRegex(ArtifactContractError, "artifact is missing"):
             validate_artifact(self.directory / "missing.com", self.manifest)
+
+    def test_rejects_prebuilt_or_unidentified_cosmopolitan_runtime(self):
+        for runtime in (None, {}, {"source_built": False}, {
+            "source_built": True, "source_commit": "f" * 40, "mode": "x86_64",
+        }, {
+            "source_built": True, "source_commit": PINS["cosmopolitan_commit"], "mode": "x86_64", "hashes": {},
+        }):
+            with self.subTest(runtime=runtime):
+                self.write_manifest(cosmopolitan_runtime=runtime)
+                with self.assertRaisesRegex(ArtifactContractError, "cosmopolitan_runtime"):
+                    validate_artifact(self.artifact, self.manifest)
 
     def test_rejects_missing_or_malformed_manifest(self):
         with self.assertRaisesRegex(ArtifactContractError, "cannot read manifest"):

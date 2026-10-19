@@ -9,7 +9,7 @@ if [ "$#" -gt 0 ]; then
 fi
 pins="$support_dir/pins.json"
 cosmo_source="$repo_root/o/cosmopolitan-source"
-build_root="$repo_root/o/rust-ape"
+build_root="$repo_root/o/rust-ape-source"
 run_script="$cosmo_source/third_party/rust_ape/run.sh"
 sdk="$build_root/sdk"
 sdk_bin="$sdk/vendor/cosmocc/bin"
@@ -83,8 +83,12 @@ export COSMO_RUST_BUILD_ROOT="$build_root"
 export COSMO_RUST_ARCH=x86_64
 
 if [ ! -f "$sdk/generated/x86_64-unknown-linux-musl.json" ] || [ ! -x "$sdk_bin/apelink" ]; then
+    python3 "$support_dir/cache_cosmocc.py" \
+        "$cosmo_source/third_party/rust_ape/upstream/xtask/src/config.rs" "$sdk/cache"
     bash "$run_script" setup
 fi
+
+python3 "$support_dir/build_fork_runtime.py" "$cosmo_source" "$sdk" "$cosmo_commit" "$build_jobs"
 
 tmp_dir=$(mktemp -d "$repo_root/o/cosmopolitan-code-build.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
@@ -173,13 +177,13 @@ artifact="$package_dir/$artifact_name"
 manifest="$package_dir/$artifact_name.json"
 "$sdk_bin/apelink" -l "$sdk_bin/ape-x86_64.elf" -o "$artifact" "$debug_elf"
 
-python3 - "$pins" "$source_commit" "$artifact" "$manifest" <<'PY'
+python3 - "$pins" "$source_commit" "$artifact" "$manifest" "$sdk/generated/fork-runtime.json" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-pins_path, source_commit, artifact_path, manifest_path = sys.argv[1:]
+pins_path, source_commit, artifact_path, manifest_path, runtime_path = sys.argv[1:]
 pins = json.loads(pathlib.Path(pins_path).read_text(encoding="utf-8"))
 artifact = pathlib.Path(artifact_path)
 digest = hashlib.sha256()
@@ -192,6 +196,7 @@ manifest = {
     "source_clean": True,
     "cosmopolitan_commit": pins["cosmopolitan_commit"],
     "rust_ape_commit": pins["rust_ape_commit"],
+    "cosmopolitan_runtime": json.loads(pathlib.Path(runtime_path).read_text(encoding="utf-8")),
     "target_architectures": pins["target_architectures"],
     "build_profile": pins["build_profile"],
     "release_opt_level": pins["release_opt_level"],

@@ -44,23 +44,38 @@ sh scripts/build-cosmopolitan-code.sh build-action
 Calling the shell entry point without a command retains its original local
 build behavior and output directory.
 
-The script verifies the pinned Cosmopolitan and Rust-APE source revisions,
-creates a disposable copy of the committed Rust workspace, applies only the
-APE-specific dependency adjustments and the APE-specific lockfile, then builds
-with one Cargo job. The native `code-rs/Cargo.lock` remains unchanged. The Rust
-toolchain and Cosmocc SDK stay under the ignored `o/` directory; the system
-toolchain is not changed. The release build disables fat LTO and keeps one
-codegen unit so it stays within the configured local build budget.
+The script verifies the pinned Cosmopolitan fork and Rust-APE source revisions,
+then builds the fork's `toolchain` target for x86-64. Its runtime, C++ library,
+startup objects, headers, APE loader, and linker tools replace the released SDK
+runtime before any Code compilation. Bootstrap GCC binaries remain build tools;
+the final runtime comes from the fork's source, not the release archive.
 
-Local builds use the sparse Cosmopolitan source checkout at
+The script creates a disposable copy of the committed Rust workspace and applies
+the APE-specific dependency adjustments and lockfile. Local and self-hosted
+builds use one compiler worker; GitHub-hosted runners may use their available
+workers. The native `code-rs/Cargo.lock` remains unchanged. The source-runtime
+SDK and Cargo outputs use `o/rust-ape-source/`, separate from older prebuilt-runtime
+caches. The release build disables fat LTO and keeps one codegen unit.
+
+Local builds require the full Cosmopolitan source checkout at
 `o/cosmopolitan-source` pinned to the revision in `pins.json`. `build-local`
 fetches it if absent; an existing checkout must match the pin and be clean.
-The default-branch GitHub workflow checks it out automatically.
+The default-branch GitHub workflow checks it out automatically and configures
+an APE interpreter on its disposable runner for the fork's build helpers.
+Local hosts must already support those helpers; the script does not install a
+system interpreter. Older sparse checkouts must be expanded before building.
+
+Compiler bootstrap first tries the SDK's pinned `cosmo.zip` archive, then the
+same version from the official `jart/cosmopolitan` GitHub release if the download
+fails. Both paths must match the SHA-256 in the pinned SDK source before the
+archive enters its cache. A hash mismatch stops the build; it never changes the
+source revision or compiler version to make a download succeed.
 
 The output is placed in `o/cosmopolitan-code/`:
 
 - `code.com` — the x86-64 APE artifact.
-- `code.com.json` — source pins, architecture, artifact size, and SHA-256.
+- `code.com.json` — source pins, architecture, artifact size, SHA-256, and hashes
+  identifying the source-built runtime, headers, loader, and linker.
 
 The build refuses to overwrite an existing output directory. Set
 `COSMOPOLITAN_CODE_OUTPUT` to a new directory to create another artifact.

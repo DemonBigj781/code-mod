@@ -129,7 +129,6 @@ def build_local(output: Path) -> None:
         source.parent.mkdir(parents=True, exist_ok=True)
         command(["git", "clone", "--filter=blob:none", "--no-checkout",
                  pins["cosmopolitan_repository"], str(source)])
-        command(["git", "-C", str(source), "sparse-checkout", "set", "third_party/rust_ape"])
         command(["git", "-C", str(source), "checkout", "--detach", pins["cosmopolitan_commit"]])
     env = os.environ.copy()
     env.update(COSMOPOLITAN_CODE_OUTPUT=str(output), CARGO_BUILD_JOBS="1",
