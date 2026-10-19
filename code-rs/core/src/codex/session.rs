@@ -1435,6 +1435,9 @@ impl Session {
         if state.current_task.is_some() {
             return false;
         }
+        // Standalone tool events need a fresh ordering slot too; reusing the
+        // previous provider request would insert them into earlier history.
+        state.request_ordinal = state.request_ordinal.saturating_add(1);
         let (task, start) = AgentTask::operator_tool(Arc::clone(self), sub_id, name, arguments);
         state.current_task = Some(task);
         drop(state);

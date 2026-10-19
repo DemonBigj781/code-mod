@@ -57,8 +57,8 @@ impl Session {
         }
         let seq = if let EventMsg::TaskStarted = msg {
             // Reset per-sub_id sequence at the start of a turn.
-            // We increment request_ordinal per HTTP attempt instead
-            // (see `begin_http_attempt`).
+            // Ordering slots are reserved per HTTP attempt or standalone
+            // operator tool (see `begin_http_attempt` and `start_operator_tool`).
             let e = state
                 .event_seq_by_sub_id
                 .entry(sub_id.to_owned())

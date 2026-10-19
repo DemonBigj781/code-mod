@@ -126,6 +126,32 @@ async fn operator_tools_list_and_native_use_never_request_a_model() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn operator_tools_get_distinct_history_order_without_model_requests() {
+    let fixture = Fixture::new(|_| {}).await;
+    let mut previous = 0;
+    for _ in 0..2 {
+        fixture.conversation.submit(Op::InvokeTool {
+            name: "list_dir".into(), arguments: Some(json!({"dir_path":fixture.work.path()})),
+        }).await.unwrap();
+        let mut ordinal = None;
+        loop {
+            let event = tokio::time::timeout(std::time::Duration::from_secs(5), fixture.conversation.next_event())
+                .await.unwrap().unwrap();
+            match event.msg {
+                EventMsg::CustomToolCallBegin(_) => ordinal = Some(event.order.expect("tool order").request_ordinal),
+                EventMsg::OperatorToolResponse { message, success } => assert_ne!(success, Some(false), "{message}"),
+                EventMsg::TaskComplete(_) => break,
+                _ => {},
+            }
+        }
+        let ordinal = ordinal.expect("native tool must emit its ordered begin event");
+        assert!(ordinal > previous, "operator history must advance monotonically");
+        previous = ordinal;
+    }
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn operator_tools_busy_cancellation_and_client_replies_remain_responsive() {
     let fixture = Fixture::new(|config| {
         config.dynamic_tools.push(DynamicToolSpec {
