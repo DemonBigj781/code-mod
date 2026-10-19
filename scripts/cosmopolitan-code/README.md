@@ -92,9 +92,16 @@ checks:
 
 sh scripts/cosmopolitan-code/test-artifact.sh o/cosmopolitan-code/code.com o/cosmopolitan-code/code.com.json
 
-The manually dispatched workflow is restricted to `Main`; it builds once on Linux and runs the same
-artifact's startup checks on Linux and Windows. A feature-branch pre-release is
-not evidence of a completed Windows runtime check.
+The manually dispatched workflow is restricted to `Main`. It first builds a
+small source-runtime probe on Linux, verifies its identity and checksum, and
+runs that identical probe on Windows. Only then does it build and test Code and
+run the identical Code artifact on Windows. A runtime failure therefore blocks
+the expensive full build without bypassing any final verification.
+
+The runtime stage is also available as `sh scripts/build-cosmopolitan-runtime.sh`
+and writes `o/cosmopolitan-runtime/`. The full build uses the same preparation
+code and resource limits. A cached probe is reused only when its source identity,
+checksum, and SDK runtime record match; an incomplete or stale cache fails closed.
 
 ## Supported scope and limitations
 

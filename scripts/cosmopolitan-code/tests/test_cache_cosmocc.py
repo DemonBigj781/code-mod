@@ -79,7 +79,7 @@ class CompilerCacheTests(unittest.TestCase):
         self.assertEqual(list(self.cache.iterdir()), [])
 
     def test_bootstrap_caches_before_running_sdk_setup(self):
-        script = (Path(__file__).resolve().parents[2] / "build-cosmopolitan-code.sh").read_text()
+        script = (Path(__file__).resolve().parents[1] / "prepare-runtime.sh").read_text()
         self.assertLess(script.index('"$support_dir/cache_cosmocc.py"'), script.index('bash "$run_script" setup'))
 
 

@@ -93,7 +93,7 @@ class ForkRuntimeTests(unittest.TestCase):
 
     def test_fork_is_built_before_code_compilation(self):
         script = (Path(__file__).resolve().parents[2] / "build-cosmopolitan-code.sh").read_text()
-        self.assertLess(script.index('"$support_dir/build_fork_runtime.py"'), script.index('bash "$run_script" cargo'))
+        self.assertLess(script.index('. "$support_dir/prepare-runtime.sh"'), script.index('bash "$run_script" cargo'))
         self.assertIn('"cosmopolitan_runtime":', script)
 
 

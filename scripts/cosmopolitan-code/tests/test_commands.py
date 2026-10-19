@@ -28,7 +28,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("test-helpers", dependency["features"])
 
     def test_build_jobs_are_one_except_on_github_hosted_runners(self):
-        script = (Path(__file__).resolve().parents[2] / "build-cosmopolitan-code.sh").read_text()
+        script = (Path(__file__).resolve().parents[1] / "prepare-runtime.sh").read_text()
         start = script.index("build_jobs=1\n")
         end = script.index("export CARGO_PROFILE_RELEASE_LTO", start)
         # Exercise only the resource-policy block, never the build commands.

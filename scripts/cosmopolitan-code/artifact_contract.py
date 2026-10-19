@@ -39,6 +39,17 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validate_runtime_metadata(runtime: Any, pins: dict[str, Any]) -> None:
+    if not isinstance(runtime, dict) or runtime.get("source_built") is not True:
+        raise ArtifactContractError("cosmopolitan_runtime must be built from the pinned fork")
+    if runtime.get("source_commit") != pins["cosmopolitan_commit"] or runtime.get("mode") != "x86_64":
+        raise ArtifactContractError("cosmopolitan_runtime does not match the pinned fork and target")
+    hashes = runtime.get("hashes")
+    for name in ("libraries_sha256", "headers_sha256", "libcosmo_sha256", "libcxx_sha256", "loader_sha256", "apelink_sha256", "tlscc_sha256"):
+        if not isinstance(hashes, dict) or not isinstance(hashes.get(name), str) or not SHA256_RE.fullmatch(hashes[name]):
+            raise ArtifactContractError(f"cosmopolitan_runtime is missing a valid {name}")
+
+
 def validate_artifact(
     artifact_path: str | Path,
     manifest_path: str | Path,
@@ -72,15 +83,7 @@ def validate_artifact(
         if manifest.get(field) != pins.get(field):
             raise ArtifactContractError(f"{field} does not match the pinned source")
 
-    runtime = manifest.get("cosmopolitan_runtime")
-    if not isinstance(runtime, dict) or runtime.get("source_built") is not True:
-        raise ArtifactContractError("cosmopolitan_runtime must be built from the pinned fork")
-    if runtime.get("source_commit") != pins["cosmopolitan_commit"] or runtime.get("mode") != "x86_64":
-        raise ArtifactContractError("cosmopolitan_runtime does not match the pinned fork and target")
-    hashes = runtime.get("hashes")
-    for name in ("libraries_sha256", "headers_sha256", "libcosmo_sha256", "libcxx_sha256", "loader_sha256", "apelink_sha256", "tlscc_sha256"):
-        if not isinstance(hashes, dict) or not isinstance(hashes.get(name), str) or not SHA256_RE.fullmatch(hashes[name]):
-            raise ArtifactContractError(f"cosmopolitan_runtime is missing a valid {name}")
+    validate_runtime_metadata(manifest.get("cosmopolitan_runtime"), pins)
 
     if manifest.get("target_architectures") != pins.get("target_architectures"):
         raise ArtifactContractError("target_architectures does not match the pinned build target")

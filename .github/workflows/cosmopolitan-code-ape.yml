@@ -7,11 +7,11 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build APE on Linux
+  runtime:
+    name: Build source runtime probe on Linux
     if: github.ref == 'refs/heads/Main'
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check agent tool schema contracts
@@ -21,27 +21,67 @@ jobs:
           jobs=1
           if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then jobs=$(getconf _NPROCESSORS_ONLN); fi
           CARGO_TARGET_DIR="$RUNNER_TEMP/code-agent-contract-target" CARGO_BUILD_JOBS="$jobs" cargo +1.93.0 test --locked --manifest-path scripts/agent-contract-check/Cargo.toml -j"$jobs" -- --test-threads=1
+      - name: Read pinned fork revision
+        id: fork-pin
+        run: echo "sha=$(python3 -c 'import json; print(json.load(open("scripts/cosmopolitan-code/pins.json"))["cosmopolitan_commit"])')" >>"$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: DemonBigj781/cosmopolitan
-          ref: 234cd347c3c6780e006bc099f8d63c0b05e509c8
+          ref: ${{ steps.fork-pin.outputs.sha }}
           path: o/cosmopolitan-source
       - name: Enable APE for source-built fork helpers
-        run: |
-          sudo install -m 0755 o/cosmopolitan-source/build/bootstrap/ape.elf /usr/bin/ape
-          if [ ! -e /proc/sys/fs/binfmt_misc/register ]; then
-            sudo mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
-          fi
-          if [ ! -e /proc/sys/fs/binfmt_misc/APE ]; then
-            printf '%s\n' ':APE:M::MZqFpD::/usr/bin/ape:' | sudo tee /proc/sys/fs/binfmt_misc/register >/dev/null
-          fi
-          if [ ! -e /proc/sys/fs/binfmt_misc/APE-jart ]; then
-            printf '%s\n' ':APE-jart:M::jartsr::/usr/bin/ape:' | sudo tee /proc/sys/fs/binfmt_misc/register >/dev/null
-          fi
+        run: sh scripts/cosmopolitan-code/enable-ape-ci.sh
       - name: Test artifact and command contracts
         run: |
           python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s o/cosmopolitan-source/third_party/rust_ape/tests -p 'test_*.py'
+      - name: Build and test the source runtime
+        run: sh scripts/build-cosmopolitan-runtime.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cosmopolitan-runtime-probe
+          path: o/cosmopolitan-runtime/*
+          if-no-files-found: error
+          retention-days: 14
+
+  runtime-windows:
+    name: Test source runtime probe on Windows
+    if: github.ref == 'refs/heads/Main'
+    needs: runtime
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cosmopolitan-runtime-probe
+          path: o/cosmopolitan-runtime
+      - name: Verify and run the identical runtime probe
+        shell: pwsh
+        run: |
+          python scripts/cosmopolitan-code/verify_runtime_probe.py o/cosmopolitan-runtime $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Resolve-Path 'o/cosmopolitan-runtime/runtime-smoke.com').Path --native-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  build:
+    name: Build APE on Linux
+    if: github.ref == 'refs/heads/Main'
+    needs: runtime-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read pinned fork revision
+        id: fork-pin
+        run: echo "sha=$(python3 -c 'import json; print(json.load(open("scripts/cosmopolitan-code/pins.json"))["cosmopolitan_commit"])')" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: DemonBigj781/cosmopolitan
+          ref: ${{ steps.fork-pin.outputs.sha }}
+          path: o/cosmopolitan-source
+      - name: Enable APE for source-built fork helpers
+        run: sh scripts/cosmopolitan-code/enable-ape-ci.sh
       - name: Build and smoke-test the x86-64 APE on Linux
         run: sh scripts/build-cosmopolitan-code.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
