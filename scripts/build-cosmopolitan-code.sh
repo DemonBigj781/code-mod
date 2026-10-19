@@ -89,6 +89,7 @@ if [ ! -f "$sdk/generated/x86_64-unknown-linux-musl.json" ] || [ ! -x "$sdk_bin/
 fi
 
 python3 "$support_dir/build_fork_runtime.py" "$cosmo_source" "$sdk" "$cosmo_commit" "$build_jobs"
+python3 "$support_dir/check_fork_shims.py" "$sdk"
 
 tmp_dir=$(mktemp -d "$repo_root/o/cosmopolitan-code-build.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
