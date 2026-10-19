@@ -41,8 +41,10 @@ class ForkRuntimeTests(unittest.TestCase):
         with patch.object(runtime.subprocess, "check_output", side_effect=[self.commit + "\n", ""]), \
              patch.object(runtime.subprocess, "run") as make:
             result = runtime.build_runtime(self.source, self.sdk, self.commit, 1)
-        self.assertIn("-j1", make.call_args.args[0])
-        self.assertIn("toolchain", make.call_args.args[0])
+        self.assertIn("-j1", make.call_args_list[0].args[0])
+        self.assertIn("toolchain", make.call_args_list[0].args[0])
+        self.assertIn("o/x86_64/tool/build/tlscc", make.call_args_list[0].args[0])
+        self.assertEqual(make.call_count, 5, "build, then compile and execute C and C++ probes")
         return result
 
     def test_installs_source_runtime_headers_and_tools_not_release_outputs(self):
@@ -53,6 +55,7 @@ class ForkRuntimeTests(unittest.TestCase):
         self.assertEqual((self.compiler / "x86_64-linux-cosmo/lib/libcosmo.a").read_bytes(), b"cosmopolitan.a")
         self.assertEqual((self.compiler / "bin/ape-x86_64.elf").read_bytes(), b"source-built loader")
         self.assertEqual((self.compiler / "bin/ar.ape").read_bytes(), b"ar")
+        self.assertEqual((self.compiler / "bin/tlscc").read_bytes(), b"tlscc")
         self.assertEqual((self.compiler / "include/libc/calls/example.h").read_bytes(), b"source internal header")
         self.assertFalse((self.compiler / "include/stale-release.h").exists())
         self.assertFalse((self.compiler / "x86_64-linux-cosmo/lib/tiny").exists())

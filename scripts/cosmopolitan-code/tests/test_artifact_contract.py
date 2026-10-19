@@ -35,7 +35,7 @@ class ArtifactContractTests(unittest.TestCase):
             "cosmopolitan_runtime": {
                 "source_built": True, "source_commit": PINS["cosmopolitan_commit"], "mode": "x86_64",
                 "hashes": {name: "d" * 64 for name in (
-                    "libraries_sha256", "headers_sha256", "libcosmo_sha256", "libcxx_sha256", "loader_sha256", "apelink_sha256",
+                    "libraries_sha256", "headers_sha256", "libcosmo_sha256", "libcxx_sha256", "loader_sha256", "apelink_sha256", "tlscc_sha256",
                 )},
             },
             "target_architectures": PINS["target_architectures"],

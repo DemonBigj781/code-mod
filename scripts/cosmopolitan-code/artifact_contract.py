@@ -78,7 +78,7 @@ def validate_artifact(
     if runtime.get("source_commit") != pins["cosmopolitan_commit"] or runtime.get("mode") != "x86_64":
         raise ArtifactContractError("cosmopolitan_runtime does not match the pinned fork and target")
     hashes = runtime.get("hashes")
-    for name in ("libraries_sha256", "headers_sha256", "libcosmo_sha256", "libcxx_sha256", "loader_sha256", "apelink_sha256"):
+    for name in ("libraries_sha256", "headers_sha256", "libcosmo_sha256", "libcxx_sha256", "loader_sha256", "apelink_sha256", "tlscc_sha256"):
         if not isinstance(hashes, dict) or not isinstance(hashes.get(name), str) or not SHA256_RE.fullmatch(hashes[name]):
             raise ArtifactContractError(f"cosmopolitan_runtime is missing a valid {name}")
 

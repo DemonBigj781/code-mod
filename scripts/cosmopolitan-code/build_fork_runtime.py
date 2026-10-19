@@ -21,7 +21,7 @@ LIBRARIES = {
     "ape/ape-no-modify-self.o": "ape-no-modify-self.o",
     "ape/ape.lds": "ape.lds",
 }
-TOOLS = ("march-native", "ar", "mktemper", "fixupobj", "zipcopy", "apelink", "pecheck")
+TOOLS = ("march-native", "ar", "mktemper", "fixupobj", "zipcopy", "apelink", "pecheck", "tlscc")
 EMPTY_LIBRARIES = ("c", "dl", "gcc_s", "m", "crypt", "pthread", "resolv", "rt", "unwind", "gomp", "stdc++")
 
 
@@ -44,6 +44,7 @@ def runtime_hashes(compiler: Path) -> dict[str, str]:
         "libcxx_sha256": sha256(library / "libcxx.a"),
         "loader_sha256": sha256(compiler / "bin/ape-x86_64.elf"),
         "apelink_sha256": sha256(compiler / "bin/apelink"),
+        "tlscc_sha256": sha256(compiler / "bin/tlscc"),
     }
 
 
@@ -97,7 +98,7 @@ def build_runtime(source: Path, sdk: Path, commit: str, jobs: int) -> dict:
 
     subprocess.run([
         "make", "-C", str(source), f"-j{jobs}", "MODE=x86_64", "XARGS=xargs -P1 -rs8000",
-        "toolchain", "o/cosmocc.h.txt",
+        "toolchain", "o/cosmocc.h.txt", *[f"o/x86_64/tool/build/{tool}" for tool in TOOLS],
     ], check=True)
     # Assemble first; never combine new headers with incomplete runtime outputs.
     with tempfile.TemporaryDirectory(prefix="fork-runtime-", dir=sdk) as temporary:
@@ -112,6 +113,14 @@ def build_runtime(source: Path, sdk: Path, commit: str, jobs: int) -> dict:
             (stage / replacement).rename(destination)
         for path in (stage / "bin").iterdir():
             path.replace(compiler / "bin" / path.name)
+    fixtures = Path(__file__).with_name("fixtures")
+    for extension, driver in (("c", "cc"), ("cc", "c++")):
+        executable = sdk / "generated" / f"fork-runtime-{extension}.com"
+        subprocess.run([
+            str(compiler / "bin" / f"x86_64-unknown-cosmo-{driver}"),
+            str(fixtures / f"fork_runtime_smoke.{extension}"), "-o", str(executable),
+        ], check=True)
+        subprocess.run(["sh", str(executable)], check=True)
     record = {"source_built": True, "source_commit": commit, "mode": "x86_64", "hashes": runtime_hashes(compiler)}
     stamp.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return record
