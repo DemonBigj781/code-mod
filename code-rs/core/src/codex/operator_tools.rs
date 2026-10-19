@@ -6,7 +6,7 @@ use crate::protocol::{EventMsg, TaskCompleteEvent};
 use crate::tools::router::{ToolDispatchMeta, ToolRouter};
 use crate::turn_diff_tracker::TurnDiffTracker;
 use code_protocol::models::{
-    FunctionCallOutputBody, FunctionCallOutputContentItem, ResponseInputItem, ResponseItem,
+    FunctionCallOutputBody, FunctionCallOutputContentItem, ResponseItem,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;

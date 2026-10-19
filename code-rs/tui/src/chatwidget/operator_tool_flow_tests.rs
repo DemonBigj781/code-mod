@@ -83,5 +83,8 @@ fn operator_tool_lifecycle_does_not_start_automatic_review_or_followup() {
     assert!(harness.chat().background_review.is_none());
     assert!(harness.chat().auto_review_baseline.is_none());
     assert!(harness.chat().active_task_ids.is_empty());
-    assert!(receiver.try_recv().is_err(), "operator completion must not submit model work");
+    while let Ok(op) = receiver.try_recv() {
+        assert!(matches!(op, Op::PersistHistorySnapshot { .. }),
+            "operator completion may persist history, but must not submit model work: {op:?}");
+    }
 }
