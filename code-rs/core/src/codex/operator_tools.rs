@@ -210,6 +210,11 @@ fn bounded_notice(text: &str) -> String {
 }
 
 pub(super) async fn respond(sess: &Session, sub_id: &str, message: String, success: Option<bool>) {
+    let message = if success == Some(false) {
+        format!("Operator tool error: {message}")
+    } else {
+        message
+    };
     sess.send_event(sess.make_event(
         sub_id,
         EventMsg::OperatorToolResponse {

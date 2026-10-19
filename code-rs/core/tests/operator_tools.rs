@@ -275,6 +275,7 @@ async fn operator_tools_mcp_catalog_discovery_and_disabled_tools() {
     assert!(output.contains("operator-mcp-ok"), "{output}");
     let (output, success) = fixture.invoke(echo, Some(json!({"text":"fixture-error"}))).await;
     assert_eq!(success, Some(false), "{output}");
+    assert!(output.starts_with("Operator tool error:"), "{output}");
     assert!(output.contains("fixture-error"), "{output}");
     let (output, success) = fixture.invoke(echo, Some(json!({"text":"fixture-structured"}))).await;
     assert_eq!(success, Some(true), "{output}");
