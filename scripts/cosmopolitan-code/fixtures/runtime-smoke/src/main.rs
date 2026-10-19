@@ -65,7 +65,10 @@ fn main() {
     assert!(child.status.success(), "portable child failed: {child:?}");
     assert_eq!(child.stdout, b"source-runtime-ok");
     if env::args().nth(1).as_deref() == Some("--native-windows") {
-        let command = PathBuf::from(env::var_os("SystemRoot").expect("Windows system directory"))
+        let system_root = env::vars_os().find_map(|(name, value)| {
+            name.to_string_lossy().eq_ignore_ascii_case("SystemRoot").then_some(value)
+        }).expect("Windows system directory");
+        let command = PathBuf::from(system_root)
             .join("System32").join("cmd.exe");
         let status = Command::new(command).args(["/D", "/C", "exit 7"]).status().expect("native Windows child");
         assert_eq!(status.code(), Some(7), "native exit code must not become a signal");
