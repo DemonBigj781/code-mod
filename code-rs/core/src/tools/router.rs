@@ -104,6 +104,7 @@ impl ToolRouter {
         let kill: Arc<dyn ToolHandler> = Arc::new(handlers::kill::KillToolHandler);
         let gh_run_wait: Arc<dyn ToolHandler> = Arc::new(handlers::gh_run_wait::GhRunWaitToolHandler);
         let bridge: Arc<dyn ToolHandler> = Arc::new(handlers::bridge::BridgeToolHandler);
+        let ssh: Arc<dyn ToolHandler> = Arc::new(handlers::ssh::SshToolHandler);
 
         let dynamic_handler: Arc<dyn ToolHandler> = Arc::new(handlers::dynamic::DynamicToolHandler);
         let mcp_handler: Arc<dyn ToolHandler> = Arc::new(handlers::mcp::McpToolHandler);
@@ -153,6 +154,7 @@ impl ToolRouter {
         handlers.insert("gh_run_wait".into(), gh_run_wait);
         handlers.insert("code_bridge".into(), Arc::clone(&bridge));
         handlers.insert("code_bridge_subscription".into(), bridge);
+        handlers.insert(crate::openai_tools::SSH_TOOL_NAME.into(), ssh);
 
         Self {
             registry: ToolRegistry::new(handlers),

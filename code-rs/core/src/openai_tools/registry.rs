@@ -56,6 +56,7 @@ pub fn get_openai_tools(
         super::OCR_ENGLISH_TOOL_NAME,
         "English",
     ));
+    tools.push(builtin_tools::create_ssh_tool());
 
     if let Some(apply_patch_tool_type) = &config.apply_patch_tool_type {
         let apply_patch_tool = match apply_patch_tool_type {

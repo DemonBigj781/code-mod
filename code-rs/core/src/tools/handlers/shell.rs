@@ -28,6 +28,25 @@ impl ToolHandler for ShellHandler {
                     Err(output) => return *output,
                 };
 
+                if crate::tools::handlers::ssh::is_shell_alias(&params.command) {
+                    return crate::tools::handlers::ssh::handle_shell_alias(
+                        sess,
+                        turn_diff_tracker,
+                        &inv.ctx,
+                        code_protocol::models::ShellToolCallParams {
+                            command: params.command,
+                            workdir: None,
+                            timeout_ms: params.timeout_ms,
+                            sandbox_permissions: Some(params.sandbox_permissions),
+                            prefix_rule: None,
+                            additional_permissions: params.additional_permissions,
+                            justification: params.justification,
+                        },
+                        inv.attempt_req,
+                    )
+                    .await;
+                }
+
                 crate::codex::exec_tool::handle_container_exec_with_params(
                     params,
                     sess,

@@ -537,6 +537,51 @@ impl Registry {
             .context("SSH connection is not registered")
     }
 
+    /// Resolve one already-configured authentication method for transport use.
+    ///
+    /// The returned value intentionally keeps secrets out of `Debug` and
+    /// serialization paths. Callers should hold it only for the duration of a
+    /// transport attempt.
+    pub fn credentials(
+        &self,
+        connection: &Connection,
+        requested_auth: Option<AuthMethod>,
+    ) -> Result<Credentials> {
+        let auth = requested_auth.unwrap_or(connection.default_auth);
+        match auth {
+            AuthMethod::Password => {
+                let credential = connection
+                    .password_id
+                    .context("password authentication is not configured for this connection")?;
+                let value = self
+                    .keyring
+                    .load(CREDENTIAL_SERVICE, &self.account(connection.id, credential))
+                    .map_err(|_| anyhow::anyhow!("secure SSH credential storage is unavailable"))?
+                    .context("saved SSH password is unavailable")?;
+                Ok(Credentials::Password(value))
+            }
+            AuthMethod::Key => {
+                let key = connection
+                    .key
+                    .as_ref()
+                    .context("key authentication is not configured for this connection")?;
+                let passphrase = key
+                    .passphrase_id
+                    .map(|credential| {
+                        self.keyring
+                            .load(CREDENTIAL_SERVICE, &self.account(connection.id, credential))
+                            .map_err(|_| anyhow::anyhow!("secure SSH credential storage is unavailable"))?
+                            .context("saved SSH key passphrase is unavailable")
+                    })
+                    .transpose()?;
+                Ok(Credentials::Key {
+                    path: key.path.clone(),
+                    passphrase,
+                })
+            }
+        }
+    }
+
     pub fn add(
         &self,
         name: &str,

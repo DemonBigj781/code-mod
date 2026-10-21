@@ -858,6 +858,10 @@ impl Session {
         &self.user_shell
     }
 
+    pub(crate) fn execution_environment(&self) -> std::collections::HashMap<String, String> {
+        crate::exec_env::create_env(&self.shell_environment_policy)
+    }
+
     pub(crate) fn exec_command_manager(&self) -> Arc<crate::exec_command::SessionManager> {
         Arc::clone(&self.exec_command_manager)
     }

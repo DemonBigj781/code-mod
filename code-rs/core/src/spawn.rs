@@ -131,7 +131,8 @@ pub(crate) async fn spawn_child_async_with_limits(
     env: HashMap<String, String>,
 ) -> std::io::Result<Child> {
     trace!(
-        "spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {sandbox_policy:?} {stdio_policy:?} {env:?}"
+        "spawn_child_async: {program:?} {args:?} {arg0:?} {cwd:?} {sandbox_policy:?} {stdio_policy:?} env_keys={:?}",
+        env.keys().collect::<Vec<_>>()
     );
 
     let mut cmd = Command::new(&program);

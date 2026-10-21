@@ -162,6 +162,23 @@ jobs:
           save-if: true
           cache-on-failure: true
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure compiler cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'RUSTC_WRAPPER=sccache'
+            echo 'SCCACHE_IDLE_TIMEOUT=1800'
+            echo 'SCCACHE_CACHE_SIZE=10G'
+          } >> "$GITHUB_ENV"
+
       - name: Prime Rust build cache (fast local build)
         shell: bash
         env:

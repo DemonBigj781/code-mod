@@ -1,9 +1,8 @@
 # SSH connection registry
 
 `/ssh` manages saved PCs without a hardcoded machine list. No connections are
-pre-registered. This command manages local configuration; remote execution,
-SCP project folders, and the agent-facing SSH/shell aliases are separate work
-and are not implemented by the registry command.
+pre-registered. The model-facing `ssh` tool can execute bounded commands through
+these registered profiles; SCP project folders remain separate work.
 
 ## Settings menu
 
@@ -41,8 +40,8 @@ updates; they must not replace or disappear behind an existing model answer.
 - `/ssh remove "Lab PC"`: remove the profile and its saved SSH credentials.
 
 Quote names containing spaces. Duplicate names are rejected case-insensitively.
-`self`, `127.0.0.1`, and `0.0.0.0` are reserved for the planned local-execution
-aliases and cannot be registered as PC names.
+`self`, `127.0.0.1`, and `0.0.0.0` are reserved for the local-execution aliases
+and cannot be registered as PC names.
 
 Endpoints accept `user@host`, `user@host:port`, and `ssh://user@host:port`.
 Bracket IPv6 addresses: `user@[2001:db8::1]:2222`. Inline passwords, remote
@@ -58,8 +57,8 @@ the same rule. This is an ordering preference, not proof of Tailscale membership
 or permission to trust a host.
 
 Registration performs no DNS lookups or connectivity tests. Hostnames retain
-their entered order in the first group; the future transport must account for
-resolved addresses and verify host identity before authentication.
+their entered order in the first group; the transport resolves and verifies
+each endpoint only when a command is executed.
 
 ## Credentials and persistence
 
@@ -81,7 +80,32 @@ diagnostics while open. Enter or Ctrl+S submits; Escape cancels without saving.
 An authentication form cannot overwrite a profile changed by another session
 after the form opened. Closing or renaming a profile never connects to its host.
 
-Registration does not accept or verify host keys. Host-key confirmation and
-execution authorization belong to the upcoming transport, not this metadata
-registry. If credential cleanup fails after a removal/update, the error explicitly
-reports the already-applied metadata change and retained credential.
+Registration does not accept or verify host keys. Remote execution requires an
+existing known host key because the transport uses strict host-key checking; it
+does not accept a first-use or changed key automatically. If credential cleanup
+fails after a removal/update, the error explicitly reports the already-applied
+metadata change and retained credential.
+
+## Agent-facing command execution
+
+The stable model-facing function name is `ssh`; profile names are arguments, not
+dynamic tool names. A command call has this shape:
+
+```json
+{"name":"Office PC","command":"uname -a"}
+```
+
+`auth` may select an already-configured `pwd` or `key` method; omitting it uses
+the profile default. `timeout_ms` is optional and is clamped to one second
+through thirty minutes, with a ten-minute default. The command is passed to SSH
+as one remote-command argument, so Code does not rewrite its quoting or install
+local shell aliases. Endpoint alternatives are tried in the registry's ordered
+failover order only for connection failures; authentication and host-key errors
+are not retried.
+
+The structured shell tool also accepts the same dispatcher through
+`shell ssh <name> [pwd|key] [--] <command>`. Use `--` when the first command word
+is `pwd` or `key`, for example `shell ssh Office-PC -- pwd`. The reserved names
+`self`, `127.0.0.1`, and `0.0.0.0` execute through the existing local shell backend
+instead of opening an SSH connection. SCP upload/download and remote project
+folders are not part of this command-execution slice.

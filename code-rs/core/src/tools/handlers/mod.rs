@@ -22,6 +22,7 @@ pub(crate) mod search_tool_bm25;
 pub(crate) mod session_history;
 pub(crate) mod session_title;
 pub(crate) mod shell;
+pub(crate) mod ssh;
 pub(crate) mod wait;
 pub(crate) mod web_fetch;
 

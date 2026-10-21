@@ -25,6 +25,7 @@ pub(crate) const LIST_DIR_TOOL_NAME: &str = "list_dir";
 pub(crate) const GREP_FILES_TOOL_NAME: &str = "grep_files";
 pub(crate) const OCR_CJK_TOOL_NAME: &str = "ocr_read_cjk";
 pub(crate) const OCR_ENGLISH_TOOL_NAME: &str = "ocr_read_eng";
+pub(crate) const SSH_TOOL_NAME: &str = "ssh";
 pub(crate) const REPL_TOOL_NAME: &str = "repl";
 pub(crate) const REPL_RESET_TOOL_NAME: &str = "repl_reset";
 

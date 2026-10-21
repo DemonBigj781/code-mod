@@ -13,6 +13,7 @@ use super::{
     READ_FILE_TOOL_NAME,
     SEARCH_TOOL_BM25_TOOL_NAME,
     SEARCH_TOOL_DESCRIPTION_TEMPLATE,
+    SSH_TOOL_NAME,
 };
 
 pub(super) fn create_shell_tool() -> OpenAiTool {
@@ -110,6 +111,49 @@ pub(super) fn create_ocr_tool(name: &str, language: &str) -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["path".to_owned()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
+pub(super) fn create_ssh_tool() -> OpenAiTool {
+    let properties = BTreeMap::from([
+        (
+            "name".to_owned(),
+            JsonSchema::String {
+                description: Some("Registered SSH connection name, or self/127.0.0.1/0.0.0.0 for local execution.".to_owned()),
+                allowed_values: None,
+            },
+        ),
+        (
+            "auth".to_owned(),
+            JsonSchema::String {
+                description: Some("Optional configured authentication method. Omit to use the profile default.".to_owned()),
+                allowed_values: Some(vec!["pwd".to_owned(), "key".to_owned()]),
+            },
+        ),
+        (
+            "command".to_owned(),
+            JsonSchema::String {
+                description: Some("Remote command to execute. The value is passed as one command argument without local shell interpolation.".to_owned()),
+                allowed_values: None,
+            },
+        ),
+        (
+            "timeout_ms".to_owned(),
+            JsonSchema::Number {
+                description: Some("Optional execution timeout in milliseconds, bounded by the SSH dispatcher.".to_owned()),
+            },
+        ),
+    ]);
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: SSH_TOOL_NAME.to_owned(),
+        description: "Execute a bounded command through a registered SSH connection. Passwords, private keys, passphrases, host registration, and host-key acceptance are operator-managed and never supplied by the model.".to_owned(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["name".to_owned(), "command".to_owned()]),
             additional_properties: Some(false.into()),
         },
     })

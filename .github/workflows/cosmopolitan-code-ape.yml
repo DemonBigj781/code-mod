@@ -14,6 +14,21 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure compiler cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'RUSTC_WRAPPER=sccache'
+            echo 'SCCACHE_IDLE_TIMEOUT=1800'
+            echo 'SCCACHE_CACHE_SIZE=10G'
+          } >> "$GITHUB_ENV"
       - name: Check agent tool schema contracts
         timeout-minutes: 5
         run: |
@@ -72,6 +87,21 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure compiler cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'RUSTC_WRAPPER=sccache'
+            echo 'SCCACHE_IDLE_TIMEOUT=1800'
+            echo 'SCCACHE_CACHE_SIZE=10G'
+          } >> "$GITHUB_ENV"
       - name: Read pinned fork revision
         id: fork-pin
         run: echo "sha=$(python3 -c 'import json; print(json.load(open("scripts/cosmopolitan-code/pins.json"))["cosmopolitan_commit"])')" >>"$GITHUB_OUTPUT"

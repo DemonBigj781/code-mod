@@ -96,6 +96,10 @@ impl SshSettingsView {
         !matches!(self.mode, Mode::List)
     }
 
+    pub(crate) fn is_complete(&self) -> bool {
+        self.complete
+    }
+
     pub(crate) fn cancel_edit(&mut self) {
         self.mode = Mode::List;
     }
@@ -283,6 +287,10 @@ impl SshSettingsView {
         true
     }
 
+    pub(crate) fn handle_key_event_direct(&mut self, key: KeyEvent) -> bool {
+        self.handle_key_direct(key)
+    }
+
     pub(crate) fn paste_direct(&mut self, text: String) -> bool {
         match &mut self.mode {
             Mode::Credentials(view) => {
@@ -304,6 +312,10 @@ impl SshSettingsView {
             }
             _ => false,
         }
+    }
+
+    pub(crate) fn handle_paste_direct(&mut self, text: String) -> bool {
+        self.paste_direct(text)
     }
 
     pub(crate) fn mouse_direct(&mut self, event: MouseEvent) -> bool {
@@ -497,6 +509,36 @@ impl BottomPaneView<'_> for SshSettingsView {
         );
     }
 }
+
+impl crate::bottom_pane::chrome_view::ChromeRenderable for SshSettingsView {
+    fn render_in_framed_chrome(&self, area: Rect, buffer: &mut Buffer) {
+        self.render(area, buffer);
+    }
+
+    fn render_in_content_only_chrome(&self, area: Rect, buffer: &mut Buffer) {
+        self.render(area, buffer);
+    }
+}
+
+impl crate::bottom_pane::chrome_view::ChromeMouseHandler for SshSettingsView {
+    fn handle_mouse_event_direct_in_framed_chrome(
+        &mut self,
+        event: MouseEvent,
+        _area: Rect,
+    ) -> bool {
+        self.mouse_direct(event)
+    }
+
+    fn handle_mouse_event_direct_in_content_only_chrome(
+        &mut self,
+        event: MouseEvent,
+        _area: Rect,
+    ) -> bool {
+        self.mouse_direct(event)
+    }
+}
+
+crate::bottom_pane::chrome_view::impl_chrome_view!(SshSettingsView);
 
 #[cfg(test)]
 mod tests {
