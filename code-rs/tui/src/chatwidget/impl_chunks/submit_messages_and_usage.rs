@@ -137,14 +137,17 @@ impl ChatWidget<'_> {
         message.sanitize_local_images_for_dispatch();
 
         let items = message.ordered_items.clone();
-        if let Err(e) = self.code_op_tx.send(Op::UserInput {
+        match self.code_op_tx.send(Op::UserInput {
             items,
             final_output_json_schema: None,
         }) {
-            tracing::error!("failed to send immediate UserInput: {e}");
+            Ok(()) => self.finalize_sent_user_message(message),
+            Err(error) => {
+                tracing::error!("failed to send immediate UserInput: {error}");
+                self.queued_user_messages.push_front(message);
+                self.refresh_queued_user_messages(true);
+            }
         }
-
-        self.finalize_sent_user_message(message);
     }
 
     /// Queue a note that will be delivered to the agent as a hidden system

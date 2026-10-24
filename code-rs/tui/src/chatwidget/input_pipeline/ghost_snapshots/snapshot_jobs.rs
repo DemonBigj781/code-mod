@@ -77,21 +77,31 @@ impl ChatWidget<'_> {
             );
         }
 
-        if !combined_items.is_empty() {
+        let dispatch_result = if !combined_items.is_empty() {
             self.flush_pending_agent_notes();
-            if let Err(e) = self
+            self
                 .code_op_tx
                 .send(Op::UserInput {
                     items: combined_items,
                     final_output_json_schema: None,
                 })
-            {
-                tracing::error!("failed to send Op::UserInput: {e}");
-            }
-        }
+        } else {
+            Ok(())
+        };
 
-        for message in messages {
-            self.finalize_sent_user_message(message);
+        match dispatch_result {
+            Ok(()) => {
+                for message in messages {
+                    self.finalize_sent_user_message(message);
+                }
+            }
+            Err(e) => {
+                tracing::error!("failed to send Op::UserInput: {e}");
+                for message in messages.into_iter().rev() {
+                    self.queued_user_messages.push_front(message);
+                }
+                self.refresh_queued_user_messages(true);
+            }
         }
     }
 

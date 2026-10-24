@@ -304,6 +304,60 @@ fn footer_only_mode_uses_footer_height_and_hides_cursor() {
 }
 
 #[test]
+fn empty_cursor_cell_shows_insertion_marker() {
+    let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+    let app_tx = AppEventSender::new(tx);
+    let composer = ChatComposer::new(true, app_tx, true);
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 4,
+    };
+    let mut buf = Buffer::empty(area);
+
+    composer.render_ref(area, &mut buf);
+
+    let (cursor_x, cursor_y) = composer
+        .cursor_pos(area)
+        .expect("focused composer should expose its cursor position");
+    assert_eq!(
+        buf[(cursor_x, cursor_y)].symbol(),
+        "▌",
+        "blank insertion cell should show a visible caret marker"
+    );
+    assert_eq!(
+        buf[(cursor_x.saturating_add(1), cursor_y)].symbol(),
+        "W",
+        "placeholder should begin after the insertion marker"
+    );
+}
+
+#[test]
+fn typed_text_end_shows_insertion_marker_without_replacing_text() {
+    let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+    let app_tx = AppEventSender::new(tx);
+    let mut composer = ChatComposer::new(true, app_tx, true);
+    composer.textarea.set_text("hello");
+    composer.textarea.set_cursor(composer.textarea.text().len());
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 4,
+    };
+    let mut buf = Buffer::empty(area);
+
+    composer.render_ref(area, &mut buf);
+
+    let (cursor_x, cursor_y) = composer
+        .cursor_pos(area)
+        .expect("focused composer should expose its cursor position");
+    assert_eq!(buf[(cursor_x, cursor_y)].symbol(), "▌");
+    assert_eq!(buf[(cursor_x.saturating_sub(1), cursor_y)].symbol(), "o");
+}
+
+#[test]
 fn insert_selected_path_quotes_and_escapes_internal_quotes() {
     let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
     let app_tx = AppEventSender::new(tx);

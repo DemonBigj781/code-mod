@@ -161,9 +161,15 @@ impl WidgetRef for ChatComposer {
         // Only show placeholder if there's no chat history AND no text typed
         if !self.typed_anything && self.textarea.text().is_empty() {
             let placeholder = crate::greeting::greeting_placeholder(&self.greeting_config);
+            let placeholder_area = Rect {
+                x: padded_textarea_rect.x.saturating_add(1),
+                y: padded_textarea_rect.y,
+                width: padded_textarea_rect.width.saturating_sub(1),
+                height: padded_textarea_rect.height,
+            };
             Line::from(placeholder)
                 .style(Style::default().dim())
-                .render_ref(padded_textarea_rect, buf);
+                .render_ref(placeholder_area, buf);
         }
 
         // Draw a high-contrast cursor overlay under the terminal cursor using the theme's
@@ -186,6 +192,9 @@ impl WidgetRef for ChatComposer {
             let theme = crate::theme::current_theme();
             let cursor_bg = theme.cursor;
             if let Some(cell) = buf.cell_mut((cx, cy)) {
+                if cell.symbol() == " " {
+                    cell.set_symbol("▌");
+                }
                 // Only tint the background so the foreground glyph stays intact. Some
                 // terminals (e.g. GNOME Terminal/VTE) temporarily hide the hardware
                 // cursor while processing arrow keys; preserving the foreground color
