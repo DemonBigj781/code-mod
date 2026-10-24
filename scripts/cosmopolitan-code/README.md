@@ -92,7 +92,7 @@ checks:
 
 sh scripts/cosmopolitan-code/test-artifact.sh o/cosmopolitan-code/code.com o/cosmopolitan-code/code.com.json
 
-The manually dispatched workflow is restricted to `Main`. It first builds a
+The `Main`-branch or manually dispatched workflow is restricted to `Main`. It first builds a
 small source-runtime probe on Linux, verifies its identity and checksum, and
 runs that identical probe on Windows. Only then does it build and test Code and
 run the identical Code artifact on Windows. A runtime failure therefore blocks

@@ -4,11 +4,9 @@ Rust-specific `rust-ci*.yml` workflows are intentionally removed in this fork.
 
 ## Verification Paths
 
-- `compile-main.yml` is the standard Linux binary build path for the `Main`
-  branch. It runs the repository's `build-fast.sh` script with one Cargo build
-  job and uploads the testable x86-64 `code` binary.
-- `cosmopolitan-code-ape.yml` builds one pinned x86-64 APE on Linux and
-  validates the same artifact on Linux and Windows; it runs only on `Main`.
+- `cosmopolitan-code-ape.yml` is the binary build path for the `Main` branch.
+  It builds one pinned x86-64 Cosmopolitan APE on Linux and validates the same
+  artifact on Linux and Windows on every relevant `Main` push or manual run.
 - Platform-specific Linux/Windows release and preview binary workflows are
   intentionally removed so binary distribution goes through the APE artifact.
 

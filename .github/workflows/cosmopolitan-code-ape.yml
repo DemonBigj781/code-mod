@@ -1,6 +1,17 @@
 name: Cosmopolitan Code APE
 
 on:
+  push:
+    branches:
+      - Main
+    paths:
+      - "code-rs/**"
+      - "codex-rs/models-manager/models.json"
+      - "announcement_tip.toml"
+      - "scripts/build-cosmopolitan-code.sh"
+      - "scripts/build-cosmopolitan-runtime.sh"
+      - "scripts/cosmopolitan-code/**"
+      - ".github/workflows/cosmopolitan-code-ape.yml"
   workflow_dispatch:
 
 permissions:
