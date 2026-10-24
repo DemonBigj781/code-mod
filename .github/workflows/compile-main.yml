@@ -72,6 +72,7 @@ jobs:
             clang \
             cmake \
             libssl-dev \
+            libwayland-dev \
             libxcb1-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
