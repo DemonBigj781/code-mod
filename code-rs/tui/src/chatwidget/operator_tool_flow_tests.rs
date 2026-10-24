@@ -57,6 +57,69 @@ fn operator_tool_command_submits_exact_arguments_without_user_input() {
 }
 
 #[test]
+fn failed_direct_queue_dispatch_keeps_prompt_for_retry() {
+    let mut harness = ChatWidgetHarness::new();
+    let message = UserMessage::from("preserve this prompt".to_owned());
+    harness.chat().queued_user_messages.push_back(message.clone());
+    harness.chat().queue_agent_note("preserve this note");
+
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    drop(receiver);
+    harness.chat().code_op_tx = sender;
+
+    harness.chat().dispatch_queued_batch(vec![message.clone()]);
+
+    assert_eq!(harness.chat().queued_user_messages.front(), Some(&message));
+    assert_eq!(harness.chat().pending_agent_notes, vec!["preserve this note"]);
+    assert_eq!(harness.chat().pending_user_prompts_for_next_turn, 0);
+}
+
+#[test]
+fn failed_direct_queue_batch_preserves_prompt_order() {
+    let mut harness = ChatWidgetHarness::new();
+    let first = UserMessage::from("first prompt".to_owned());
+    let second = UserMessage::from("second prompt".to_owned());
+    harness.chat().queued_user_messages.push_back(first.clone());
+    harness.chat().queued_user_messages.push_back(second.clone());
+
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    drop(receiver);
+    harness.chat().code_op_tx = sender;
+
+    harness
+        .chat()
+        .dispatch_queued_batch(vec![first.clone(), second.clone()]);
+
+    assert_eq!(
+        harness.chat().queued_user_messages.iter().collect::<Vec<_>>(),
+        vec![&first, &second]
+    );
+}
+
+#[test]
+fn failed_immediate_hidden_message_is_queued_for_retry() {
+    let mut harness = ChatWidgetHarness::new();
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    drop(receiver);
+    harness.chat().code_op_tx = sender;
+
+    harness
+        .chat()
+        .submit_hidden_text_message_with_preface("preserve immediate message".to_owned(), String::new());
+
+    assert_eq!(harness.chat().queued_user_messages.len(), 1);
+    assert!(matches!(
+        harness.chat().queued_user_messages.front(),
+        Some(UserMessage { display_text, ordered_items, .. })
+            if display_text.is_empty()
+                && ordered_items == &vec![InputItem::Text {
+                    text: "preserve immediate message".to_owned(),
+                }]
+    ));
+    assert_eq!(harness.chat().pending_user_prompts_for_next_turn, 0);
+}
+
+#[test]
 fn operator_tool_lifecycle_does_not_start_automatic_review_or_followup() {
     let mut harness = ChatWidgetHarness::new();
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();

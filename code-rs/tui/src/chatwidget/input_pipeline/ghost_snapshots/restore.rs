@@ -305,9 +305,15 @@ impl ChatWidget<'_> {
     }
 
     pub(in super::super) fn flush_pending_agent_notes(&mut self) {
-        for note in self.pending_agent_notes.drain(..) {
-            if let Err(e) = self.code_op_tx.send(Op::AddToHistory { text: note }) {
-                tracing::error!("failed to send AddToHistory op: {e}");
+        let mut notes = std::mem::take(&mut self.pending_agent_notes).into_iter();
+        while let Some(note) = notes.next() {
+            if let Err(error) = self.code_op_tx.send(Op::AddToHistory { text: note }) {
+                tracing::error!("failed to send AddToHistory op: {error}");
+                if let Op::AddToHistory { text } = error.0 {
+                    self.pending_agent_notes.push(text);
+                }
+                self.pending_agent_notes.extend(notes);
+                break;
             }
         }
     }
