@@ -35,6 +35,24 @@ impl ChatWidget<'_> {
     }
 
     pub(in super::super) fn dispatch_queued_batch(&mut self, batch: Vec<UserMessage>) {
+        let sender = self.code_op_tx.clone();
+        self.dispatch_queued_batch_with_sender(batch, |op| {
+            sender
+                .send(op)
+                .map_err(|error| {
+                    let message = error.to_string();
+                    (error.0, message)
+                })
+        });
+    }
+
+    pub(in super::super) fn dispatch_queued_batch_with_sender<F>(
+        &mut self,
+        batch: Vec<UserMessage>,
+        mut send: F,
+    ) where
+        F: FnMut(Op) -> Result<(), (Op, String)>,
+    {
         if batch.is_empty() {
             return;
         }
@@ -78,13 +96,15 @@ impl ChatWidget<'_> {
         }
 
         let dispatch_result = if !combined_items.is_empty() {
-            self.flush_pending_agent_notes();
-            self
-                .code_op_tx
-                .send(Op::UserInput {
+            if !self.flush_pending_agent_notes_with_sender(&mut send) {
+                Err("pending agent notes could not be sent".to_owned())
+            } else {
+                send(Op::UserInput {
                     items: combined_items,
                     final_output_json_schema: None,
                 })
+                .map_err(|(_, error)| error)
+            }
         } else {
             Ok(())
         };
@@ -96,7 +116,7 @@ impl ChatWidget<'_> {
                 }
             }
             Err(e) => {
-                tracing::error!("failed to send Op::UserInput: {e}");
+                tracing::error!("failed to dispatch queued user input: {e}");
                 for message in messages.into_iter().rev() {
                     self.queued_user_messages.push_front(message);
                 }

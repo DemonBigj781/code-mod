@@ -1,0 +1,94 @@
+name: Compile Code
+
+on:
+  push:
+    branches:
+      - Main
+    paths:
+      - "build-fast.sh"
+      - "code-rs/**"
+      - ".github/workflows/compile-main.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compile-main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build the Code binary
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_FAST_DEBUG: "0"
+      CARGO_PROFILE_DEV_FAST_CODEGEN_UNITS: "256"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
+      RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read Rust toolchain
+        id: rust_toolchain
+        shell: sh
+        run: |
+          set -eu
+          channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' code-rs/rust-toolchain.toml | head -n 1)
+          if [ -z "$channel" ]; then
+            echo "Unable to read the Rust channel from code-rs/rust-toolchain.toml" >&2
+            exit 1
+          fi
+          printf 'channel=%s\n' "$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+        with:
+          toolchain: ${{ steps.rust_toolchain.outputs.channel }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          prefix-key: code-compile-main
+          shared-key: rust-${{ steps.rust_toolchain.outputs.channel }}
+          workspaces: code-rs -> target
+          cache-targets: true
+          cache-workspace-crates: true
+          cache-on-failure: true
+
+      - name: Install Linux build dependencies
+        shell: sh
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            libssl-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+
+      - name: Compile Code
+        env:
+          BUILD_FAST_BINS: code
+          KEEP_ENV: "1"
+        run: ./build-fast.sh
+
+      - name: Upload Code binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: code-linux-x86_64
+          path: |
+            code-rs/target/dev-fast/code
+            code-rs/bin/code
+          if-no-files-found: error
+          retention-days: 14

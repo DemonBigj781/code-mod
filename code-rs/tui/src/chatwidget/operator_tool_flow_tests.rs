@@ -63,11 +63,24 @@ fn failed_direct_queue_dispatch_keeps_prompt_for_retry() {
     harness.chat().queued_user_messages.push_back(message.clone());
     harness.chat().queue_agent_note("preserve this note");
 
-    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-    drop(receiver);
-    harness.chat().code_op_tx = sender;
+    let mut note_send_attempted = false;
+    let mut user_input_sent = false;
+    harness
+        .chat()
+        .dispatch_queued_batch_with_sender(vec![message.clone()], |op| match op {
+            Op::AddToHistory { text } => {
+                note_send_attempted = true;
+                Err((Op::AddToHistory { text }, "simulated note send failure".to_owned()))
+            }
+            Op::UserInput { .. } => {
+                user_input_sent = true;
+                Ok(())
+            }
+            other => panic!("unexpected queued dispatch operation: {other:?}"),
+        });
 
-    harness.chat().dispatch_queued_batch(vec![message.clone()]);
+    assert!(note_send_attempted);
+    assert!(!user_input_sent);
 
     assert_eq!(harness.chat().queued_user_messages.front(), Some(&message));
     assert_eq!(harness.chat().pending_agent_notes, vec!["preserve this note"]);
@@ -117,6 +130,31 @@ fn failed_immediate_hidden_message_is_queued_for_retry() {
                 }]
     ));
     assert_eq!(harness.chat().pending_user_prompts_for_next_turn, 0);
+}
+
+#[test]
+fn immediate_hidden_message_flushes_notes_before_prompt() {
+    let mut harness = ChatWidgetHarness::new();
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    harness.chat().code_op_tx = sender;
+    harness.chat().queue_agent_note("send this first");
+
+    harness
+        .chat()
+        .submit_hidden_text_message_with_preface("send this prompt".to_owned(), String::new());
+
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        Op::AddToHistory { text } if text == "send this first"
+    ));
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        Op::UserInput { items, .. }
+            if items == vec![InputItem::Text {
+                text: "send this prompt".to_owned(),
+            }]
+    ));
+    assert!(receiver.try_recv().is_err());
 }
 
 #[test]

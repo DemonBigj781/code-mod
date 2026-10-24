@@ -136,6 +136,13 @@ impl ChatWidget<'_> {
         }
         message.sanitize_local_images_for_dispatch();
 
+        if !self.flush_pending_agent_notes() {
+            tracing::error!("failed to send pending agent notes before immediate UserInput");
+            self.queued_user_messages.push_front(message);
+            self.refresh_queued_user_messages(true);
+            return;
+        }
+
         let items = message.ordered_items.clone();
         match self.code_op_tx.send(Op::UserInput {
             items,
