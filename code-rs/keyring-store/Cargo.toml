@@ -7,6 +7,9 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+cosmopolitan-ape = []
+
 [dependencies]
 keyring = { workspace = true, features = ["crypto-rust"] }
 sha2 = { workspace = true }

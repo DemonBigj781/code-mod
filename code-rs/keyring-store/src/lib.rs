@@ -81,9 +81,63 @@ pub fn best_keyring_store() -> Arc<dyn KeyringStore> {
     {
         Arc::new(macos::DataProtectionKeyringStore)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+    {
+        Arc::new(LinuxKernelKeyringStore)
+    }
+    #[cfg(not(any(
+        target_os = "macos",
+        all(target_os = "linux", feature = "cosmopolitan-ape")
+    )))]
     {
         Arc::new(DefaultKeyringStore)
+    }
+}
+
+/// Kernel-keyring storage for the portable Cosmopolitan build on Linux.
+///
+/// The APE cannot rely on a desktop Secret Service being activatable, and its
+/// compile-time Linux target would select that D-Bus backend even when the same
+/// artifact is running on another host. The kernel keyring keeps credentials
+/// out of files and makes them available to other Code processes in the same
+/// login session.
+#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+#[derive(Debug)]
+pub struct LinuxKernelKeyringStore;
+
+#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+impl LinuxKernelKeyringStore {
+    fn entry(service: &str, account: &str) -> Result<Entry, CredentialStoreError> {
+        let credential =
+            keyring::keyutils::KeyutilsCredential::new_with_target(None, service, account)
+                .map_err(CredentialStoreError::new)?;
+        Ok(Entry::new_with_credential(Box::new(credential)))
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+impl KeyringStore for LinuxKernelKeyringStore {
+    fn load(&self, service: &str, account: &str) -> Result<Option<String>, CredentialStoreError> {
+        let entry = Self::entry(service, account)?;
+        match entry.get_password() {
+            Ok(password) => Ok(Some(password)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(CredentialStoreError::new(error)),
+        }
+    }
+
+    fn save(&self, service: &str, account: &str, value: &str) -> Result<(), CredentialStoreError> {
+        Self::entry(service, account)?
+            .set_password(value)
+            .map_err(CredentialStoreError::new)
+    }
+
+    fn delete(&self, service: &str, account: &str) -> Result<bool, CredentialStoreError> {
+        match Self::entry(service, account)?.delete_credential() {
+            Ok(()) => Ok(true),
+            Err(keyring::Error::NoEntry) => Ok(false),
+            Err(error) => Err(CredentialStoreError::new(error)),
+        }
     }
 }
 
@@ -158,6 +212,38 @@ pub mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::sync::PoisonError;
+
+    #[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+    #[test]
+    fn cosmopolitan_ape_uses_the_linux_kernel_keyring() {
+        assert_eq!(
+            format!("{:?}", super::best_keyring_store()),
+            "LinuxKernelKeyringStore"
+        );
+    }
+
+    #[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+    #[test]
+    fn cosmopolitan_ape_kernel_keyring_round_trip() {
+        let store = super::best_keyring_store();
+        let account = format!(
+            "code-keyring-store-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let value = "temporary-test-credential";
+
+        store.save("Code Test", &account, value).unwrap();
+        assert_eq!(
+            store.load("Code Test", &account).unwrap().as_deref(),
+            Some(value)
+        );
+        assert!(store.delete("Code Test", &account).unwrap());
+        assert_eq!(store.load("Code Test", &account).unwrap(), None);
+    }
 
     #[derive(Default, Clone, Debug)]
     pub struct MockKeyringStore {

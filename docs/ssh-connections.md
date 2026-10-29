@@ -72,8 +72,12 @@ Passwords and key passphrases are stored in the OS credential store under
 `Code SSH`; metadata contains only opaque credential IDs and local key-file
 paths. If secure storage is unavailable, password/passphrase registration fails
 without a plaintext fallback. Agent or unencrypted-key registration does not
-require storing a secret. The selected secure-store backend must be available
-on the running platform; this is particularly important for portable APE builds.
+require storing a secret. Native Linux builds use the persistent Secret Service
+backend. The portable APE uses the Linux kernel keyring so credentials remain
+available to Code processes in the same login session without depending on a
+desktop D-Bus service; re-enter them after the login session or machine restarts.
+On non-Linux APE hosts, password and passphrase storage remains unavailable until
+a host-native secure-store adapter exists.
 
 The credential form masks secret values and suppresses raw key/paste session
 diagnostics while open. Enter or Ctrl+S submits; Escape cancels without saving.
