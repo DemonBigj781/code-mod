@@ -21,8 +21,18 @@ use std::path::{Path, PathBuf};
 const DEFAULT_TIMEOUT_MS: u64 = 10 * 60 * 1_000;
 const MAX_TIMEOUT_MS: u64 = 30 * 60 * 1_000;
 const MIN_TIMEOUT_MS: u64 = 1_000;
-const SSH_CONNECT_TIMEOUT_SECONDS: &str = "10";
+const SSH_CONNECT_TIMEOUT_SECONDS: u64 = 10;
 const ASKPASS_ENV: &str = "CODE_SSH_ASKPASS";
+
+fn ssh_connect_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(SSH_CONNECT_TIMEOUT_SECONDS)
+}
+
+fn ssh_attempt_foreground_wait() -> std::time::Duration {
+    // The SSH process must report its connection timeout before generic exec
+    // backgrounds the attempt, otherwise endpoint failover cannot classify it.
+    ssh_connect_timeout() + std::time::Duration::from_secs(2)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SshRequest {
@@ -214,12 +224,13 @@ async fn dispatch_ssh_request(
             Ok(params) => params,
             Err(error) => return tool_error(ctx.call_id.clone(), error),
         };
-        let response = crate::codex::exec_tool::handle_container_exec_with_params(
+        let response = crate::codex::exec_tool::handle_container_exec_with_params_and_wait(
             params,
             sess,
             turn_diff_tracker,
             ctx,
             attempt_req,
+            ssh_attempt_foreground_wait(),
         )
         .await;
         if response_success(&response) != Some(false) {
@@ -466,6 +477,11 @@ mod tests {
             "ssh: connect to host example port 22: Connection timed out"
         ));
         assert!(!is_retryable_transport_failure("remote command exited with code 1"));
+    }
+
+    #[test]
+    fn ssh_attempt_stays_foreground_past_connect_timeout() {
+        assert!(ssh_attempt_foreground_wait() > ssh_connect_timeout());
     }
 
     #[test]

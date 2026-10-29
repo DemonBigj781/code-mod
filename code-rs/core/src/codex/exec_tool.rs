@@ -759,12 +759,33 @@ pub(crate) async fn handle_apply_patch_action(
     }
 }
 
+const DEFAULT_EXEC_FOREGROUND_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 pub(crate) async fn handle_container_exec_with_params(
     params: ExecParams,
     sess: &Session,
     turn_diff_tracker: &mut TurnDiffTracker,
     ctx: &ToolCallCtx,
     attempt_req: u64,
+) -> ResponseInputItem {
+    handle_container_exec_with_params_and_wait(
+        params,
+        sess,
+        turn_diff_tracker,
+        ctx,
+        attempt_req,
+        DEFAULT_EXEC_FOREGROUND_WAIT,
+    )
+    .await
+}
+
+pub(crate) async fn handle_container_exec_with_params_and_wait(
+    params: ExecParams,
+    sess: &Session,
+    turn_diff_tracker: &mut TurnDiffTracker,
+    ctx: &ToolCallCtx,
+    attempt_req: u64,
+    foreground_wait: std::time::Duration,
 ) -> ResponseInputItem {
     let sub_id = ctx.sub_id.clone();
     let call_id = ctx.call_id.clone();
@@ -1990,10 +2011,11 @@ pub(crate) async fn handle_container_exec_with_params(
         }
     }
 
-    // Wait up to 10 seconds for completion
-    let waited = tokio::time::timeout(std::time::Duration::from_secs(10), notify.notified()).await;
+    // Wait for a caller-selected foreground window before backgrounding.
+    let waited = tokio::time::timeout(foreground_wait, notify.notified()).await;
     if waited.is_ok() {
-        // Completed within 10s - return the real output and drop the background entry.
+        // Completed within the foreground window - return the real output and
+        // drop the background entry.
         let done_opt = {
             let mut st = crate::codex::lock_or_panic!(sess.state);
             st.background_execs
