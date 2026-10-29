@@ -73,13 +73,12 @@ Passwords and key passphrases are stored in the OS credential store under
 paths. If secure storage is unavailable, password/passphrase registration fails
 without a plaintext fallback. Agent or unencrypted-key registration does not
 require storing a secret. Native Linux builds use the persistent Secret Service
-backend. On Linux, the portable APE invokes the host-native `keyctl` helper from
-the `keyutils` package to use the Linux kernel keyring without depending on APE
-libc support or a desktop D-Bus service. Ensure `keyctl` is on `PATH`; credentials
-remain available to Code processes in the same login session and must be
-re-entered after the login session or machine restarts. On non-Linux APE hosts,
-password and passphrase storage remains unavailable until a host-native
-secure-store adapter exists.
+backend. On Linux, the portable APE uses Linux-gated kernel keyring syscalls
+without depending on APE libc support, external helpers, or a desktop D-Bus
+service. Credentials remain available to Code processes owned by the same user
+and must be re-entered after the login session or machine restarts. On non-Linux
+APE hosts, password and passphrase storage remains unavailable until a
+host-native secure-store adapter exists.
 
 The credential form masks secret values and suppresses raw key/paste session
 diagnostics while open. Enter or Ctrl+S submits; Escape cancels without saving.

@@ -2,18 +2,24 @@ use keyring::Entry;
 use keyring::Error as KeyringError;
 use sha2::Digest;
 use sha2::Sha256;
+#[cfg(all(
+    target_arch = "x86_64",
+    target_env = "musl",
+    target_os = "linux",
+    feature = "cosmopolitan-ape"
+))]
+use std::arch::asm;
 use std::error::Error;
+#[cfg(all(
+    target_arch = "x86_64",
+    target_env = "musl",
+    target_os = "linux",
+    feature = "cosmopolitan-ape"
+))]
+use std::ffi::CString;
 use std::fmt;
 use std::fmt::Debug;
-#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
-use std::io::Write;
 use std::path::Path;
-#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
-use std::process::Command;
-#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
-use std::process::Output;
-#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
-use std::process::Stdio;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -89,13 +95,23 @@ pub fn best_keyring_store() -> Arc<dyn KeyringStore> {
     {
         Arc::new(macos::DataProtectionKeyringStore)
     }
-    #[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_env = "musl",
+        target_os = "linux",
+        feature = "cosmopolitan-ape"
+    ))]
     {
-        Arc::new(LinuxKeyctlStore)
+        Arc::new(LinuxApeKernelKeyringStore)
     }
     #[cfg(not(any(
         target_os = "macos",
-        all(target_os = "linux", feature = "cosmopolitan-ape")
+        all(
+            target_arch = "x86_64",
+            target_env = "musl",
+            target_os = "linux",
+            feature = "cosmopolitan-ape"
+        )
     )))]
     {
         Arc::new(DefaultKeyringStore)
@@ -106,15 +122,36 @@ pub fn best_keyring_store() -> Arc<dyn KeyringStore> {
 ///
 /// The APE cannot rely on a desktop Secret Service being activatable, and its
 /// own libc does not implement the keyring syscalls used by the `keyring`
-/// crate's Linux backend. Invoking the host-native `keyctl` helper keeps
-/// credentials out of files while making them available to other Code
-/// processes in the same login session.
-#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+/// crate's Linux backend. Linux-gated raw syscalls keep credentials out of
+/// files while making them available to other Code processes owned by the same
+/// user.
+#[cfg(all(
+    target_arch = "x86_64",
+    target_env = "musl",
+    target_os = "linux",
+    feature = "cosmopolitan-ape"
+))]
 #[derive(Debug)]
-pub struct LinuxKeyctlStore;
+pub struct LinuxApeKernelKeyringStore;
 
-#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
-impl LinuxKeyctlStore {
+#[cfg(all(
+    target_arch = "x86_64",
+    target_env = "musl",
+    target_os = "linux",
+    feature = "cosmopolitan-ape"
+))]
+impl LinuxApeKernelKeyringStore {
+    const HOST_LINUX: i32 = 1;
+    const SYS_ADD_KEY: isize = 248;
+    const SYS_KEYCTL: isize = 250;
+    const KEY_SPEC_USER_KEYRING: isize = -4;
+    const KEYCTL_SET_PERM: isize = 5;
+    const KEYCTL_UNLINK: isize = 9;
+    const KEYCTL_SEARCH: isize = 10;
+    const KEYCTL_READ: isize = 11;
+    const OWNER_PERMISSIONS: isize = 0x3f3f0000;
+    const ENOKEY: isize = 126;
+
     fn description(service: &str, account: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(service.as_bytes());
@@ -129,112 +166,181 @@ impl LinuxKeyctlStore {
         )))
     }
 
-    fn run(args: &[&str], input: Option<&[u8]>) -> Result<Output, CredentialStoreError> {
-        let mut command = Command::new("keyctl");
-        command
-            .args(args)
-            .stdin(if input.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = command
-            .spawn()
-            .map_err(|error| Self::platform_error(format!("failed to run keyctl: {error}")))?;
-        if let Some(input) = input {
-            child
-                .stdin
-                .take()
-                .ok_or_else(|| Self::platform_error("failed to open keyctl standard input"))?
-                .write_all(input)
-                .map_err(|error| {
-                    Self::platform_error(format!("failed to write keyctl standard input: {error}"))
-                })?;
+    fn host_is_linux() -> bool {
+        unsafe extern "C" {
+            static __hostos: i32;
         }
-        child
-            .wait_with_output()
-            .map_err(|error| Self::platform_error(format!("failed to wait for keyctl: {error}")))
+        // SAFETY: `__hostos` is a read-only Cosmopolitan runtime symbol that is
+        // present in every APE linked by the pinned toolchain.
+        unsafe { __hostos & Self::HOST_LINUX != 0 }
     }
 
-    fn command_error(action: &str, output: &Output) -> CredentialStoreError {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr.trim();
-        let message = if detail.is_empty() {
-            format!("keyctl {action} failed with status {}", output.status)
+    fn raw_syscall5(
+        number: isize,
+        arg1: isize,
+        arg2: isize,
+        arg3: isize,
+        arg4: isize,
+        arg5: isize,
+    ) -> isize {
+        let result: isize;
+        // SAFETY: This is the x86-64 Linux syscall ABI. Every call is gated by
+        // `host_is_linux`, and all pointer/length pairs below remain valid for
+        // the duration of the instruction.
+        unsafe {
+            asm!(
+                "syscall",
+                inlateout("rax") number => result,
+                in("rdi") arg1,
+                in("rsi") arg2,
+                in("rdx") arg3,
+                in("r10") arg4,
+                in("r8") arg5,
+                lateout("rcx") _,
+                lateout("r11") _,
+                options(nostack)
+            );
+        }
+        result
+    }
+
+    fn checked(action: &str, result: isize) -> Result<isize, CredentialStoreError> {
+        if result < 0 && result > -4096 {
+            let error = std::io::Error::from_raw_os_error((-result) as i32);
+            Err(Self::platform_error(format!(
+                "Linux keyring {action} failed: {error}"
+            )))
         } else {
-            format!(
-                "keyctl {action} failed with status {}: {detail}",
-                output.status
-            )
-        };
-        Self::platform_error(message)
+            Ok(result)
+        }
     }
 
-    fn search(description: &str) -> Result<Option<String>, CredentialStoreError> {
-        let output = Self::run(&["search", "@u", "user", description], None)?;
-        if output.status.success() {
-            let key_id = std::str::from_utf8(&output.stdout)
-                .map_err(|error| {
-                    Self::platform_error(format!("keyctl returned an invalid key ID: {error}"))
-                })?
-                .trim();
-            key_id.parse::<i64>().map_err(|error| {
-                Self::platform_error(format!("keyctl returned an invalid key ID: {error}"))
-            })?;
-            return Ok(Some(key_id.to_string()));
+    fn ensure_linux() -> Result<(), CredentialStoreError> {
+        if Self::host_is_linux() {
+            Ok(())
+        } else {
+            Err(Self::platform_error(
+                "Linux kernel credential storage is unavailable on this APE host",
+            ))
         }
+    }
 
-        let keyring = Self::run(&["list", "@u"], None)?;
-        if keyring.status.success() {
+    fn search(description: &CString) -> Result<Option<isize>, CredentialStoreError> {
+        let result = Self::raw_syscall5(
+            Self::SYS_KEYCTL,
+            Self::KEYCTL_SEARCH,
+            Self::KEY_SPEC_USER_KEYRING,
+            c"user".as_ptr() as isize,
+            description.as_ptr() as isize,
+            0,
+        );
+        if result == -Self::ENOKEY {
             Ok(None)
         } else {
-            Err(Self::command_error("search", &output))
+            Self::checked("search", result).map(Some)
         }
+    }
+
+    fn remove_key(key_id: isize) -> Result<(), CredentialStoreError> {
+        Self::checked(
+            "unlink",
+            Self::raw_syscall5(
+                Self::SYS_KEYCTL,
+                Self::KEYCTL_UNLINK,
+                key_id,
+                Self::KEY_SPEC_USER_KEYRING,
+                0,
+                0,
+            ),
+        )?;
+        Ok(())
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
-impl KeyringStore for LinuxKeyctlStore {
+#[cfg(all(
+    target_arch = "x86_64",
+    target_env = "musl",
+    target_os = "linux",
+    feature = "cosmopolitan-ape"
+))]
+impl KeyringStore for LinuxApeKernelKeyringStore {
     fn load(&self, service: &str, account: &str) -> Result<Option<String>, CredentialStoreError> {
-        let description = Self::description(service, account);
+        Self::ensure_linux()?;
+        let description = CString::new(Self::description(service, account))
+            .map_err(|error| Self::platform_error(format!("invalid key description: {error}")))?;
         let Some(key_id) = Self::search(&description)? else {
             return Ok(None);
         };
-        let output = Self::run(&["pipe", &key_id], None)?;
-        if !output.status.success() {
-            return Err(Self::command_error("pipe", &output));
+        let size = Self::checked(
+            "read size",
+            Self::raw_syscall5(Self::SYS_KEYCTL, Self::KEYCTL_READ, key_id, 0, 0, 0),
+        )? as usize;
+        let mut value = vec![0_u8; size];
+        if size != 0 {
+            let read = Self::checked(
+                "read",
+                Self::raw_syscall5(
+                    Self::SYS_KEYCTL,
+                    Self::KEYCTL_READ,
+                    key_id,
+                    value.as_mut_ptr() as isize,
+                    value.len() as isize,
+                    0,
+                ),
+            )? as usize;
+            if read > value.len() {
+                return Err(Self::platform_error(
+                    "Linux keyring payload changed while it was being read",
+                ));
+            }
+            value.truncate(read);
         }
-        String::from_utf8(output.stdout).map(Some).map_err(|error| {
-            Self::platform_error(format!("keyctl returned invalid UTF-8: {error}"))
+        String::from_utf8(value).map(Some).map_err(|error| {
+            Self::platform_error(format!("Linux keyring returned invalid UTF-8: {error}"))
         })
     }
 
     fn save(&self, service: &str, account: &str, value: &str) -> Result<(), CredentialStoreError> {
-        let description = Self::description(service, account);
-        let output = Self::run(
-            &["padd", "user", &description, "@u"],
-            Some(value.as_bytes()),
+        Self::ensure_linux()?;
+        let description = CString::new(Self::description(service, account))
+            .map_err(|error| Self::platform_error(format!("invalid key description: {error}")))?;
+        let key_id = Self::checked(
+            "save",
+            Self::raw_syscall5(
+                Self::SYS_ADD_KEY,
+                c"user".as_ptr() as isize,
+                description.as_ptr() as isize,
+                value.as_ptr() as isize,
+                value.len() as isize,
+                Self::KEY_SPEC_USER_KEYRING,
+            ),
         )?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(Self::command_error("padd", &output))
+        if let Err(error) = Self::checked(
+            "set permissions",
+            Self::raw_syscall5(
+                Self::SYS_KEYCTL,
+                Self::KEYCTL_SET_PERM,
+                key_id,
+                Self::OWNER_PERMISSIONS,
+                0,
+                0,
+            ),
+        ) {
+            let _ = Self::remove_key(key_id);
+            return Err(error);
         }
+        Ok(())
     }
 
     fn delete(&self, service: &str, account: &str) -> Result<bool, CredentialStoreError> {
-        let description = Self::description(service, account);
+        Self::ensure_linux()?;
+        let description = CString::new(Self::description(service, account))
+            .map_err(|error| Self::platform_error(format!("invalid key description: {error}")))?;
         let Some(key_id) = Self::search(&description)? else {
             return Ok(false);
         };
-        let output = Self::run(&["unlink", &key_id, "@u"], None)?;
-        if output.status.success() {
-            Ok(true)
-        } else {
-            Err(Self::command_error("unlink", &output))
-        }
+        Self::remove_key(key_id)?;
+        Ok(true)
     }
 }
 
@@ -310,18 +416,28 @@ pub mod tests {
     use std::sync::Mutex;
     use std::sync::PoisonError;
 
-    #[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_env = "musl",
+        target_os = "linux",
+        feature = "cosmopolitan-ape"
+    ))]
     #[test]
-    fn cosmopolitan_ape_uses_the_host_keyctl_backend() {
+    fn cosmopolitan_ape_uses_the_raw_linux_keyring_backend() {
         assert_eq!(
             format!("{:?}", super::best_keyring_store()),
-            "LinuxKeyctlStore"
+            "LinuxApeKernelKeyringStore"
         );
     }
 
-    #[cfg(all(target_os = "linux", feature = "cosmopolitan-ape"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_env = "musl",
+        target_os = "linux",
+        feature = "cosmopolitan-ape"
+    ))]
     #[test]
-    fn cosmopolitan_ape_keyctl_round_trip() {
+    fn cosmopolitan_ape_kernel_keyring_round_trip() {
         let store = super::best_keyring_store();
         let account = format!(
             "code-keyring-store-test-{}-{}",
@@ -338,6 +454,27 @@ pub mod tests {
                 store.load("Code Test", &account)?.as_deref(),
                 Some("replacement-value")
             );
+            let description = super::LinuxApeKernelKeyringStore::description("Code Test", &account);
+            let search = std::process::Command::new("keyctl")
+                .args(["search", "@u", "user", &description])
+                .output()
+                .expect("keyctl should be installed by the APE build job");
+            assert!(
+                search.status.success(),
+                "{}",
+                String::from_utf8_lossy(&search.stderr)
+            );
+            let key_id = String::from_utf8(search.stdout).unwrap();
+            let read = std::process::Command::new("keyctl")
+                .args(["pipe", key_id.trim()])
+                .output()
+                .unwrap();
+            assert!(
+                read.status.success(),
+                "{}",
+                String::from_utf8_lossy(&read.stderr)
+            );
+            assert_eq!(read.stdout, b"replacement-value");
             assert!(store.delete("Code Test", &account)?);
             assert_eq!(store.load("Code Test", &account)?, None);
             Ok::<_, CredentialStoreError>(())
