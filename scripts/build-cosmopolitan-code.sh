@@ -33,6 +33,9 @@ tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-t
     cd "$workspace/code-rs"
     sh "$support_dir/check-tls-backends.sh" "$PWD"
     bash "$run_script" cargo --config "$patch_config" test \
+        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-keyring-store \
+        --features code-keyring-store/cosmopolitan-ape --release -- --test-threads=1
+    bash "$run_script" cargo --config "$patch_config" test \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core \
         --test conversation_identity --test session_history_native --test agent_tool_contract --test operator_tools \
         --test session_background_isolation --test agent_completion_wake --no-default-features \

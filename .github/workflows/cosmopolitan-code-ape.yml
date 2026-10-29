@@ -113,6 +113,8 @@ jobs:
             echo 'SCCACHE_IDLE_TIMEOUT=1800'
             echo 'SCCACHE_CACHE_SIZE=10G'
           } >> "$GITHUB_ENV"
+      - name: Install host keyring helper
+        run: sudo apt-get update && sudo apt-get install -y keyutils
       - name: Read pinned fork revision
         id: fork-pin
         run: echo "sha=$(python3 -c 'import json; print(json.load(open("scripts/cosmopolitan-code/pins.json"))["cosmopolitan_commit"])')" >>"$GITHUB_OUTPUT"
