@@ -144,12 +144,17 @@ impl LinuxApeKernelKeyringStore {
     const HOST_LINUX: i32 = 1;
     const SYS_ADD_KEY: isize = 248;
     const SYS_KEYCTL: isize = 250;
+    const KEY_SPEC_PROCESS_KEYRING: isize = -2;
     const KEY_SPEC_USER_KEYRING: isize = -4;
+    const KEYCTL_UPDATE: isize = 2;
     const KEYCTL_SET_PERM: isize = 5;
+    const KEYCTL_LINK: isize = 8;
     const KEYCTL_UNLINK: isize = 9;
     const KEYCTL_SEARCH: isize = 10;
     const KEYCTL_READ: isize = 11;
     const OWNER_PERMISSIONS: isize = 0x3f3f0000;
+    const EPERM: isize = 1;
+    const EACCES: isize = 13;
     const ENOKEY: isize = 126;
 
     fn description(service: &str, account: &str) -> String {
@@ -241,17 +246,10 @@ impl LinuxApeKernelKeyringStore {
         }
     }
 
-    fn remove_key(key_id: isize) -> Result<(), CredentialStoreError> {
+    fn unlink_key(key_id: isize, keyring: isize) -> Result<(), CredentialStoreError> {
         Self::checked(
             "unlink",
-            Self::raw_syscall5(
-                Self::SYS_KEYCTL,
-                Self::KEYCTL_UNLINK,
-                key_id,
-                Self::KEY_SPEC_USER_KEYRING,
-                0,
-                0,
-            ),
+            Self::raw_syscall5(Self::SYS_KEYCTL, Self::KEYCTL_UNLINK, key_id, keyring, 0, 0),
         )?;
         Ok(())
     }
@@ -304,6 +302,25 @@ impl KeyringStore for LinuxApeKernelKeyringStore {
         Self::ensure_linux()?;
         let description = CString::new(Self::description(service, account))
             .map_err(|error| Self::platform_error(format!("invalid key description: {error}")))?;
+
+        if let Some(key_id) = Self::search(&description)? {
+            let update = Self::raw_syscall5(
+                Self::SYS_KEYCTL,
+                Self::KEYCTL_UPDATE,
+                key_id,
+                value.as_ptr() as isize,
+                value.len() as isize,
+                0,
+            );
+            if update >= 0 {
+                return Ok(());
+            }
+            if update != -Self::EPERM && update != -Self::EACCES {
+                Self::checked("update", update)?;
+            }
+            Self::unlink_key(key_id, Self::KEY_SPEC_USER_KEYRING)?;
+        }
+
         let key_id = Self::checked(
             "save",
             Self::raw_syscall5(
@@ -312,7 +329,7 @@ impl KeyringStore for LinuxApeKernelKeyringStore {
                 description.as_ptr() as isize,
                 value.as_ptr() as isize,
                 value.len() as isize,
-                Self::KEY_SPEC_USER_KEYRING,
+                Self::KEY_SPEC_PROCESS_KEYRING,
             ),
         )?;
         if let Err(error) = Self::checked(
@@ -326,9 +343,24 @@ impl KeyringStore for LinuxApeKernelKeyringStore {
                 0,
             ),
         ) {
-            let _ = Self::remove_key(key_id);
+            let _ = Self::unlink_key(key_id, Self::KEY_SPEC_PROCESS_KEYRING);
             return Err(error);
         }
+        if let Err(error) = Self::checked(
+            "link",
+            Self::raw_syscall5(
+                Self::SYS_KEYCTL,
+                Self::KEYCTL_LINK,
+                key_id,
+                Self::KEY_SPEC_USER_KEYRING,
+                0,
+                0,
+            ),
+        ) {
+            let _ = Self::unlink_key(key_id, Self::KEY_SPEC_PROCESS_KEYRING);
+            return Err(error);
+        }
+        let _ = Self::unlink_key(key_id, Self::KEY_SPEC_PROCESS_KEYRING);
         Ok(())
     }
 
@@ -339,7 +371,7 @@ impl KeyringStore for LinuxApeKernelKeyringStore {
         let Some(key_id) = Self::search(&description)? else {
             return Ok(false);
         };
-        Self::remove_key(key_id)?;
+        Self::unlink_key(key_id, Self::KEY_SPEC_USER_KEYRING)?;
         Ok(true)
     }
 }
