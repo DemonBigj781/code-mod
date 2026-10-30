@@ -1,7 +1,7 @@
 # Rustwright MCP source snapshot
 
-The files under `src/` are adapted from the native MCP server in
-`Skyvern-AI/rustwright` at commit
+The files under `src/` and the tool-catalog test fixture are adapted from the
+native MCP server in `Skyvern-AI/rustwright` at commit
 `7d8f4c092cfa3f26d5307b5385233160e70e86a2` (October 15, 2026).
 
 Code carries this source snapshot because the upstream `rustwright-mcp` package
