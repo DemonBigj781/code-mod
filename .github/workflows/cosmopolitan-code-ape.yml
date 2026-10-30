@@ -115,6 +115,11 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Install host keyring helper
         run: sudo apt-get update && sudo apt-get install -y keyutils
+      - name: Test native Rustwright MCP integration
+        working-directory: code-rs
+        run: |
+          cargo test --locked -p code-rustwright-mcp
+          cargo test --locked -p code-core --features browser-automation rustwright_mcp::tests::
       - name: Read pinned fork revision
         id: fork-pin
         run: echo "sha=$(python3 -c 'import json; print(json.load(open("scripts/cosmopolitan-code/pins.json"))["cosmopolitan_commit"])')" >>"$GITHUB_OUTPUT"
@@ -127,6 +132,12 @@ jobs:
         run: sh scripts/cosmopolitan-code/enable-ape-ci.sh
       - name: Build and smoke-test the x86-64 APE on Linux
         run: sh scripts/build-cosmopolitan-code.sh
+      - name: Smoke-test embedded Rustwright MCP with Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          browser=$(command -v google-chrome || command -v chromium || command -v chromium-browser)
+          RUSTWRIGHT_CHROMIUM="$browser" python3 scripts/cosmopolitan-code/check-rustwright-mcp.py o/cosmopolitan-code/code.com --exercise-browser
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cosmopolitan-code-ape
@@ -158,6 +169,8 @@ jobs:
           & $artifact --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $artifact --help > $null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/cosmopolitan-code/check-rustwright-mcp.py $artifact
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/cosmopolitan-code/check-history-worker.py $artifact
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

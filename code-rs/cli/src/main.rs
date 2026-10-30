@@ -30,6 +30,8 @@ use code_cli::secrets_cmd;
 use std::io::IsTerminal;
 mod bridge;
 mod llm;
+#[cfg(feature = "browser-automation")]
+mod rustwright_mcp;
 use llm::{LlmCli, run_llm};
 use code_common::CliConfigOverrides;
 use code_core::{entry_to_rollout_path, SessionCatalog, SessionQuery};
@@ -194,6 +196,11 @@ enum Subcommand {
 
     /// Manage Code Bridge subscription for this workspace.
     Bridge(BridgeCommand),
+
+    /// Internal: run Code's pinned native Rustwright MCP server.
+    #[cfg(feature = "browser-automation")]
+    #[clap(hide = true)]
+    RustwrightMcp(rustwright_mcp::RustwrightMcpArgs),
 }
 
 fn reject_local_provider_for_remote_control(
@@ -1084,6 +1091,10 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                 root_config_overrides.clone(),
             );
             run_llm(llm_cli).await?;
+        }
+        #[cfg(feature = "browser-automation")]
+        Some(Subcommand::RustwrightMcp(args)) => {
+            rustwright_mcp::run(args).await?;
         }
     }
 

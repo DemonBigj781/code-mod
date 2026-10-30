@@ -440,6 +440,27 @@ You can further customize how Code runs at the command line using the `--ask-for
 
 You can configure Code to use [MCP servers](https://modelcontextprotocol.io/about) to give Code access to external applications, resources, or services such as [Playwright](https://github.com/microsoft/playwright-mcp), [Figma](https://www.figma.com/blog/design-context-everywhere-you-build/), [documentation](https://context7.com/), and [more](https://github.com/mcp?utm_source=blog-source&utm_campaign=mcp-registry-server-launch-2025).
 
+### Built-in Rustwright
+
+Desktop builds with browser automation include Code's pinned native
+[Rustwright](https://github.com/Skyvern-AI/rustwright) MCP server without
+requiring a manual `[mcp_servers.rustwright]` entry. It runs inside the Code
+executable and does not require Node.js, npm, Python, or a separately installed
+MCP binary.
+
+Rustwright launches an existing Chrome or Chromium executable. It searches the
+standard platform locations and honors `RUSTWRIGHT_CHROMIUM`, `CHROME`, or
+`CHROMIUM` when an explicit executable is needed. Code does not download a
+browser automatically. `RUSTWRIGHT_MCP_CDP_ENDPOINT` can instead attach to an
+existing Chromium CDP endpoint; the upstream Rustwright environment variables
+for headers, timeouts, tool profiles, response limits, and screenshots remain
+available.
+
+Code confines Rustwright file operations to the active workspace, schedules its
+stateful tools one at a time, and keeps the existing native `browser` tool
+available while parity is evaluated. A user-defined MCP server named
+`rustwright` (case-insensitive) takes precedence over the built-in definition.
+
 ### Server transport configuration
 
 Each server may set `startup_timeout_sec` to adjust how long Code waits for it to start and respond to a tools listing. The default is `10` seconds.

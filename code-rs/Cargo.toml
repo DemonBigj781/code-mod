@@ -47,6 +47,7 @@ members = [
     "protocol",
     "protocol-ts",
     "rmcp-client",
+    "rustwright-mcp",
     "responses-api-proxy",
     "otel",
     "terminal-detection",
@@ -131,6 +132,7 @@ code-protocol = { path = "protocol" }
 code-protocol-ts = { path = "protocol-ts" }
 code-responses-api-proxy = { path = "responses-api-proxy" }
 code-rmcp-client = { path = "rmcp-client" }
+code-rustwright-mcp = { path = "rustwright-mcp" }
 code-otel = { path = "otel" }
 code-terminal-detection = { path = "terminal-detection", package = "codex-terminal-detection" }
 code-tui = { path = "tui", default-features = false }

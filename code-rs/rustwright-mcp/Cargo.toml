@@ -1,0 +1,21 @@
+[package]
+name = "code-rustwright-mcp"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = "=0.22.1"
+rmcp = { version = "=2.2.0", default-features = false, features = ["server", "transport-io"] }
+rustwright = { git = "https://github.com/Skyvern-AI/rustwright", rev = "7d8f4c092cfa3f26d5307b5385233160e70e86a2", package = "rustwright" }
+rustwright-agent = { git = "https://github.com/Skyvern-AI/rustwright", rev = "7d8f4c092cfa3f26d5307b5385233160e70e86a2", package = "rustwright-agent" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+rustwright-agent = { git = "https://github.com/Skyvern-AI/rustwright", rev = "7d8f4c092cfa3f26d5307b5385233160e70e86a2", package = "rustwright-agent", features = ["test-support"] }

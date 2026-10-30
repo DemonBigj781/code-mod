@@ -13,7 +13,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["managed-network-proxy", "browser-automation", "code-tui/code-fork", "code-tui/native-picker"]
-browser-automation = ["code-core/browser-automation", "code-login/browser-automation", "code-tui/browser-automation"]
+browser-automation = ["dep:code-rustwright-mcp", "code-core/browser-automation", "code-login/browser-automation", "code-tui/browser-automation"]
 cosmopolitan-ape = ["code-core/cosmopolitan-ape", "code-tui/cosmopolitan-ape", "code-tui/code-fork", "browser-automation", "managed-network-proxy"]
 managed-network-proxy = ["code-core/managed-network-proxy", "code-tui/managed-network-proxy"]
 
@@ -37,6 +37,7 @@ code-keyring-store = { workspace = true }
 code-login = { workspace = true }
 code-mcp-server = { workspace = true }
 code-rmcp-client = { workspace = true }
+code-rustwright-mcp = { workspace = true, optional = true }
 code-process-hardening = { workspace = true }
 code-protocol = { workspace = true }
 code-secrets = { workspace = true }

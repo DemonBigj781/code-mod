@@ -263,6 +263,24 @@ impl Runner<'_> {
         let mut shell_style_mcp_exclude: HashSet<String> = HashSet::new();
         let mut effective_mcp_servers = updated_config.mcp_servers.clone();
 
+        #[cfg(feature = "browser-automation")]
+        match std::env::current_exe() {
+            Ok(code_executable) => {
+                crate::rustwright_mcp::insert_builtin_server(
+                    &mut effective_mcp_servers,
+                    &updated_config.cwd,
+                    &code_executable,
+                );
+            }
+            Err(err) => {
+                self.send_warning_event(
+                    &submission_id,
+                    format!("Rustwright MCP is unavailable because Code could not resolve its executable path: {err}"),
+                )
+                .await;
+            }
+        }
+
         if let Some((_, active_entry)) = active_profile {
             let profile = active_entry.config.clone();
             shell_style_mcp_include = profile

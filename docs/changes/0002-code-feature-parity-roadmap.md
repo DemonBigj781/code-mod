@@ -516,35 +516,33 @@ by this validation record.
         agent context, and model/tool command execution honoring safety and
         shell-profile policy.
 
-- [ ] Evaluate Rustwright as a built-in browser automation tool.
-  - [ ] Review `https://github.com/Skyvern-AI/rustwright` as a candidate for
-        Code's browser tool/runtime surface. It advertises Playwright-compatible
-        Python/Node APIs on a native Rust CDP engine, plus agent-focused CLI and
-        standalone MCP package options.
-  - [ ] Include `https://github.com/Pedrvisk/camoufox-rust` in the same browser
-        runtime evaluation as a Camoufox/Firefox-oriented companion or
-        alternative. It advertises Rust-managed Camoufox binaries, fingerprint
-        and persona handling, native Juggler automation, CLI launch/verify flows,
-        and persistence backends.
-  - [ ] Include `https://github.com/9prodhi/camoufox-rs` in the Camoufox track
-        as a pure Rust Juggler-protocol client candidate with process launch,
-        pipe transport, session routing, Browser/Context/Page-style APIs, and an
-        optional daemon CLI.
-  - [ ] Include the EvilFox Camoufox anti-detect change
-        `https://github.com/Evil0ctal/EvilFox/commit/2e933e16ef0fb4253af4d8fbe99198ec2c6f32d4`
-        as a concrete Camoufox hardening input. The commit advertises improved
-        resistance to advanced bot detection and changes Camoufox anti-detect
-        helpers plus browser property configuration.
-  - [ ] Include `https://github.com/adambenhassen/crw-camofox` in the adjacent
-        crawler/search-tool evaluation as a self-hosted, Firecrawl-compatible
-        Rust service with API and MCP server surfaces for agent workflows.
-  - [ ] Compare Rustwright against the existing `code-rs/browser` runtime and
-        `browser` OpenAI tool, and compare Camoufox against that same surface,
-        before adding dependencies or replacing control paths.
-  - [ ] Decide whether integration should be native crate/API, bundled CLI, or
-        MCP-backed, and verify Chromium install, sandboxing, session ownership,
-        screenshots, console events, Firefox/Camoufox compatibility, anti-detect
-        privacy/safety policy, and resource limits on the Steam Deck.
+- [ ] Integrate Rustwright as built-in native browser automation.
+  - [x] Pin `Skyvern-AI/rustwright` at commit
+        `7d8f4c092cfa3f26d5307b5385233160e70e86a2` and embed its native MCP server
+        behind the internal `code rustwright-mcp` command. Carry the minimal MCP
+        source snapshot because upstream currently publishes that package only
+        as a binary target; keep its engine and agent crates pinned Git
+        dependencies.
+  - [x] Remove the unfinished Microsoft Playwright Node/npm bootstrap and its
+        runtime download, cache, and install-lock path. Rustwright must not add
+        a second JavaScript runtime to Code.
+  - [x] Register a built-in `rustwright` MCP server that invokes the current Code
+        executable, confines file operations to the active workspace, schedules
+        calls one at a time, and preserves a case-insensitive user-defined server
+        override.
+  - [x] Preserve the existing `code-rs/browser` runtime and native `browser` tool
+        while Rustwright parity is evaluated instead of replacing a working
+        control path speculatively.
+  - [ ] Validate the pinned MCP handshake, complete tool discovery, a
+        representative browser call, clean shutdown, and the Cosmopolitan APE on
+        Linux and Windows through GitHub Actions.
+  - [ ] Compare navigation, snapshots, screenshots, console and network events,
+        uploads, downloads, dialogs, tabs, cancellation, browser discovery, and
+        cleanup against the existing browser tool before deciding whether either
+        surface should replace the other.
+  - [ ] Keep Camoufox, crawler, and anti-detect alternatives as separate future
+        evaluations; they are not prerequisites for the native Rustwright MCP
+        integration.
 
 - [ ] Add an upstream/OpenAI Codex update strategy for internal borrowed code.
   - [ ] Treat `.github/workflows/upstream-merge.yml` as existing infrastructure
