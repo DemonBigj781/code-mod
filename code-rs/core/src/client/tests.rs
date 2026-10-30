@@ -385,6 +385,33 @@ async fn collect_events(
 }
 
 #[tokio::test]
+async fn silent_response_stream_fails_within_the_provider_idle_timeout() {
+    let stream = futures::stream::pending::<Result<Bytes>>();
+    let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(1);
+
+    super::process_sse(
+        stream,
+        tx,
+        std::time::Duration::from_millis(25),
+        disabled_debug_logger(),
+        "silent-request".to_owned(),
+        None,
+        Arc::new(RwLock::new(super::StreamCheckpoint::default())),
+    )
+    .await;
+
+    assert!(
+        matches!(
+            rx.recv().await,
+            Some(Err(CodexErr::Stream(message, _, Some(request_id))))
+                if message.contains("timeout waiting for SSE")
+                    && request_id == "silent-request"
+        ),
+        "a stream that opens but never yields data must fail instead of hanging forever"
+    );
+}
+
+#[tokio::test]
 async fn sse_transport_error_flushes_partial_debug_log() {
     let temp = tempfile::tempdir().expect("temporary debug log root");
     let logger = Arc::new(Mutex::new(

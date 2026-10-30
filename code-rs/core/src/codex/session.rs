@@ -1427,6 +1427,9 @@ impl Session {
             current_task.abort(TurnAbortReason::Replaced);
         }
         state.current_task = Some(agent);
+        if let Some(current_task) = state.current_task.as_mut() {
+            current_task.start();
+        }
     }
 
     pub(super) fn start_operator_tool(
@@ -1442,10 +1445,11 @@ impl Session {
         // Standalone tool events need a fresh ordering slot too; reusing the
         // previous provider request would insert them into earlier history.
         state.request_ordinal = state.request_ordinal.saturating_add(1);
-        let (task, start) = AgentTask::operator_tool(Arc::clone(self), sub_id, name, arguments);
+        let task = AgentTask::operator_tool(Arc::clone(self), sub_id, name, arguments);
         state.current_task = Some(task);
-        drop(state);
-        let _ = start.send(());
+        if let Some(current_task) = state.current_task.as_mut() {
+            current_task.start();
+        }
         true
     }
 

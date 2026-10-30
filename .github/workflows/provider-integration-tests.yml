@@ -3,6 +3,7 @@ name: Provider Integration Tests
 on:
   push:
     branches:
+      - Main
       - main
     paths:
       - "code-rs/**"
@@ -115,6 +116,16 @@ jobs:
           set -eu
           cargo test --frozen --locked -j1 -p code-core direct_model_provider_ -- --nocapture
           cargo test --frozen --locked -j1 -p code-core --test remote_models_manager remote_models_provider_ -- --nocapture
+
+      - name: Test provider stream and task liveness
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
+        shell: sh
+        run: |
+          set -eu
+          cargo test --frozen --locked -j1 -p code-core client::tests::silent_response_stream_fails_within_the_provider_idle_timeout --lib -- --exact --test-threads=1
+          cargo test --frozen --locked -j1 -p code-core codex::streaming::agent::tests::spawned_task_waits_until_ownership_is_registered --lib -- --exact --test-threads=1
+          cargo test --frozen --locked -j1 -p code-core --test operator_input_delivery operator_input_preempts_blocked_provider -- --test-threads=1
+          cargo test --frozen --locked -j1 -p code-core --test agent_completion_wake -- --test-threads=1
 
       - name: Test direct provider TUI behavior
         working-directory: ${{ env.RUST_WORKSPACE_DIR }}

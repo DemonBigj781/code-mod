@@ -1,4 +1,5 @@
 use super::*;
+use std::future::Future;
 
 mod developer_message;
 mod review;
@@ -27,9 +28,41 @@ pub(in crate::codex) struct AgentTask {
     sess: Arc<Session>,
     pub(in crate::codex) sub_id: String,
     handle: AbortHandle,
+    start_gate: TaskStartGate,
     kind: AgentTaskKind,
     pub(in crate::codex) _origin: TaskOriginKind,
     pub(in crate::codex) _visible_to_user: bool,
+}
+
+struct TaskStartGate {
+    sender: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl TaskStartGate {
+    fn start(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
+fn spawn_gated_task<F>(task: F) -> (AbortHandle, TaskStartGate)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(async move {
+        if receiver.await.is_ok() {
+            task.await;
+        }
+    })
+    .abort_handle();
+    (
+        handle,
+        TaskStartGate {
+            sender: Some(sender),
+        },
+    )
 }
 
 impl AgentTask {
@@ -38,24 +71,21 @@ impl AgentTask {
         sub_id: String,
         name: String,
         arguments: Option<serde_json::Value>,
-    ) -> (Self, tokio::sync::oneshot::Sender<()>) {
-        let (start, ready) = tokio::sync::oneshot::channel();
+    ) -> Self {
         let session = Arc::clone(&sess);
         let id = sub_id.clone();
-        let handle = tokio::spawn(async move {
-            // Register ownership before a fast tool can finish and remove itself.
-            if ready.await.is_ok() {
-                super::super::operator_tools::run(session, id, name, arguments).await;
-            }
-        }).abort_handle();
-        (Self {
+        let (handle, start_gate) = spawn_gated_task(async move {
+            super::super::operator_tools::run(session, id, name, arguments).await;
+        });
+        Self {
             sess,
             sub_id,
             handle,
+            start_gate,
             kind: AgentTaskKind::OperatorTool,
             _origin: TaskOriginKind::OperatorTool,
             _visible_to_user: true,
-        }, start)
+        }
     }
 
     pub(in crate::codex) fn spawn(
@@ -66,19 +96,17 @@ impl AgentTask {
         origin: TaskOriginKind,
         visible_to_user: bool,
     ) -> Self {
-        let handle = {
-            let sess_clone = Arc::clone(&sess);
-            let tc_clone = Arc::clone(&turn_context);
-            let sub_clone = sub_id.clone();
-            tokio::spawn(async move {
-                run::run_agent(sess_clone, tc_clone, sub_clone, input).await;
-            })
-            .abort_handle()
-        };
+        let sess_clone = Arc::clone(&sess);
+        let tc_clone = Arc::clone(&turn_context);
+        let sub_clone = sub_id.clone();
+        let (handle, start_gate) = spawn_gated_task(async move {
+            run::run_agent(sess_clone, tc_clone, sub_clone, input).await;
+        });
         Self {
             sess,
             sub_id,
             handle,
+            start_gate,
             kind: AgentTaskKind::Regular,
             _origin: origin,
             _visible_to_user: visible_to_user,
@@ -91,25 +119,17 @@ impl AgentTask {
         sub_id: String,
         input: Vec<InputItem>,
     ) -> Self {
-        let handle = {
-            let sess_clone = Arc::clone(&sess);
-            let tc_clone = Arc::clone(&turn_context);
-            let sub_clone = sub_id.clone();
-            tokio::spawn(async move {
-                compact::run_compact_task(
-                    sess_clone,
-                    tc_clone,
-                    sub_clone,
-                    input,
-                )
-                .await;
-            })
-            .abort_handle()
-        };
+        let sess_clone = Arc::clone(&sess);
+        let tc_clone = Arc::clone(&turn_context);
+        let sub_clone = sub_id.clone();
+        let (handle, start_gate) = spawn_gated_task(async move {
+            compact::run_compact_task(sess_clone, tc_clone, sub_clone, input).await;
+        });
         Self {
             sess,
             sub_id,
             handle,
+            start_gate,
             kind: AgentTaskKind::Compact,
             _origin: TaskOriginKind::ManualCompact,
             _visible_to_user: false,
@@ -122,23 +142,25 @@ impl AgentTask {
         sub_id: String,
         input: Vec<InputItem>,
     ) -> Self {
-        let handle = {
-            let sess_clone = Arc::clone(&sess);
-            let tc_clone = Arc::clone(&turn_context);
-            let sub_clone = sub_id.clone();
-            tokio::spawn(async move {
-                run::run_agent(sess_clone, tc_clone, sub_clone, input).await;
-            })
-            .abort_handle()
-        };
+        let sess_clone = Arc::clone(&sess);
+        let tc_clone = Arc::clone(&turn_context);
+        let sub_clone = sub_id.clone();
+        let (handle, start_gate) = spawn_gated_task(async move {
+            run::run_agent(sess_clone, tc_clone, sub_clone, input).await;
+        });
         Self {
             sess,
             sub_id,
             handle,
+            start_gate,
             kind: AgentTaskKind::Review,
             _origin: TaskOriginKind::Review,
             _visible_to_user: true,
         }
+    }
+
+    pub(in crate::codex) fn start(&mut self) {
+        self.start_gate.start();
     }
 
     pub(in crate::codex) fn abort(self, reason: TurnAbortReason) {
@@ -157,5 +179,39 @@ impl AgentTask {
                 sess.send_event(event).await;
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+    use tokio::time::{Duration, timeout};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn spawned_task_waits_until_ownership_is_registered() {
+        let (ran_tx, mut ran_rx) = mpsc::channel(1);
+        let (_handle, mut start_gate) = spawn_gated_task(async move {
+            ran_tx
+                .send(())
+                .await
+                .expect("test receiver should remain open");
+        });
+
+        assert!(
+            timeout(Duration::from_millis(25), ran_rx.recv())
+                .await
+                .is_err(),
+            "a newly spawned task must not run before Session registers ownership"
+        );
+
+        start_gate.start();
+
+        assert_eq!(
+            timeout(Duration::from_secs(1), ran_rx.recv())
+                .await
+                .expect("started task should run promptly"),
+            Some(())
+        );
     }
 }
