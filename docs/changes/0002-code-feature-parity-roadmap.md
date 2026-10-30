@@ -533,7 +533,7 @@ by this validation record.
   - [x] Preserve the existing `code-rs/browser` runtime and native `browser` tool
         while Rustwright parity is evaluated instead of replacing a working
         control path speculatively.
-  - [ ] Validate the pinned MCP handshake, complete tool discovery, a
+  - [x] Validate the pinned MCP handshake, complete tool discovery, a
         representative browser call, clean shutdown, and the Cosmopolitan APE on
         Linux and Windows through GitHub Actions.
   - [ ] Compare navigation, snapshots, screenshots, console and network events,
