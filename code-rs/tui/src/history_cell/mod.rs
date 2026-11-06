@@ -80,7 +80,6 @@ pub(crate) use exec_merged::{
 pub(crate) use exec_helpers::{
     action_enum_from_parsed,
     emphasize_shell_command_name,
-    exec_command_lines,
     exec_render_parts_parsed,
     exec_render_parts_parsed_with_meta,
     first_context_path,

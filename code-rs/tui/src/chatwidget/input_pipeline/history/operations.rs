@@ -24,10 +24,26 @@ impl ChatWidget<'_> {
         &mut self,
         idx: usize,
         mut cell: Box<dyn HistoryCell>,
-        record: HistoryDomainRecord,
+        mut record: HistoryDomainRecord,
     ) {
         if idx >= self.history_cells.len() {
             return;
+        }
+
+        if let Some(started_at) = self.history_cells[idx]
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .map(|running| running.state().started_at)
+        {
+            if let Some(completed) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::ToolCallCell>()
+            {
+                completed.state_mut().started_at = Some(started_at);
+            }
+            if let HistoryDomainRecord::ToolCall(state) = &mut record {
+                state.started_at = Some(started_at);
+            }
         }
 
         let record_idx = self
@@ -55,6 +71,17 @@ impl ChatWidget<'_> {
     pub(in crate::chatwidget) fn history_replace_at(&mut self, idx: usize, mut cell: Box<dyn HistoryCell>) {
         if idx >= self.history_cells.len() {
             return;
+        }
+
+        if let Some(started_at) = self.history_cells[idx]
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .map(|running| running.state().started_at)
+            && let Some(completed) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::ToolCallCell>()
+        {
+            completed.state_mut().started_at = Some(started_at);
         }
 
         let old_id = self.history_cell_ids.get(idx).and_then(|id| *id);

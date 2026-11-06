@@ -1,7 +1,11 @@
 //! Operator-managed SSH connections. This module never opens a network connection.
 
 use anyhow::{Context, Result, bail, ensure};
-use code_keyring_store::{KeyringStore, best_keyring_store, store_key_for_code_home};
+use code_keyring_store::{
+    KeyringStore,
+    best_keyring_store_for_code_home,
+    store_key_for_code_home,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -368,7 +372,7 @@ impl Registry {
     pub fn new(home: &Path) -> Self {
         Self {
             home: home.to_owned(),
-            keyring: best_keyring_store(),
+            keyring: best_keyring_store_for_code_home(home),
         }
     }
 

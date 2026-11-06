@@ -103,15 +103,23 @@ impl ChatWidget<'_> {
                 return stub(message, parent_id);
             }
         }
-        let mut options = CreateGhostCommitOptions::new(self.config.cwd.as_path()).message(message);
+        let scope = self.repository_scope();
+        let mut repo_paths = scope.repositories;
+        if repo_paths.len() != 1 {
+            return Err(GitToolingError::NotAGitRepository {
+                path: scope.root,
+            });
+        }
+        let repo_path = repo_paths.remove(0);
+        let mut options = CreateGhostCommitOptions::new(repo_path.as_path()).message(message);
         if let Some(parent_commit) = parent {
             options = options.parent(parent_commit.id());
         }
-        let hook_repo_follow = self.config.cwd.clone();
+        let hook_repo_follow = repo_path.clone();
         let hook = move || bump_snapshot_epoch_for(&hook_repo_follow);
         let result = create_ghost_commit(&options.post_commit_hook(&hook));
         if result.is_ok() {
-            bump_snapshot_epoch_for(&self.config.cwd);
+            bump_snapshot_epoch_for(&repo_path);
         }
         result
     }
@@ -142,7 +150,13 @@ impl ChatWidget<'_> {
 
     pub(crate) fn spawn_auto_review_baseline_capture(&self) {
         let turn_sequence = self.turn_sequence;
-        let repo_path = self.config.cwd.clone();
+        let Some(repo_path) = self.auto_review_git_root() else {
+            tracing::debug!(
+                workspace = %self.config.cwd.display(),
+                "auto review baseline capture skipped; workspace review mode does not require Git"
+            );
+            return;
+        };
         let app_event_tx = self.app_event_tx.clone();
 
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
@@ -207,7 +221,17 @@ impl ChatWidget<'_> {
         if let Some(stub) = GIT_DIFF_NAME_ONLY_BETWEEN_STUB.lock().unwrap().as_ref() {
             return stub(base_commit.to_string(), head_commit.to_string());
         }
-        self.run_git_command(
+        let scope = self.repository_scope();
+        if let Some(error) = scope.error {
+            return Err(error);
+        }
+        let mut repo_paths = scope.repositories;
+        if repo_paths.len() != 1 {
+            return Err("auto review diff requires exactly one repository".to_owned());
+        }
+        let repo_path = repo_paths.remove(0);
+        self.run_git_command_at(
+            &repo_path,
             ["diff", "--name-only", base_commit, head_commit],
             |stdout| {
                 let changes = stdout

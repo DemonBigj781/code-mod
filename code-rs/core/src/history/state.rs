@@ -492,6 +492,8 @@ pub struct ToolCallState {
     pub id: HistoryId,
     #[serde(default)]
     pub call_id: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<SystemTime>,
     pub status: ToolStatus,
     pub title: String,
     pub duration: Option<Duration>,
@@ -2900,6 +2902,7 @@ mod tests {
         let tool_id = state.push(HistoryRecord::ToolCall(ToolCallState {
             id: HistoryId::ZERO,
             call_id: Some("tool-call".into()),
+            started_at: Some(SystemTime::UNIX_EPOCH),
             status: ToolStatus::Running,
             title: "tool".into(),
             duration: None,
@@ -2998,6 +3001,7 @@ mod tests {
         records.push(HistoryRecord::ToolCall(ToolCallState {
             id: HistoryId(5),
             call_id: Some("tool-call".into()),
+            started_at: Some(now),
             status: ToolStatus::Success,
             title: "ToolCall".into(),
             duration: Some(Duration::from_secs(2)),

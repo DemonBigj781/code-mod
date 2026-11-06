@@ -30,9 +30,9 @@ impl BrowserSessionCell {
             return;
         }
         if let Some(p) = picker {
-            *slot = Some(p);
+            *slot = Some(crate::tui::force_text_image_protocol(p));
         } else {
-            *slot = Some(Picker::from_fontsize(font_size));
+            *slot = Some(crate::tui::text_image_picker(font_size));
         }
     }
 
@@ -71,12 +71,12 @@ impl BrowserSessionCell {
     fn ensure_picker(&self) -> Picker {
         let mut picker_ref = self.cached_picker.borrow_mut();
         if picker_ref.is_none() {
-            *picker_ref = Some(Picker::from_fontsize((8, 16)));
+            *picker_ref = Some(crate::tui::text_image_picker((8, 16)));
         }
         picker_ref
             .as_ref()
             .cloned()
-            .unwrap_or_else(|| Picker::from_fontsize((8, 16)))
+            .unwrap_or_else(|| crate::tui::text_image_picker((8, 16)))
     }
 
     fn compute_screenshot_rows(&self, screenshot_cols: usize) -> Option<usize> {

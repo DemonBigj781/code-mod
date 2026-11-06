@@ -7,12 +7,22 @@ use super::BrowserManager;
 impl BrowserManager {
     /// Execute an arbitrary CDP command against the active page session.
     pub async fn execute_cdp(&self, method: &str, params: Value) -> Result<Value> {
+        if !self.is_external_connection().await {
+            return Err(BrowserError::ConfigError(format!(
+                "CDP command {method} is only available for an external Chrome connection; the built-in browser uses Firefox/Camoufox with Juggler"
+            )));
+        }
         let page = self.get_or_create_page().await?;
         page.execute_cdp_raw(method, params).await
     }
 
     /// Execute an arbitrary CDP command at the browser (no session) scope.
     pub async fn execute_cdp_browser(&self, method: &str, params: Value) -> Result<Value> {
+        if !self.is_external_connection().await {
+            return Err(BrowserError::ConfigError(format!(
+                "CDP browser command {method} is only available for an external Chrome connection; the built-in browser uses Firefox/Camoufox with Juggler"
+            )));
+        }
         // Ensure a browser is connected.
         self.ensure_browser().await?;
         let browser_guard = self.browser.lock().await;
@@ -54,4 +64,3 @@ impl BrowserManager {
         Ok(resp.result)
     }
 }
-

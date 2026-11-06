@@ -137,41 +137,84 @@ pub(super) async fn selector_rect_after_scroll(
     }
 }
 
-pub(super) async fn node_id_for_selector(
+pub(super) async fn inspect_dom_target(
     browser_manager: &code_browser::BrowserManager,
-    selector: &str,
-) -> Result<u64, String> {
-    use serde_json::json;
-
-    let selector = selector.trim();
-    if selector.is_empty() {
-        return Err("selector must be non-empty".to_owned());
-    }
-
-    let doc = browser_manager
-        .execute_cdp("DOM.getDocument", json!({}))
+    selector: Option<&str>,
+    id: Option<&str>,
+    coordinates: Option<(f64, f64)>,
+) -> Result<Value, String> {
+    let selector = selector.map(str::trim).filter(|value| !value.is_empty());
+    let id = id.map(str::trim).filter(|value| !value.is_empty());
+    let selector_json = serde_json::to_string(&selector)
+        .map_err(|error| format!("Failed to encode selector: {error}"))?;
+    let id_json =
+        serde_json::to_string(&id).map_err(|error| format!("Failed to encode id: {error}"))?;
+    let coordinates_json = serde_json::to_string(&coordinates)
+        .map_err(|error| format!("Failed to encode coordinates: {error}"))?;
+    let script = format!(
+        r#"(() => {{
+            try {{
+                const selector = {selector_json};
+                const id = {id_json};
+                const coordinates = {coordinates_json};
+                let element = null;
+                if (id !== null) element = document.getElementById(id);
+                else if (selector !== null) element = document.querySelector(selector);
+                else if (coordinates !== null) element = document.elementFromPoint(coordinates[0], coordinates[1]);
+                if (!element) return {{ok:false,error:'target element not found'}};
+                try {{ element.scrollIntoView({{block:'center',inline:'center'}}); }} catch (_) {{}}
+                const rect = element.getBoundingClientRect();
+                const attributes = [];
+                for (const attribute of element.attributes || []) attributes.push(attribute.name, attribute.value);
+                let matchedCssRules = 0;
+                for (const sheet of document.styleSheets || []) {{
+                    let rules;
+                    try {{ rules = sheet.cssRules || []; }} catch (_) {{ continue; }}
+                    for (const rule of rules) {{
+                        if (!rule.selectorText) continue;
+                        try {{ if (element.matches(rule.selectorText)) matchedCssRules++; }} catch (_) {{}}
+                    }}
+                }}
+                let highlight = document.getElementById('__code_inspect_highlight');
+                if (!highlight) {{
+                    highlight = document.createElement('div');
+                    highlight.id = '__code_inspect_highlight';
+                    Object.assign(highlight.style, {{
+                        position:'fixed', pointerEvents:'none', zIndex:'2147483646',
+                        border:'2px solid rgba(255,229,153,.95)',
+                        background:'rgba(111,168,220,.20)', boxSizing:'border-box'
+                    }});
+                    document.documentElement.appendChild(highlight);
+                }}
+                Object.assign(highlight.style, {{
+                    left:`${{rect.left}}px`, top:`${{rect.top}}px`,
+                    width:`${{rect.width}}px`, height:`${{rect.height}}px`
+                }});
+                return {{
+                    ok:true,
+                    tagName:element.tagName || '',
+                    attributes,
+                    outerHTML:element.outerHTML || '',
+                    boxModel:{{x:rect.x,y:rect.y,width:rect.width,height:rect.height}},
+                    matchedCssRules
+                }};
+            }} catch (error) {{
+                return {{ok:false,error:String(error)}};
+            }}
+        }})()"#
+    );
+    let raw = browser_manager
+        .execute_javascript(&script)
         .await
-        .map_err(|e| format!("Failed to get document: {e}"))?;
-    let root_node_id = doc
-        .get("root")
-        .and_then(|r| r.get("nodeId"))
-        .and_then(serde_json::Value::as_u64)
-        .ok_or_else(|| "DOM.getDocument missing root.nodeId".to_owned())?;
-
-    let query = browser_manager
-        .execute_cdp(
-            "DOM.querySelector",
-            json!({"nodeId": root_node_id, "selector": selector}),
-        )
-        .await
-        .map_err(|e| format!("Failed to query selector: {e}"))?;
-    let node_id = query
-        .get("nodeId")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    if node_id == 0 {
-        return Err("selector not found".to_owned());
+        .map_err(|error| format!("Failed to inspect DOM target: {error}"))?;
+    let value = unwrap_execute_javascript_value(raw)?;
+    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        Ok(value)
+    } else {
+        Err(value
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("target element not found")
+            .to_owned())
     }
-    Ok(node_id)
 }
-

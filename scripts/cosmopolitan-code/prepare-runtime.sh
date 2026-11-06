@@ -1,10 +1,8 @@
+# shellcheck shell=sh
 # Shared source validation, resource limits, and runtime preparation.
 pins="$support_dir/pins.json"
 cosmo_source="$repo_root/o/cosmopolitan-source"
-build_root="$repo_root/o/rust-ape-source"
 run_script="$cosmo_source/third_party/rust_ape/run.sh"
-sdk="$build_root/sdk"
-sdk_bin="$sdk/vendor/cosmocc/bin"
 
 read_pin() {
     python3 - "$pins" "$1" <<'PY'
@@ -20,12 +18,32 @@ cosmo_commit=$(read_pin cosmopolitan_commit)
 cosmo_repository=$(read_pin cosmopolitan_repository)
 rust_ape_commit=$(read_pin rust_ape_commit)
 artifact_name=$(read_pin artifact_name)
+build_root=${COSMO_RUST_BUILD_ROOT:-"$repo_root/o/rust-ape-source-$cosmo_commit-$rust_ape_commit"}
+sdk="$build_root/sdk"
+sdk_bin="$sdk/vendor/cosmocc/bin"
+compiler_bootstrap_metadata="$sdk/generated/local-cosmocc-bootstrap.json"
+local_cosmo_root=${COSMOPOLITAN_SOURCE_ROOT:-"$HOME/projects/cosmo"}
+local_compiler_archive=${COSMOPOLITAN_BOOTSTRAP_SDK:-"$local_cosmo_root/o/toolchain/compiler-payload/cosmocc-sdk.zip"}
+local_compiler_provenance=${COSMOPOLITAN_BOOTSTRAP_PROVENANCE:-"$(dirname "$local_compiler_archive")/BUILD.json"}
 source_commit=$(git -C "$repo_root" rev-parse HEAD)
+source_mode=${COSMOPOLITAN_CODE_SOURCE_MODE:-clean}
 
-if [ -n "$(git -C "$repo_root" status --porcelain)" ]; then
-    echo "Refusing to build a prerelease from a dirty source tree." >&2
-    exit 1
-fi
+case "$source_mode" in
+    clean)
+        source_clean=true
+        if [ -n "$(git -C "$repo_root" status --porcelain)" ]; then
+            echo "Refusing to build a prerelease from a dirty source tree." >&2
+            exit 1
+        fi
+        ;;
+    working-tree)
+        source_clean=false
+        ;;
+    *)
+        echo "Unsupported Cosmopolitan Code source mode: $source_mode" >&2
+        exit 1
+        ;;
+esac
 
 if [ ! -f "$run_script" ]; then
     printf 'Pinned Cosmopolitan sources are missing. Fetch %s at %s into %s first.\n' \
@@ -82,9 +100,12 @@ prepare_runtime() {
         cmp "$runtime_output/fork-runtime.json" "$sdk/generated/fork-runtime.json"
         return
     fi
-    if [ ! -f "$sdk/generated/x86_64-unknown-linux-musl.json" ] || [ ! -x "$sdk_bin/apelink" ]; then
-        python3 "$support_dir/cache_cosmocc.py" \
-            "$cosmo_source/third_party/rust_ape/upstream/xtask/src/config.rs" "$sdk/cache"
+    if [ ! -f "$sdk/generated/x86_64-unknown-linux-musl.json" ] || \
+        [ ! -x "$sdk_bin/apelink" ] || [ ! -f "$compiler_bootstrap_metadata" ]; then
+        python3 "$support_dir/stage_local_cosmocc.py" \
+            "$local_compiler_archive" "$local_compiler_provenance" \
+            "$cosmo_source/third_party/rust_ape/upstream/xtask/src/config.rs" \
+            "$pins" "$sdk"
         bash "$run_script" setup
     fi
 

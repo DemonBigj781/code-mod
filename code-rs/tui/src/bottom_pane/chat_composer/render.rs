@@ -179,8 +179,9 @@ impl WidgetRef for ChatComposer {
         // Implementation notes:
         // - We compute the visible cursor position using the same `state` (scroll) used to
         //   render the textarea so the overlay aligns with wrapped lines.
-        // - We paint the underlying cell with bg=theme.cursor and fg=theme.background.
-        //   This provides contrast regardless of light/dark theme.
+        // - We always paint an explicit insertion marker. Merely tinting the cell under an
+        //   existing character is too subtle when a terminal temporarily hides its hardware
+        //   cursor, which made the caret appear only at the blank cell after the text.
         // - The hardware cursor is still positioned via `frame.set_cursor_position` at the
         //   app layer; this overlay ensures visibility independent of terminal settings.
         let state_snapshot = *state;
@@ -192,13 +193,7 @@ impl WidgetRef for ChatComposer {
             let theme = crate::theme::current_theme();
             let cursor_bg = theme.cursor;
             if let Some(cell) = buf.cell_mut((cx, cy)) {
-                if cell.symbol() == " " {
-                    cell.set_symbol("▌");
-                }
-                // Only tint the background so the foreground glyph stays intact. Some
-                // terminals (e.g. GNOME Terminal/VTE) temporarily hide the hardware
-                // cursor while processing arrow keys; preserving the foreground color
-                // keeps the caret location visible instead of flashing blank cells.
+                cell.set_symbol("▌");
                 cell.set_bg(cursor_bg);
                 let fg_bg_ratio = crate::theme::contrast_ratio(theme.background, cursor_bg);
                 let fg_text_ratio = crate::theme::contrast_ratio(theme.text_bright, cursor_bg);

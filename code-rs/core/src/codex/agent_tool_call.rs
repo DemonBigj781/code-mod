@@ -836,7 +836,8 @@ pub(crate) async fn handle_run_agent(
                     crate::agent_tool::AgentCreateRequest {
                         owner_session_id: Some(sess.id), model: model.clone(), name: agent_name,
                         prompt: params.task, context: Some(parent_handoff), output_goal: None,
-                        files: Vec::new(), read_only: config.read_only, batch_id: Some(batch_id.clone()),
+                        files: Vec::new(), read_only: config.read_only, working_dir: None,
+                        batch_id: Some(batch_id.clone()),
                         config: None, worktree_branch: None, worktree_base: None, source_kind: None,
                         reasoning_effort: sess.model_reasoning_effort.into(),
                     }, config.clone(),

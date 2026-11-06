@@ -295,7 +295,7 @@ pub(crate) enum AppEvent {
     /// Background ghost snapshot job finished (success or failure).
     GhostSnapshotFinished {
         job_id: u64,
-        result: Result<GhostCommit, GitToolingError>,
+        result: Result<Vec<(PathBuf, GhostCommit)>, GitToolingError>,
         elapsed: Duration,
     },
 

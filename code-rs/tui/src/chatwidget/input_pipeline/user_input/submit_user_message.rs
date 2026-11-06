@@ -1,3 +1,12 @@
+fn direct_project_alias_name(message: &str, custom_command_handled: bool) -> Option<&str> {
+    if custom_command_handled {
+        return None;
+    }
+    let (name, args) = crate::slash_command::parse_slash_name(message)?;
+    let is_builtin = name.to_ascii_lowercase().parse::<SlashCommand>().is_ok();
+    (args.is_empty() && !is_builtin).then_some(name)
+}
+
 impl ChatWidget<'_> {
     pub(in super::super) fn submit_user_message(&mut self, user_message: UserMessage) {
         if self.layout.scroll_offset.get() > 0 {
@@ -75,6 +84,7 @@ impl ChatWidget<'_> {
             return;
         }
         let original_text = message.display_text.clone();
+        let mut custom_command_handled = false;
 
         let mut submitted_cli = false;
         let manual_edit_pending = self.auto_state.is_paused_manual()
@@ -189,6 +199,7 @@ impl ChatWidget<'_> {
         // Expand user-defined custom prompts, supporting both "/prompts:name" and "/name" forms.
         match prompt_args::expand_custom_prompt(&text_only, self.bottom_pane.custom_prompts()) {
             Ok(Some(expanded)) => {
+                custom_command_handled = true;
                 text_only.clone_from(&expanded);
                 message
                     .ordered_items
@@ -234,6 +245,7 @@ impl ChatWidget<'_> {
                     "plan" | "solve" | "code"
                 );
                 if has_custom && !is_builtin {
+                    custom_command_handled = true;
                     let res = code_core::slash_commands::format_subagent_command(
                         cmd_name,
                         &args,
@@ -274,6 +286,13 @@ impl ChatWidget<'_> {
                     // Continue with normal submission after this match block
                 }
             }
+        }
+
+        if let Some(name) = direct_project_alias_name(&original_text, custom_command_handled)
+            && self.handle_project_alias(name)
+        {
+            self.consume_pending_prompt_for_ui_only_turn();
+            return;
         }
 
         let processed = crate::slash_command::process_slash_command_message(&text_only);
@@ -557,5 +576,31 @@ impl ChatWidget<'_> {
         }
 
         // (debug watchdog removed)
+    }
+}
+
+#[cfg(test)]
+mod project_registry_submission_tests {
+    use super::direct_project_alias_name;
+
+    #[test]
+    fn direct_project_alias_requires_an_unknown_argument_free_slash_command() {
+        assert_eq!(
+            direct_project_alias_name("/code-project", false),
+            Some("code-project")
+        );
+        assert_eq!(
+            direct_project_alias_name(" /CODE_PROJECT ", false),
+            Some("CODE_PROJECT")
+        );
+        assert_eq!(direct_project_alias_name("/code-project extra", false), None);
+        assert_eq!(direct_project_alias_name("/status", false), None);
+        assert_eq!(direct_project_alias_name("/STATUS", false), None);
+        assert_eq!(direct_project_alias_name("not-a-command", false), None);
+    }
+
+    #[test]
+    fn custom_prompts_and_subagent_commands_take_precedence_over_project_aliases() {
+        assert_eq!(direct_project_alias_name("/code-project", true), None);
     }
 }

@@ -1,0 +1,114 @@
+//! # camoufox-juggler
+//!
+//! Native Rust client for Firefox's Juggler automation protocol.
+//!
+//! Camoufox embeds the Juggler protocol (the Firefox automation layer
+//! Playwright uses). This crate closes the automation loop with zero
+//! Playwright dependency:
+//!
+//! - [`launch_with_juggler`] prepares the launch (fingerprint, env, prefs)
+//!   through the `camoufox` facade and spawns the browser with the Juggler
+//!   pipe connected (FDs 3/4 on Unix, `PW_PIPE_READ`/`PW_PIPE_WRITE`
+//!   inheritable handles on Windows)
+//! - [`JugglerBrowser`] manages contexts, pages, cookies, downloads and
+//!   the credentials-aware proxy configuration
+//! - [`JugglerPage`] navigates, evaluates JS, screenshots, captures
+//!   cookies/local storage, dispatches input events (mouse, keyboard,
+//!   touch, wheel), exposes network events, intercepts requests and file
+//!   choosers, injects WebSocket frames, streams screencasts and tracks
+//!   web workers
+//! - [`verify_fingerprint`] asserts the running browser's spoofed surfaces
+//!   match the generated fingerprint
+//! - [`Orchestrator`] runs a pool of persona-driven browser sessions with
+//!   rotation policies and persistent rotation state
+//!
+//! ## Example
+//!
+//! ```no_run
+//! # async fn demo() -> camoufox_juggler::Result<()> {
+//! use camoufox::builder::{HeadlessMode, LaunchOptions};
+//! use camoufox_core::os::SupportedOs;
+//!
+//! let options = LaunchOptions {
+//!     os: vec![SupportedOs::Linux],
+//!     headless: HeadlessMode::On,
+//!     ..Default::default()
+//! };
+//! let mut browser = camoufox_juggler::launch_with_juggler(&options).await?;
+//! let page = browser.new_page().await?;
+//! page.goto("https://example.com").await?;
+//! let title = page.evaluate("document.title").await?;
+//! println!("title: {title:?}");
+//! browser.close().await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Network events & interception
+//!
+//! ```no_run
+//! # async fn demo() -> camoufox_juggler::Result<()> {
+//! # let browser: camoufox_juggler::JugglerBrowser = todo!();
+//! # let page: std::sync::Arc<camoufox_juggler::JugglerPage> = todo!();
+//! // Observe traffic
+//! let mut events = page.network_events();
+//! page.set_request_interception(true).await?;
+//! while let Some(event) = events.next().await? {
+//!     if let camoufox_juggler::NetworkEvent::RequestWillBeSent(request) = event {
+//!         if request.is_intercepted && request.url.contains("ads.example") {
+//!             page.take_intercepted_request(&request).abort().await?;
+//!         }
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! ```
+
+pub mod binding;
+pub mod browser;
+pub mod cloudflare;
+pub mod connection;
+pub mod console;
+pub mod dom;
+pub mod download;
+pub mod driver;
+pub mod emulation;
+pub mod error;
+pub mod har;
+pub mod input;
+pub mod network;
+pub mod orchestrator;
+pub mod page;
+pub mod permission;
+pub mod process;
+pub mod protocol;
+pub mod screencast;
+pub mod transport;
+pub mod verify;
+pub mod worker;
+
+pub use binding::{BindingCall, BindingCalls};
+pub use browser::JugglerBrowser;
+pub use cloudflare::{ChallengeKind, CloudflareOptions, CloudflareOutcome};
+pub use connection::{Connection, DEFAULT_COMMAND_TIMEOUT};
+pub use console::{ConsoleEvents, ConsoleLevel, ConsoleMessage};
+pub use dom::{NodeDescription, Point, Quad};
+pub use download::{
+    DownloadBehavior, DownloadCreated, DownloadEvent, DownloadEvents, DownloadFinished,
+};
+pub use driver::{core_error, into_core, launch_prepared_with_juggler, launch_with_juggler};
+pub use emulation::{ColorScheme, Contrast, EmulatedMedia, ForcedColors, MediaType, ReducedMotion};
+pub use error::{JugglerError, Result};
+pub use har::HarLog;
+pub use input::{KeyDescriptor, Modifiers, MouseButton, TouchEventType, TouchPoint};
+pub use network::{
+    FulfillResponse, InterceptedRequest, NetworkEvent, NetworkEvents, NetworkRequest,
+    NetworkRequestFailed, NetworkRequestFinished, NetworkResponseInfo, RouteOverrides,
+    WebSocketFrame, WebSocketInfo,
+};
+pub use orchestrator::{OrchestratedSession, Orchestrator, OrchestratorOptions};
+pub use page::{Dialog, FileChooser, JugglerPage};
+pub use permission::Permission;
+pub use screencast::{ScreencastFrame, ScreencastFrames};
+pub use verify::{verify_fingerprint, SurfaceCheck, VerificationReport};
+pub use worker::{WorkerEvent, WorkerEvents, WorkerInfo};

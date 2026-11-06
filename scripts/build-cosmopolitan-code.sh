@@ -12,15 +12,22 @@ if [ -e "$output_dir" ]; then
     echo "Refusing to overwrite existing output directory: $output_dir" >&2
     exit 1
 fi
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=cosmopolitan-code/prepare-runtime.sh
 . "$support_dir/prepare-runtime.sh"
 
 tmp_dir=$(mktemp -d "$repo_root/o/cosmopolitan-code-build.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 workspace="$tmp_dir/source"
 mkdir -p "$workspace"
-git -C "$repo_root" archive --format=tar "$source_commit" \
-    code-rs codex-rs/models-manager/models.json announcement_tip.toml >"$tmp_dir/source.tar"
-tar -xf "$tmp_dir/source.tar" -C "$workspace"
+source_snapshot_sha256=
+if [ "$source_mode" = working-tree ]; then
+    source_snapshot_sha256=$(python3 "$support_dir/snapshot_worktree.py" "$repo_root" "$workspace")
+else
+    git -C "$repo_root" archive --format=tar "$source_commit" \
+        code-rs codex-rs/models-manager/models.json announcement_tip.toml >"$tmp_dir/source.tar"
+    tar -xf "$tmp_dir/source.tar" -C "$workspace"
+fi
 
 patch --batch -d "$workspace/code-rs" -p1 \
     <"$support_dir/overrides/cosmopolitan-musl.patch"
@@ -98,48 +105,60 @@ if [ ! -f "$debug_elf" ]; then
     exit 1
 fi
 
+browser_runtime_source=${COSMOPOLITAN_BROWSER_RUNTIME_SOURCE:-"$repo_root/o/camoufox-runtime-prototype"}
+browser_runtime_archive=${COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE:-}
+if [ -n "$browser_runtime_archive" ]; then
+    if [ ! -f "$browser_runtime_archive" ]; then
+        echo "Configured browser runtime archive is missing: $browser_runtime_archive" >&2
+        exit 1
+    fi
+elif [ -d "$browser_runtime_source" ]; then
+    browser_runtime_archive="$tmp_dir/browser-runtime.zip"
+    python3 "$support_dir/package-browser-runtime.py" \
+        "$browser_runtime_source" "$browser_runtime_archive" \
+        --pins "$support_dir/pins.json" \
+        --report "$tmp_dir/browser-runtime-report.json"
+elif [ -f "$repo_root/o/camoufox-runtime/browser-runtime.zip" ]; then
+    browser_runtime_archive="$repo_root/o/camoufox-runtime/browser-runtime.zip"
+else
+    echo "Camoufox runtime input is missing. Set COSMOPOLITAN_BROWSER_RUNTIME_SOURCE or COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE." >&2
+    exit 1
+fi
+
 package_dir="$tmp_dir/package"
 mkdir -p "$package_dir"
 cp "$runtime_smoke" "$package_dir/runtime-smoke.com"
 artifact="$package_dir/$artifact_name"
 manifest="$package_dir/$artifact_name.json"
 "$sdk_bin/apelink" -l "$sdk_bin/ape-x86_64.elf" -o "$artifact" "$debug_elf"
+cat "$browser_runtime_archive" >>"$artifact"
 
-python3 - "$pins" "$source_commit" "$artifact" "$manifest" "$sdk/generated/fork-runtime.json" <<'PY'
-import hashlib
-import json
-import pathlib
+python3 - "$support_dir" "$artifact" "$manifest" "$sdk/generated/fork-runtime.json" \
+    "$compiler_bootstrap_metadata" "$browser_runtime_archive" "$source_commit" "$source_clean" \
+    "$source_snapshot_sha256" <<'PY'
 import sys
 
-pins_path, source_commit, artifact_path, manifest_path, runtime_path = sys.argv[1:]
-pins = json.loads(pathlib.Path(pins_path).read_text(encoding="utf-8"))
-artifact = pathlib.Path(artifact_path)
-digest = hashlib.sha256()
-with artifact.open("rb") as stream:
-    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-        digest.update(chunk)
-manifest = {
-    "schema_version": pins["schema_version"],
-    "source_commit": source_commit,
-    "source_clean": True,
-    "cosmopolitan_commit": pins["cosmopolitan_commit"],
-    "rust_ape_commit": pins["rust_ape_commit"],
-    "cosmopolitan_runtime": json.loads(pathlib.Path(runtime_path).read_text(encoding="utf-8")),
-    "target_architectures": pins["target_architectures"],
-    "build_profile": pins["build_profile"],
-    "release_opt_level": pins["release_opt_level"],
-    "release_lto": pins["release_lto"],
-    "release_codegen_units": pins["release_codegen_units"],
-    "artifact_name": pins["artifact_name"],
-    "artifact_size_bytes": artifact.stat().st_size,
-    "artifact_sha256": digest.hexdigest(),
-}
-pathlib.Path(manifest_path).write_text(
-    json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+support_dir, artifact, manifest, runtime, bootstrap, browser_runtime, source_commit, source_clean, snapshot = sys.argv[1:]
+sys.path.insert(0, support_dir)
+from artifact_contract import write_artifact_manifest
+
+write_artifact_manifest(
+    artifact,
+    manifest,
+    runtime,
+    bootstrap,
+    source_commit,
+    browser_runtime_path=browser_runtime,
+    source_clean=source_clean == "true",
+    source_snapshot_sha256=snapshot or None,
 )
 PY
 
-sh "$support_dir/test-artifact.sh" "$artifact" "$manifest"
+if [ "$source_clean" = true ]; then
+    sh "$support_dir/test-artifact.sh" "$artifact" "$manifest"
+else
+    sh "$support_dir/test-development-artifact.sh" "$artifact" "$manifest"
+fi
 python3 "$support_dir/check-history-worker.py" "$artifact"
 mkdir -p "$(dirname "$output_dir")"
 mv "$package_dir" "$output_dir"

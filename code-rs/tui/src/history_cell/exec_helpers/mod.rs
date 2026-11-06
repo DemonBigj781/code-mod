@@ -12,7 +12,6 @@ pub(crate) use read_annotation::{
     parse_read_line_annotation_with_range,
 };
 pub(crate) use render::{
-    exec_command_lines,
     exec_render_parts_parsed,
     exec_render_parts_parsed_with_meta,
     running_status_line,
@@ -22,4 +21,3 @@ pub(crate) use shell_display::{
     insert_line_breaks_after_double_ampersand,
     normalize_shell_command_display,
 };
-

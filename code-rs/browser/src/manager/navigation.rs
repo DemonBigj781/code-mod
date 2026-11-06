@@ -79,7 +79,8 @@ impl BrowserManager {
         let error_string = err.to_string();
         let config = self.config.read().await.clone();
         let is_external = config.connect_port.is_some() || config.connect_ws.is_some();
-        let browser_active = self.browser.lock().await.is_some();
+        let browser_active = self.browser.lock().await.is_some()
+            || self.embedded_browser.lock().await.is_some();
         let wait_desc = match &config.wait {
             WaitStrategy::Event(event) => format!("event:{event}"),
             WaitStrategy::Delay { delay_ms } => format!("delay:{delay_ms}ms"),
@@ -250,6 +251,26 @@ impl BrowserManager {
     }
 
     async fn goto_once(&self, url: &str) -> Result<crate::page::GotoResult> {
+        if !self.is_external_connection().await {
+            let nav_start = std::time::Instant::now();
+            info!("Navigating embedded Firefox to URL: {}", url);
+            let info = self.embedded_browser().await?.navigate(url).await?;
+            let result = crate::page::GotoResult {
+                url: info.url,
+                title: (!info.title.is_empty()).then_some(info.title),
+            };
+            info!(
+                "Embedded Firefox navigation complete to: {} in {:?}",
+                result.url,
+                nav_start.elapsed()
+            );
+            if let Some(ref callback) = *self.navigation_callback.read().await {
+                callback(result.url.clone());
+            }
+            self.update_activity().await;
+            return Ok(result);
+        }
+
         // Get or create page.
         let page = self.get_or_create_page().await?;
 

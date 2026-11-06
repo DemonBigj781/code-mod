@@ -30,6 +30,7 @@ use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
 use crossterm::terminal::supports_keyboard_enhancement;
 use ratatui_image::picker::Picker;
+use ratatui_image::picker::ProtocolType;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 
@@ -190,8 +191,8 @@ fn query_terminal_info() -> TerminalInfo {
     // Try to query using ratatui_image's picker
     let picker = match Picker::from_query_stdio() {
         Ok(p) => {
-            tracing::info!("Successfully queried terminal capabilities via Picker");
-            Some(p)
+            tracing::info!("Successfully queried terminal cell size via Picker");
+            Some(force_text_image_protocol(p))
         }
         Err(e) => {
             tracing::warn!("Failed to query terminal via Picker: {}", e);
@@ -218,6 +219,21 @@ fn query_terminal_info() -> TerminalInfo {
     };
 
     TerminalInfo { picker, font_size }
+}
+
+/// Force image previews through Ratatui's colored half-block renderer.
+///
+/// Kitty, Sixel, and iTerm protocols draw pixels outside Ratatui's cell
+/// buffer. Those pixels can survive redraws and hover over later terminal
+/// content until the tab is recreated. Half-blocks are ordinary colored text
+/// cells, so normal buffer diffing and clears remove them reliably.
+pub(crate) fn force_text_image_protocol(mut picker: Picker) -> Picker {
+    picker.set_protocol_type(ProtocolType::Halfblocks);
+    picker
+}
+
+pub(crate) fn text_image_picker(font_size: (u16, u16)) -> Picker {
+    force_text_image_protocol(Picker::from_fontsize(font_size))
 }
 
 fn set_panic_hook() {
@@ -455,7 +471,10 @@ pub(crate) fn should_enable_keyboard_enhancement() -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::force_text_image_protocol;
     use super::should_enable_keyboard_enhancement;
+    use ratatui_image::picker::Picker;
+    use ratatui_image::picker::ProtocolType;
 
     #[cfg(unix)]
     use super::fd_has_terminal_hangup;
@@ -516,6 +535,16 @@ mod tests {
         restore_env("WT_SESSION", prev_wt_session);
         restore_env("CODE_ENABLE_KBD_ENHANCEMENT", prev_enable);
         restore_env("CODE_DISABLE_KBD_ENHANCEMENT", prev_disable);
+    }
+
+    #[test]
+    fn terminal_images_are_forced_to_color_text_cells() {
+        let mut picker = Picker::from_fontsize((8, 16));
+        picker.set_protocol_type(ProtocolType::Kitty);
+
+        let picker = force_text_image_protocol(picker);
+
+        assert_eq!(picker.protocol_type(), ProtocolType::Halfblocks);
     }
 
     fn restore_env(key: &str, value: Option<String>) {

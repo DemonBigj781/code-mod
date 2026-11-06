@@ -26,6 +26,9 @@ pub(super) fn sync_command_popup_inner(view: &mut ChatComposer) {
                 if !view.subagent_commands.is_empty() {
                     command_popup.set_subagent_commands(view.subagent_commands.clone());
                 }
+                if !view.project_aliases.is_empty() {
+                    command_popup.set_project_aliases(view.project_aliases.clone());
+                }
                 command_popup.on_composer_text_change(first_line);
                 view.active_popup = ActivePopup::Command(command_popup);
                 // Notify app: composer expanded due to slash popup
@@ -42,4 +45,3 @@ pub(super) fn set_custom_prompts_inner(view: &mut ChatComposer, prompts: Vec<Cus
         popup.set_prompts(view.custom_prompts.clone());
     }
 }
-

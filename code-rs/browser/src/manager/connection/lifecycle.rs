@@ -20,6 +20,11 @@ impl BrowserManager {
 
         self.stop_navigation_monitor().await;
 
+        if let Some(browser) = self.embedded_browser.lock().await.take() {
+            info!("Stopping embedded Camoufox browser");
+            browser.close().await?;
+        }
+
         let mut page_guard = self.page.lock().await;
         *page_guard = None;
 
@@ -64,6 +69,21 @@ impl BrowserManager {
     }
 
     pub(in super::super) async fn ensure_browser(&self) -> Result<()> {
+        if !self.is_external_connection().await {
+            let embedded = self.embedded_browser.lock().await.clone();
+            if let Some(browser) = embedded {
+                match tokio::time::timeout(Duration::from_secs(2), browser.page_info()).await {
+                    Ok(Ok(_)) => return Ok(()),
+                    Ok(Err(error)) => warn!("Embedded browser check failed: {error}"),
+                    Err(_) => warn!("Embedded browser check timed out"),
+                }
+                self.embedded_browser.lock().await.take();
+            }
+            info!("Starting/restarting embedded Camoufox browser...");
+            self.start().await?;
+            return Ok(());
+        }
+
         let mut browser_guard = self.browser.lock().await;
 
         // Check if we have a browser instance
@@ -112,6 +132,7 @@ impl BrowserManager {
         }
 
         let browser = Arc::clone(&self.browser);
+        let embedded_browser = Arc::clone(&self.embedded_browser);
         let last_activity = Arc::clone(&self.last_activity);
         let user_data_dir = Arc::clone(&self.user_data_dir);
 
@@ -123,6 +144,10 @@ impl BrowserManager {
                     warn!("Browser idle timeout reached, closing");
                     let mut browser_guard = browser.lock().await;
                     if let Some(mut browser) = browser_guard.take() {
+                        let _ = browser.close().await;
+                    }
+                    drop(browser_guard);
+                    if let Some(browser) = embedded_browser.lock().await.take() {
                         let _ = browser.close().await;
                     }
                     if should_cleanup
@@ -162,6 +187,10 @@ impl BrowserManager {
         }
 
         self.stop_navigation_monitor().await;
+
+        if let Some(browser) = self.embedded_browser.lock().await.take() {
+            browser.close().await?;
+        }
 
         // Clear page state
         *self.page.lock().await = None;

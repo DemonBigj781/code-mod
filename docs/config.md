@@ -442,24 +442,27 @@ You can configure Code to use [MCP servers](https://modelcontextprotocol.io/abou
 
 ### Built-in Rustwright
 
-Desktop builds with browser automation include Code's pinned native
-[Rustwright](https://github.com/Skyvern-AI/rustwright) MCP server without
-requiring a manual `[mcp_servers.rustwright]` entry. It runs inside the Code
-executable and does not require Node.js, npm, Python, or a separately installed
-MCP binary.
+Linux x86-64 builds with browser automation include Code's pinned native
+[Rustwright](https://github.com/Skyvern-AI/rustwright) MCP server and Camoufox
+runtime without requiring a manual `[mcp_servers.rustwright]` entry. The MCP
+server runs inside the Code executable and controls Camoufox through native
+Juggler pipes. It does not require Chrome, Chromium, CDP, Node.js, npm, Python,
+or a separately installed MCP binary.
 
-Rustwright launches an existing Chrome or Chromium executable. It searches the
-standard platform locations and honors `RUSTWRIGHT_CHROMIUM`, `CHROME`, or
-`CHROMIUM` when an explicit executable is needed. Code does not download a
-browser automatically. `RUSTWRIGHT_MCP_CDP_ENDPOINT` can instead attach to an
-existing Chromium CDP endpoint; the upstream Rustwright environment variables
-for headers, timeouts, tool profiles, response limits, and screenshots remain
-available.
+The portable `code.com` artifact carries the pinned Camoufox browser plus the
+Mesa and LLVM software-rendering libraries used for headless screenshots. On
+first use, Code extracts and verifies that payload under
+`$CODE_HOME/browser/runtime`; later runs reuse the validated cache, and an
+invalid cache or stale extraction lock is repaired automatically. The embedded
+browser payload is currently Linux x86-64 only, even though the Cosmopolitan
+executable itself can start on other supported operating systems.
 
-Code confines Rustwright file operations to the active workspace, schedules its
-stateful tools one at a time, and keeps the existing native `browser` tool
-available while parity is evaluated. A user-defined MCP server named
-`rustwright` (case-insensitive) takes precedence over the built-in definition.
+Code confines browser file operations to the active workspace and schedules
+stateful Rustwright tools one at a time. Response and screenshot limits remain
+configurable through the documented `RUSTWRIGHT_MCP_*` environment variables.
+`CODE_BROWSER_RUNTIME_DIR` can select an already prepared runtime tree for
+development and testing. A user-defined MCP server named `rustwright`
+(case-insensitive) takes precedence over the built-in definition.
 
 ### Server transport configuration
 
@@ -1098,6 +1101,33 @@ auto_drive_observer_cadence = 3
 ```
 
 When the observer reports `status = "failing"`, the TUI banner highlights the intervention, updates the pending prompt when provided, and records guidance for future coordinator turns.
+
+## Project Registry and Snapshot Scope
+
+The runtime project registry is separate from the `[projects]` configuration
+table below. Use `/project` when Code may be started from a convenience
+directory rather than the intended repository root:
+
+- `/project add single /path/to/repo code 0` registers one exact repository.
+- `/project add group /path/to/projects games 2` registers a bounded collection
+  of repositories no more than two directory levels below the declared root.
+- `/project add master /path/to/projects all-projects 3` registers the sole
+  master fallback scope.
+- `/project use code`, `/project code`, and `/code` select the same registered
+  project.
+
+The registry is persisted at `CODE_HOME/projects.json` with atomic, locked
+writes. Registered names must be valid slash-command names and cannot collide
+with built-in commands, custom prompts, subagent commands, or configured
+project commands. Deleted or inaccessible paths remain listed and produce a
+specific selection/snapshot error so the operator can repair or remove the
+entry.
+
+The active registry entry controls Git snapshot, undo-preview, and automatic
+review repository discovery. `single` never scans sibling or child
+repositories. `group` and `master` honor `git_search_depth`. Without an active
+entry, Code accepts only a Git repository containing the current directory and
+does not recursively scan a broad startup directory.
 
 ## Project Hooks
 

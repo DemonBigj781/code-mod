@@ -243,7 +243,7 @@ pub(super) fn create_auth_storage(
     code_home: PathBuf,
     mode: AuthCredentialsStoreMode,
 ) -> Arc<dyn AuthStorageBackend> {
-    let keyring_store = code_keyring_store::best_keyring_store();
+    let keyring_store = code_keyring_store::best_keyring_store_for_code_home(&code_home);
     create_auth_storage_with_keyring_store(code_home, mode, keyring_store)
 }
 

@@ -23,14 +23,10 @@ pub(super) async fn handle_browser_cookies_get(
         "browser_cookies_get".to_owned(),
         params,
         || async move {
-            use serde_json::json;
-
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             let Some(browser_manager) = browser_manager else {
                 return tool_error(call_id_clone.clone(), "Browser is not initialized. Use browser_open to start the browser.");
             };
-
-            let _ = browser_manager.execute_cdp("Network.enable", json!({})).await;
 
             let urls: Option<Vec<String>> = serde_json::from_str::<Value>(&arguments_clone)
                 .ok()
@@ -44,15 +40,7 @@ pub(super) async fn handle_browser_cookies_get(
                 })
                 .filter(|v| !v.is_empty());
 
-            let resp = if let Some(urls) = urls {
-                browser_manager
-                    .execute_cdp("Network.getCookies", json!({ "urls": urls }))
-                    .await
-            } else {
-                browser_manager
-                    .execute_cdp("Network.getAllCookies", json!({}))
-                    .await
-            };
+            let resp = browser_manager.get_cookies(urls).await;
 
             match resp {
                 Ok(value) => {
@@ -85,14 +73,10 @@ pub(super) async fn handle_browser_cookies_set(
         "browser_cookies_set".to_owned(),
         params,
         || async move {
-            use serde_json::json;
-
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             let Some(browser_manager) = browser_manager else {
                 return tool_error(call_id_clone.clone(), "Browser is not initialized. Use browser_open to start the browser.");
             };
-
-            let _ = browser_manager.execute_cdp("Network.enable", json!({})).await;
 
             let cookies_value = serde_json::from_str::<Value>(&arguments_clone)
                 .ok()
@@ -101,9 +85,7 @@ pub(super) async fn handle_browser_cookies_set(
                 return tool_error(call_id_clone.clone(), "cookies_set requires a 'cookies' array");
             };
 
-            let resp = browser_manager
-                .execute_cdp("Network.setCookies", json!({ "cookies": cookies }))
-                .await;
+            let resp = browser_manager.set_cookies(cookies).await;
             match resp {
                 Ok(value) => {
                     let payload = serde_json::json!({
@@ -303,4 +285,3 @@ pub(super) async fn handle_browser_storage_set(
     )
     .await
 }
-

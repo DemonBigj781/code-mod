@@ -564,10 +564,7 @@ async fn build_turn_status_items_legacy(sess: &Session) -> Vec<ResponseItem> {
                     .unwrap_or_else(|| "unknown".to_owned());
 
                 // Try to get a tab title if available
-                let title = match browser_manager.get_or_create_page().await {
-                    Ok(page) => page.get_title().await,
-                    Err(_) => None,
-                };
+                let title = browser_manager.get_title().await;
 
                 // Get browser type description
                 let browser_type = browser_manager.get_browser_type().await;
@@ -750,10 +747,7 @@ async fn build_turn_status_items_v2(sess: &Session) -> Vec<ResponseItem> {
                 .await
                 .unwrap_or_else(|| "unknown".to_owned());
 
-            let title = match browser_manager.get_or_create_page().await {
-                Ok(page) => page.get_title().await,
-                Err(_) => None,
-            };
+            let title = browser_manager.get_title().await;
 
             let browser_type = browser_manager.get_browser_type().await.clone();
             let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;

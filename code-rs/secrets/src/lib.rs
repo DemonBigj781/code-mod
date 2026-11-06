@@ -106,7 +106,8 @@ impl SecretsManager {
     pub fn new(code_home: PathBuf, backend_kind: SecretsBackendKind) -> Self {
         let backend: Arc<dyn SecretsBackend> = match backend_kind {
             SecretsBackendKind::Local => {
-                let keyring_store = code_keyring_store::best_keyring_store();
+                let keyring_store =
+                    code_keyring_store::best_keyring_store_for_code_home(&code_home);
                 Arc::new(LocalSecretsBackend::new(code_home, keyring_store))
             }
         };

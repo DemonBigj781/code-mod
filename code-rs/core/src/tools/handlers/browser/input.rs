@@ -26,9 +26,7 @@ pub(super) async fn handle_browser_click(
                 return tool_error(call_id_clone, "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             // Determine click type: default 'click', or 'mousedown'/'mouseup'
             let click_type = params
@@ -111,9 +109,7 @@ pub(super) async fn handle_browser_move(
                 return tool_error(call_id_clone, "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
             match args {
@@ -190,9 +186,7 @@ pub(super) async fn handle_browser_type(
                 return tool_error(call_id_clone, "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
             match args {
@@ -235,9 +229,7 @@ pub(super) async fn handle_browser_key(
                 return tool_error(call_id_clone, "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
             match args {
@@ -289,9 +281,7 @@ pub(super) async fn handle_browser_scroll(
                 return tool_error(call_id_clone, "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
             match args {
@@ -380,4 +370,3 @@ pub(super) async fn handle_browser_history(
     )
     .await
 }
-

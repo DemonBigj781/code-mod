@@ -72,7 +72,7 @@ reshaped, and some are new.
 | -------------------- | --------- | ------------------------------------------------------------------------------------ | --------------------------------------------- |
 | Multi-runtime REPL   | Hybrid    | Node, Deno, Python — per-runtime toggles, permission management, `codex.emitImage()` | `core/src/tools/repl/`                        |
 | REPL history linkage | Fork-only | Child execs track their parent call; you can jump between them                       | `tui/src/history_cell/`                       |
-| Browser automation   | Fork-only | Headless Chrome via CDP — screenshots, viewport config, asset storage                | `browser/`                                    |
+| Browser automation   | Fork-only | Embedded Camoufox through native Juggler/Rustwright — snapshots, screenshots, tabs, and workspace-confined file input | `rustwright-mcp/`, `core/src/rustwright_mcp.rs` |
 | `search_tool_bm25`   | Hybrid    | MCP tools stay hidden until a selection exists                                       | `core/src/tools/handlers/search_tool_bm25.rs` |
 | `apply_patch`        | Hybrid    | Wired through local safety, hook, and diff checks                                    | `core/src/tools/handlers/apply_patch.rs`      |
 
@@ -89,7 +89,7 @@ reshaped, and some are new.
 | Hotkeys             | Fork-only | Per-platform overrides (macOS, Windows, Linux, Android, Termux, BSD)         | `core/src/config_types.rs`               |
 | Shell profiles      | Fork-only | Scoped skills, MCP include/exclude, safety overrides                         | `core/src/config/sources.rs`             |
 | Auth                | Fork-only | Multi-account with device code + PKCE, file/keyring/ephemeral storage        | `login/`, `core/src/auth/`               |
-| Android/Termux      | Fork-only | Browser/CDP paths compiled out; separate build flow                          | `build.zsh`                              |
+| Android/Termux      | Fork-only | Embedded browser automation is not packaged; separate build flow             | `build.zsh`                              |
 
 ---
 

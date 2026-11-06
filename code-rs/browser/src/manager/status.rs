@@ -29,16 +29,13 @@ impl BrowserManager {
         let config = self.config.read().await;
         if config.connect_ws.is_some() || config.connect_port.is_some() {
             "CDP-connected to user's Chrome browser".to_owned()
-        } else if config.headless {
-            "internal headless Chrome browser".to_owned()
         } else {
-            "internal Chrome browser (headed mode)".to_owned()
+            "internal headless Firefox browser (Camoufox/Juggler)".to_owned()
         }
     }
 
     pub async fn set_enabled(&self, enabled: bool) -> Result<()> {
-        let mut config = self.config.write().await;
-        config.enabled = enabled;
+        self.config.write().await.enabled = enabled;
 
         if enabled {
             self.start().await?;
@@ -47,6 +44,48 @@ impl BrowserManager {
         }
 
         Ok(())
+    }
+
+    /// Remove the persistent inspection highlight without exposing protocol details.
+    pub async fn clear_inspection_highlight(&self) -> Result<()> {
+        if !self.is_external_connection().await {
+            let script = "document.getElementById('__code_inspect_highlight')?.remove(); true";
+            let _ = self.embedded_browser().await?.evaluate(script).await?;
+            return Ok(());
+        }
+        let _ = self
+            .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_cookies(&self, urls: Option<Vec<String>>) -> Result<serde_json::Value> {
+        if !self.is_external_connection().await {
+            let cookies = self.embedded_browser().await?.cookies().await?;
+            self.update_activity().await;
+            return Ok(serde_json::json!({ "cookies": cookies }));
+        }
+        let _ = self.execute_cdp("Network.enable", serde_json::json!({})).await;
+        match urls {
+            Some(urls) if !urls.is_empty() => {
+                self.execute_cdp("Network.getCookies", serde_json::json!({ "urls": urls }))
+                    .await
+            }
+            _ => self
+                .execute_cdp("Network.getAllCookies", serde_json::json!({}))
+                .await,
+        }
+    }
+
+    pub async fn set_cookies(&self, cookies: Vec<serde_json::Value>) -> Result<serde_json::Value> {
+        if !self.is_external_connection().await {
+            self.embedded_browser().await?.set_cookies(cookies).await?;
+            self.update_activity().await;
+            return Ok(serde_json::json!({}));
+        }
+        let _ = self.execute_cdp("Network.enable", serde_json::json!({})).await;
+        self.execute_cdp("Network.setCookies", serde_json::json!({ "cookies": cookies }))
+            .await
     }
 
     pub async fn update_config(&self, updates: impl FnOnce(&mut BrowserConfig)) -> Result<()> {
@@ -60,6 +99,14 @@ impl BrowserManager {
                 page.update_viewport(config.viewport.clone())?;
             }
         }
+        if config.connect_port.is_none()
+            && config.connect_ws.is_none()
+            && let Some(browser) = self.embedded_browser.lock().await.clone()
+        {
+            browser
+                .resize(config.viewport.width, config.viewport.height)
+                .await?;
+        }
 
         Ok(())
     }
@@ -69,6 +116,10 @@ impl BrowserManager {
     }
 
     pub async fn get_current_url(&self) -> Option<String> {
+        if !self.is_external_connection().await {
+            let browser = self.embedded_browser.lock().await.clone()?;
+            return browser.page_info().await.ok().map(|info| info.url);
+        }
         let page_guard = self.page.lock().await;
         if let Some(page) = page_guard.as_ref() {
             page.get_current_url().await.ok()
@@ -77,9 +128,23 @@ impl BrowserManager {
         }
     }
 
+    pub async fn get_title(&self) -> Option<String> {
+        if !self.is_external_connection().await {
+            let browser = self.embedded_browser.lock().await.clone()?;
+            return browser.page_info().await.ok().map(|info| info.title);
+        }
+        let page_guard = self.page.lock().await;
+        if let Some(page) = page_guard.as_ref() {
+            page.get_title().await
+        } else {
+            None
+        }
+    }
+
     pub async fn get_status(&self) -> BrowserStatus {
         let config = self.config.read().await;
-        let browser_active = self.browser.lock().await.is_some();
+        let browser_active = self.browser.lock().await.is_some()
+            || self.embedded_browser.lock().await.is_some();
         let current_url = self.get_current_url().await;
 
         BrowserStatus {
@@ -156,14 +221,18 @@ impl BrowserManager {
         let browser_active = self
             .browser
             .try_lock()
-            .is_ok_and(|b| b.is_some());
+            .is_ok_and(|b| b.is_some())
+            || self
+                .embedded_browser
+                .try_lock()
+                .is_ok_and(|browser| browser.is_some());
 
         let mode = if enabled { "enabled" } else { "disabled" };
         let fp = if fullpage { "on" } else { "off" };
         let conn_type = if is_external {
             "external Chrome (CDP via /chrome)"
         } else {
-            "built-in headless (via /browser)"
+            "built-in headless Firefox (Camoufox/Juggler via /browser)"
         };
 
         let mut status = format!(
@@ -179,4 +248,3 @@ impl BrowserManager {
         status
     }
 }
-

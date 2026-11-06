@@ -1,13 +1,66 @@
+fn create_workspace_ghost_commits(
+    scope: &RepositoryScope,
+) -> Result<Vec<(PathBuf, GhostCommit)>, GitToolingError> {
+    let process_timeout = GHOST_SNAPSHOT_TIMEOUT.saturating_sub(Duration::from_secs(1));
+    let deadline = Instant::now() + process_timeout;
+    if scope.repositories.is_empty() {
+        return Err(GitToolingError::NotAGitRepository {
+            path: scope.root.clone(),
+        });
+    }
+    let repo_paths = scope.repositories.clone();
+    let mut snapshots = Vec::with_capacity(repo_paths.len());
+    for repo_path in repo_paths {
+        let remaining = deadline.checked_duration_since(Instant::now()).ok_or_else(|| {
+            GitToolingError::Io(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "ghost snapshot workspace deadline exceeded",
+            ))
+        })?;
+        let hook_repo = repo_path.clone();
+        let commit = create_ghost_commit(
+            &CreateGhostCommitOptions::new(repo_path.as_path())
+                .command_timeout(remaining)
+                .post_commit_hook(&move || bump_snapshot_epoch_for(&hook_repo)),
+        )?;
+        snapshots.push((repo_path, commit));
+    }
+    Ok(snapshots)
+}
+
+fn snapshot_scope_is_current(request_scope: &str, current_scope: &str) -> bool {
+    request_scope == current_scope
+}
+
+fn queue_latest_snapshot<T>(
+    queue: &mut VecDeque<(u64, T)>,
+    next_job_id: u64,
+    request: T,
+) -> (u64, bool) {
+    if let Some((job_id, queued_request)) = queue.back_mut() {
+        *queued_request = request;
+        return (*job_id, false);
+    }
+    queue.push_back((next_job_id, request));
+    (next_job_id, true)
+}
+
 impl ChatWidget<'_> {
     pub(in super::super) fn capture_ghost_snapshot(&mut self, summary: Option<String>) -> GhostSnapshotJobHandle {
         if self.ghost_snapshots_disabled {
             return GhostSnapshotJobHandle::Skipped;
         }
 
+        let scope = self.repository_scope();
+        if let Some(error) = scope.error.as_deref() {
+            self.push_background_tail(format!("Git snapshot skipped for {}: {error}", scope.label));
+            return GhostSnapshotJobHandle::Skipped;
+        }
         let request = GhostSnapshotRequest::new(
             summary,
             self.current_conversation_snapshot(),
             self.history_snapshot_for_persistence(),
+            scope,
         );
         self.enqueue_ghost_snapshot(request)
     }
@@ -17,18 +70,19 @@ impl ChatWidget<'_> {
             return None;
         }
 
+        let scope = self.repository_scope();
+        if let Some(error) = scope.error.as_deref() {
+            self.push_background_tail(format!("Git snapshot skipped for {}: {error}", scope.label));
+            return None;
+        }
         let request = GhostSnapshotRequest::new(
             summary,
             self.current_conversation_snapshot(),
             self.history_snapshot_for_persistence(),
+            scope,
         );
-        let repo_path = self.config.cwd.clone();
         let started_at = request.started_at;
-        let hook_repo = repo_path.clone();
-        let result = create_ghost_commit(
-            &CreateGhostCommitOptions::new(repo_path.as_path())
-                .post_commit_hook(&move || bump_snapshot_epoch_for(&hook_repo)),
-        );
+        let result = create_workspace_ghost_commits(&request.scope);
         let elapsed = started_at.elapsed();
         
         self.finalize_ghost_snapshot(request, result, elapsed)
@@ -187,9 +241,14 @@ impl ChatWidget<'_> {
     }
 
     pub(in super::super) fn enqueue_ghost_snapshot(&mut self, request: GhostSnapshotRequest) -> GhostSnapshotJobHandle {
-        let job_id = self.next_ghost_snapshot_id;
-        self.next_ghost_snapshot_id = self.next_ghost_snapshot_id.wrapping_add(1);
-        self.ghost_snapshot_queue.push_back((job_id, request));
+        let (job_id, inserted) = queue_latest_snapshot(
+            &mut self.ghost_snapshot_queue,
+            self.next_ghost_snapshot_id,
+            request,
+        );
+        if inserted {
+            self.next_ghost_snapshot_id = self.next_ghost_snapshot_id.wrapping_add(1);
+        }
         self.spawn_next_ghost_snapshot();
         GhostSnapshotJobHandle::Scheduled(job_id)
     }
@@ -206,17 +265,16 @@ impl ChatWidget<'_> {
             return;
         };
 
-        let repo_path = self.config.cwd.clone();
+        let scope = request.scope.clone();
         let app_event_tx = self.app_event_tx.clone();
         let notice_ticket = self.make_background_tail_ticket();
         let started_at = request.started_at;
         self.active_ghost_snapshot = Some((job_id, request));
 
         tokio::spawn(async move {
+            let worker_scope = scope.clone();
             let handle = tokio::task::spawn_blocking(move || {
-                let hook_repo = repo_path.clone();
-                let options = CreateGhostCommitOptions::new(repo_path.as_path());
-                create_ghost_commit(&options.post_commit_hook(&move || bump_snapshot_epoch_for(&hook_repo)))
+                create_workspace_ghost_commits(&worker_scope)
             });
             tokio::pin!(handle);
 
@@ -251,8 +309,10 @@ impl ChatWidget<'_> {
                         notice_sent = true;
                         let elapsed = started_at.elapsed();
                         let message = format!(
-                            "Git snapshot still running… {} elapsed.",
-                            format_duration(elapsed)
+                            "Git snapshot still running for {} ({} repositories)… {} elapsed.",
+                            scope.label,
+                            scope.repositories.len(),
+                            format_duration(elapsed),
                         );
                         app_event_tx.send_background_event_with_ticket(&notice_ticket, message);
                     }
@@ -261,9 +321,9 @@ impl ChatWidget<'_> {
 
             let elapsed = started_at.elapsed();
             let event = match join_result {
-                Ok(Ok(commit)) => AppEvent::GhostSnapshotFinished {
+                Ok(Ok(repositories)) => AppEvent::GhostSnapshotFinished {
                     job_id,
-                    result: Ok(commit),
+                    result: Ok(repositories),
                     elapsed,
                 },
                 Ok(Err(err)) => AppEvent::GhostSnapshotFinished {
@@ -290,15 +350,23 @@ impl ChatWidget<'_> {
     pub(in super::super) fn finalize_ghost_snapshot(
         &mut self,
         request: GhostSnapshotRequest,
-        result: Result<GhostCommit, GitToolingError>,
+        result: Result<Vec<(PathBuf, GhostCommit)>, GitToolingError>,
         elapsed: Duration,
     ) -> Option<GhostSnapshot> {
+        let current_scope = self.repository_scope();
+        if !snapshot_scope_is_current(&request.scope.key, &current_scope.key) {
+            self.push_background_tail(format!(
+                "Discarded Git snapshot for previous scope {}; active scope is {}.",
+                request.scope.label, current_scope.label
+            ));
+            return None;
+        }
         match result {
-            Ok(commit) => {
+            Ok(repositories) => {
                 self.ghost_snapshots_disabled = false;
                 self.ghost_snapshots_disabled_reason = None;
                 let snapshot = GhostSnapshot::new(
-                    commit,
+                    repositories,
                     request.summary,
                     request.conversation,
                     request.history,
@@ -314,8 +382,10 @@ impl ChatWidget<'_> {
                 }
                 if elapsed >= GHOST_SNAPSHOT_NOTICE_THRESHOLD {
                     self.push_background_tail(format!(
-                        "Git snapshot captured in {}.",
-                        format_duration(elapsed)
+                        "Git snapshot captured for {} ({} repositories) in {}.",
+                        request.scope.label,
+                        snapshot.repositories.len(),
+                        format_duration(elapsed),
                     ));
                 }
                 Some(snapshot)
@@ -323,22 +393,38 @@ impl ChatWidget<'_> {
             Err(err) => {
                 if let GitToolingError::Io(io_err) = &err
                     && io_err.kind() == io::ErrorKind::TimedOut {
-                        self.push_background_tail(format!(
-                            "Git snapshot timed out after {}. Try again once the repository is less busy.",
+                        self.ghost_snapshots_disabled = true;
+                        self.ghost_snapshot_queue.clear();
+                        let message = format!(
+                            "Snapshots disabled for this session after Git timed out at {}. The timed-out Git process was terminated.",
                             format_duration(elapsed)
-                        ));
+                        );
+                        let hint = "Restart Code after reducing the workspace size or resolving the slow Git filter to re-enable snapshots.".to_owned();
+                        self.ghost_snapshots_disabled_reason = Some(GhostSnapshotsDisabledReason {
+                            message: message.clone(),
+                            hint: Some(hint.clone()),
+                        });
+                        self.push_background_tail(message);
+                        self.push_background_tail(hint);
                         tracing::warn!(
                             elapsed = %format_duration(elapsed),
-                            "ghost snapshot timed out"
+                            "ghost snapshot timed out; snapshots disabled for this session"
                         );
                         return None;
                     }
+                if matches!(err, GitToolingError::NotAGitRepository { .. }) {
+                    self.ghost_snapshots_disabled = false;
+                    self.ghost_snapshots_disabled_reason = None;
+                    self.push_background_tail(
+                        "No Git repositories found under the active workspace; snapshot skipped."
+                            .to_owned(),
+                    );
+                    tracing::info!("ghost snapshot skipped because no repository was found");
+                    return None;
+                }
+
                 self.ghost_snapshots_disabled = true;
                 let (message, hint) = match &err {
-                    GitToolingError::NotAGitRepository { .. } => (
-                        "Snapshots disabled: this workspace is not inside a Git repository.".to_owned(),
-                        None,
-                    ),
                     _ => (
                         format!("Snapshots disabled after Git error: {err}"),
                         Some(
@@ -359,5 +445,136 @@ impl ChatWidget<'_> {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod workspace_snapshot_tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn stale_snapshot_results_are_rejected_after_project_scope_changes() {
+        assert!(!snapshot_scope_is_current("project:old", "project:new"));
+        assert!(snapshot_scope_is_current("project:code", "project:code"));
+    }
+
+    fn init_repo(repo: &Path, contents: &str) {
+        std::fs::create_dir_all(repo).expect("create repository directory");
+        let init = Command::new("git")
+            .current_dir(repo)
+            .args(["init", "--initial-branch=main"])
+            .status()
+            .expect("run git init");
+        assert!(init.success(), "git init failed for {}", repo.display());
+        std::fs::write(repo.join("tracked.txt"), contents).expect("write tracked file");
+        let commit = Command::new("git")
+            .current_dir(repo)
+            .args([
+                "-c",
+                "user.name=Snapshot Test",
+                "-c",
+                "user.email=snapshot@example.com",
+                "add",
+                "tracked.txt",
+            ])
+            .status()
+            .expect("run git add");
+        assert!(commit.success(), "git add failed for {}", repo.display());
+        let commit = Command::new("git")
+            .current_dir(repo)
+            .args([
+                "-c",
+                "user.name=Snapshot Test",
+                "-c",
+                "user.email=snapshot@example.com",
+                "commit",
+                "-m",
+                "initial",
+            ])
+            .status()
+            .expect("run git commit");
+        assert!(commit.success(), "git commit failed for {}", repo.display());
+    }
+
+    fn scope(root: PathBuf, repositories: Vec<PathBuf>) -> RepositoryScope {
+        RepositoryScope {
+            key: format!("test:{}", root.display()),
+            label: "test scope".to_owned(),
+            root,
+            repositories,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn workspace_snapshot_uses_repository_containing_nested_cwd() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("repo");
+        let nested_cwd = repo.join("src").join("nested");
+        init_repo(&repo, "before\n");
+        std::fs::create_dir_all(&nested_cwd).expect("create nested cwd");
+        std::fs::write(repo.join("tracked.txt"), "after\n").expect("modify tracked file");
+
+        let snapshots = create_workspace_ghost_commits(&scope(
+            nested_cwd,
+            vec![repo.canonicalize().expect("canonical repository")],
+        ))
+        .expect("capture containing repository");
+
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].0, repo.canonicalize().expect("canonical repository"));
+        assert!(!snapshots[0].1.id().is_empty());
+    }
+
+    #[test]
+    fn workspace_snapshot_captures_all_repositories_below_non_git_parent() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let repo_b = workspace.join("b-repo");
+        let repo_a = workspace.join("a-repo");
+        init_repo(&repo_b, "before b\n");
+        init_repo(&repo_a, "before a\n");
+        std::fs::write(repo_a.join("tracked.txt"), "after a\n").expect("modify first repo");
+        std::fs::write(repo_b.join("tracked.txt"), "after b\n").expect("modify second repo");
+
+        let snapshots = create_workspace_ghost_commits(&scope(
+            workspace,
+            vec![
+                repo_a.canonicalize().expect("canonical first repository"),
+                repo_b.canonicalize().expect("canonical second repository"),
+            ],
+        ))
+        .expect("capture nested repositories");
+
+        let repository_paths: Vec<_> = snapshots.into_iter().map(|(path, _)| path).collect();
+        assert_eq!(
+            repository_paths,
+            vec![
+                repo_a.canonicalize().expect("canonical first repository"),
+                repo_b.canonicalize().expect("canonical second repository"),
+            ]
+        );
+    }
+
+    #[test]
+    fn workspace_snapshot_reports_no_repository_without_disabling_discovery() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let err = create_workspace_ghost_commits(&scope(
+            temp.path().to_path_buf(),
+            Vec::new(),
+        ))
+        .expect_err("no repository");
+
+        assert!(matches!(err, GitToolingError::NotAGitRepository { .. }));
+    }
+
+    #[test]
+    fn pending_snapshot_requests_are_coalesced_to_the_latest_request() {
+        let mut queue = VecDeque::new();
+        assert_eq!(queue_latest_snapshot(&mut queue, 7, "first"), (7, true));
+        assert_eq!(queue_latest_snapshot(&mut queue, 8, "latest"), (7, false));
+        assert_eq!(queue.into_iter().collect::<Vec<_>>(), vec![(7, "latest")]);
     }
 }

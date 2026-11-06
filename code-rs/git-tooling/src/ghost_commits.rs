@@ -1,22 +1,127 @@
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
 
 use tempfile::Builder;
+use walkdir::WalkDir;
 
 use crate::GhostCommit;
 use crate::GitToolingError;
 use crate::operations::apply_repo_prefix_to_force_include;
 use crate::operations::ensure_git_repository;
+use crate::operations::ensure_git_repository_with_timeout;
 use crate::operations::normalize_relative_path;
 use crate::operations::repo_subdir;
-use crate::operations::resolve_head;
+use crate::operations::resolve_head_with_timeout;
 use crate::operations::resolve_repository_root;
+use crate::operations::resolve_repository_root_with_timeout;
 use crate::operations::run_git_for_status;
-use crate::operations::run_git_for_stdout;
+use crate::operations::run_git_for_status_with_timeout;
+use crate::operations::run_git_for_stdout_with_timeout;
 
 /// Default commit message used for ghost commits when none is provided.
 const DEFAULT_COMMIT_MESSAGE: &str = "code snapshot";
+
+const REPOSITORY_DISCOVERY_SKIP_DIRS: &[&str] = &[
+    ".cache",
+    ".cargo",
+    ".code",
+    ".codex",
+    ".local",
+    ".npm",
+    ".pnpm-store",
+    ".rustup",
+    ".steam",
+    ".var",
+    "__pycache__",
+    "node_modules",
+    "target",
+    "venv",
+    ".venv",
+];
+
+/// Find the Git repositories represented by a workspace path.
+///
+/// If the path is already inside a repository, only that repository is returned. Otherwise the
+/// workspace is searched recursively for nested repositories. Symbolic links are not followed and
+/// common generated/cache directories are pruned so a broad start directory remains bounded.
+pub fn discover_repository_roots(workspace_path: &Path) -> Result<Vec<PathBuf>, GitToolingError> {
+    discover_repository_roots_inner(workspace_path, None)
+}
+
+/// Find Git repository roots no more than `max_depth` directory levels below a workspace.
+///
+/// A depth of zero accepts only a repository containing `workspace_path`; it never scans child
+/// or sibling directories. The depth counts repository-root directories below the workspace, not
+/// the `.git` marker itself.
+pub fn discover_repository_roots_with_depth(
+    workspace_path: &Path,
+    max_depth: usize,
+) -> Result<Vec<PathBuf>, GitToolingError> {
+    discover_repository_roots_inner(workspace_path, Some(max_depth))
+}
+
+fn discover_repository_roots_inner(
+    workspace_path: &Path,
+    max_depth: Option<usize>,
+) -> Result<Vec<PathBuf>, GitToolingError> {
+    match ensure_git_repository(workspace_path) {
+        Ok(()) => {
+            let root = resolve_repository_root(workspace_path)?;
+            return Ok(vec![root.canonicalize().unwrap_or(root)]);
+        }
+        Err(GitToolingError::NotAGitRepository { .. }) => {}
+        Err(err) => return Err(err),
+    }
+
+    let mut roots = BTreeSet::new();
+    let mut walker = WalkDir::new(workspace_path).follow_links(false);
+    if let Some(max_depth) = max_depth {
+        walker = walker.max_depth(max_depth.saturating_add(1));
+    }
+    let mut entries = walker.into_iter();
+
+    while let Some(entry) = entries.next() {
+        let entry = entry?;
+        let file_name = entry.file_name().to_string_lossy();
+        if entry.depth() > 0
+            && entry.file_type().is_dir()
+            && REPOSITORY_DISCOVERY_SKIP_DIRS.contains(&file_name.as_ref())
+        {
+            entries.skip_current_dir();
+            continue;
+        }
+
+        if file_name != ".git" {
+            continue;
+        }
+        if entry.file_type().is_dir() {
+            entries.skip_current_dir();
+        }
+        let Some(candidate) = entry.path().parent() else {
+            continue;
+        };
+        match ensure_git_repository(candidate) {
+            Ok(()) => {
+                let root = resolve_repository_root(candidate)?;
+                roots.insert(root.canonicalize().unwrap_or(root));
+            }
+            Err(GitToolingError::NotAGitRepository { .. }) => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    if roots.is_empty() {
+        return Err(GitToolingError::NotAGitRepository {
+            path: workspace_path.to_path_buf(),
+        });
+    }
+
+    Ok(roots.into_iter().collect())
+}
 
 /// Options to control ghost commit creation.
 pub struct CreateGhostCommitOptions<'a> {
@@ -25,6 +130,7 @@ pub struct CreateGhostCommitOptions<'a> {
     pub force_include: Vec<PathBuf>,
     pub parent: Option<&'a str>,
     pub post_commit_hook: Option<&'a dyn Fn()>,
+    pub command_timeout: Option<Duration>,
 }
 
 impl<'a> CreateGhostCommitOptions<'a> {
@@ -36,6 +142,7 @@ impl<'a> CreateGhostCommitOptions<'a> {
             force_include: Vec::new(),
             parent: None,
             post_commit_hook: None,
+            command_timeout: None,
         }
     }
 
@@ -57,6 +164,13 @@ impl<'a> CreateGhostCommitOptions<'a> {
     #[must_use]
     pub fn post_commit_hook(mut self, hook: &'a dyn Fn()) -> Self {
         self.post_commit_hook = Some(hook);
+        self
+    }
+
+    /// Limits the total time spent by Git subprocesses while creating this snapshot.
+    #[must_use]
+    pub fn command_timeout(mut self, timeout: Duration) -> Self {
+        self.command_timeout = Some(timeout);
         self
     }
 
@@ -100,12 +214,15 @@ fn create_index_tempdir(home_dir: Option<&Path>) -> std::io::Result<tempfile::Te
 pub fn create_ghost_commit(
     options: &CreateGhostCommitOptions<'_>,
 ) -> Result<GhostCommit, GitToolingError> {
-    ensure_git_repository(options.repo_path)?;
+    let deadline = options.command_timeout.map(|timeout| Instant::now() + timeout);
+    ensure_git_repository_with_timeout(options.repo_path, remaining_timeout(deadline)?)?;
 
-    let repo_root = resolve_repository_root(options.repo_path)?;
+    let repo_root =
+        resolve_repository_root_with_timeout(options.repo_path, remaining_timeout(deadline)?)?;
     let repo_prefix = repo_subdir(repo_root.as_path(), options.repo_path);
     let parent_override = options.parent.map(ToString::to_string);
-    let resolved_parent = resolve_head(repo_root.as_path())?;
+    let resolved_parent =
+        resolve_head_with_timeout(repo_root.as_path(), remaining_timeout(deadline)?)?;
     let parent_ref = parent_override
         .as_deref()
         .or(resolved_parent.as_deref())
@@ -131,7 +248,12 @@ pub fn create_ghost_commit(
         add_args.extend([OsString::from("--"), prefix.as_os_str().to_os_string()]);
     }
 
-    run_git_for_status(repo_root.as_path(), add_args, Some(base_env.as_slice()))?;
+    run_git_for_status_with_timeout(
+        repo_root.as_path(),
+        add_args,
+        Some(base_env.as_slice()),
+        remaining_timeout(deadline)?,
+    )?;
     if !force_include.is_empty() {
         let mut args = Vec::with_capacity(force_include.len() + 2);
         args.push(OsString::from("add"));
@@ -141,13 +263,19 @@ pub fn create_ghost_commit(
                 .iter()
                 .map(|path| OsString::from(path.as_os_str())),
         );
-        run_git_for_status(repo_root.as_path(), args, Some(base_env.as_slice()))?;
+        run_git_for_status_with_timeout(
+            repo_root.as_path(),
+            args,
+            Some(base_env.as_slice()),
+            remaining_timeout(deadline)?,
+        )?;
     }
 
-    let tree_id = run_git_for_stdout(
+    let tree_id = run_git_for_stdout_with_timeout(
         repo_root.as_path(),
         vec![OsString::from("write-tree")],
         Some(base_env.as_slice()),
+        remaining_timeout(deadline)?,
     )?;
 
     let mut commit_env = base_env;
@@ -163,10 +291,11 @@ pub fn create_ghost_commit(
     };
 
     // Retrieve commit ID.
-    let commit_id = run_git_for_stdout(
+    let commit_id = run_git_for_stdout_with_timeout(
         repo_root.as_path(),
         commit_args,
         Some(commit_env.as_slice()),
+        remaining_timeout(deadline)?,
     )?;
 
     if let Some(hook) = options.post_commit_hook {
@@ -174,6 +303,22 @@ pub fn create_ghost_commit(
     }
 
     Ok(GhostCommit::new(commit_id, parent_ref))
+}
+
+fn remaining_timeout(deadline: Option<Instant>) -> Result<Option<Duration>, GitToolingError> {
+    let Some(deadline) = deadline else {
+        return Ok(None);
+    };
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .map(Some)
+        .ok_or_else(|| {
+            GitToolingError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "ghost snapshot Git command deadline exceeded",
+            ))
+        })
 }
 
 /// Restore the working tree to match the provided ghost commit.
@@ -234,6 +379,7 @@ mod tests {
     use crate::operations::run_git_for_stdout;
     use pretty_assertions::assert_eq;
     use std::process::Command;
+    use std::time::{Duration, Instant};
 
     /// Runs a git command in the test repository and asserts success.
     fn run_git_in(repo_path: &Path, args: &[&str]) {
@@ -293,6 +439,87 @@ mod tests {
         }
 
         run_git_in(repo, &["config", "core.autocrlf", "false"]);
+    }
+
+    #[test]
+    fn repository_discovery_resolves_the_repo_containing_a_nested_cwd() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("workspace").join("nested-repo");
+        let cwd = repo.join("src").join("deeper");
+        std::fs::create_dir_all(&cwd).expect("nested cwd");
+        init_test_repo(&repo);
+
+        let roots = discover_repository_roots(&cwd).expect("discover containing repository");
+
+        assert_eq!(roots, vec![repo.canonicalize().expect("canonical repo")]);
+    }
+
+    #[test]
+    fn repository_discovery_finds_a_repo_below_a_non_git_workspace() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let repo = workspace.join("child").join("repo");
+        std::fs::create_dir_all(&repo).expect("repository directory");
+        init_test_repo(&repo);
+
+        let roots = discover_repository_roots(&workspace).expect("discover nested repository");
+
+        assert_eq!(roots, vec![repo.canonicalize().expect("canonical repo")]);
+    }
+
+    #[test]
+    fn repository_discovery_returns_all_nested_repos_in_stable_order() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let repo_b = workspace.join("b-repo");
+        let repo_a = workspace.join("a-repo");
+        std::fs::create_dir_all(&repo_a).expect("first repository directory");
+        std::fs::create_dir_all(&repo_b).expect("second repository directory");
+        init_test_repo(&repo_b);
+        init_test_repo(&repo_a);
+
+        let roots = discover_repository_roots(&workspace).expect("discover nested repositories");
+
+        assert_eq!(
+            roots,
+            vec![
+                repo_a.canonicalize().expect("canonical first repo"),
+                repo_b.canonicalize().expect("canonical second repo"),
+            ]
+        );
+    }
+
+    #[test]
+    fn bounded_repository_discovery_does_not_scan_beyond_configured_depth() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let shallow = workspace.join("shallow");
+        let deep = workspace.join("level-one").join("level-two").join("deep");
+        std::fs::create_dir_all(&shallow).expect("shallow repository directory");
+        std::fs::create_dir_all(&deep).expect("deep repository directory");
+        init_test_repo(&shallow);
+        init_test_repo(&deep);
+
+        let roots = discover_repository_roots_with_depth(&workspace, 1)
+            .expect("discover repositories within one directory level");
+
+        assert_eq!(
+            roots,
+            vec![shallow.canonicalize().expect("canonical shallow repo")]
+        );
+    }
+
+    #[test]
+    fn zero_depth_repository_discovery_does_not_scan_sibling_or_child_repos() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace = temp.path().join("workspace");
+        let child = workspace.join("child");
+        std::fs::create_dir_all(&child).expect("child repository directory");
+        init_test_repo(&child);
+
+        let err = discover_repository_roots_with_depth(&workspace, 0).unwrap_err();
+
+        assert!(matches!(err, GitToolingError::NotAGitRepository { .. }));
     }
 
     #[test]
@@ -603,6 +830,71 @@ mod tests {
         assert_eq!(settings_after, "{\n  \"after\": true\n}\n");
         assert!(repo.join("temp.txt").exists());
 
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ghost_commit_timeout_terminates_git_and_filter_processes() -> Result<(), GitToolingError> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir()?;
+        let repo = temp.path();
+        init_test_repo(repo);
+        std::fs::write(repo.join("tracked.txt"), "initial\n")?;
+        run_git_in(repo, &["add", "tracked.txt"]);
+        run_git_in(
+            repo,
+            &[
+                "-c",
+                "user.name=Tester",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+
+        let pid_file = repo.join("filter.pid");
+        let filter = repo.join("slow-filter.sh");
+        std::fs::write(
+            &filter,
+            format!(
+                "#!/bin/sh\necho $$ > '{}'\nsleep 30\ncat\n",
+                pid_file.display()
+            ),
+        )?;
+        let mut permissions = std::fs::metadata(&filter)?.permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&filter, permissions)?;
+        run_git_in(
+            repo,
+            &[
+                "config",
+                "filter.slow.clean",
+                filter.to_str().expect("UTF-8 filter path"),
+            ],
+        );
+        std::fs::write(repo.join(".gitattributes"), "*.slow filter=slow\n")?;
+        std::fs::write(repo.join("blocked.slow"), "content\n")?;
+
+        let started = Instant::now();
+        let error = create_ghost_commit(
+            &CreateGhostCommitOptions::new(repo).command_timeout(Duration::from_millis(250)),
+        )
+        .expect_err("slow git add should time out");
+
+        assert!(
+            matches!(&error, GitToolingError::Io(io_error) if io_error.kind() == std::io::ErrorKind::TimedOut),
+            "unexpected error: {error}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let filter_pid = std::fs::read_to_string(&pid_file)?;
+        let status = Command::new("kill")
+            .args(["-0", filter_pid.trim()])
+            .status()?;
+        assert!(!status.success(), "slow filter process survived snapshot timeout");
         Ok(())
     }
 }

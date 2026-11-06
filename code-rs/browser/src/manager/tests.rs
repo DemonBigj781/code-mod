@@ -13,6 +13,9 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::BrowserConfig;
+use crate::BrowserManager;
+
 #[derive(Debug)]
 struct TestError(&'static str);
 
@@ -43,6 +46,30 @@ fn handler_ignores_oneshot_cancellations() {
         assert!(!should_stop);
         assert_eq!(consecutive_errors, 0);
     }
+}
+
+#[tokio::test]
+async fn internal_browser_reports_embedded_firefox_backend() {
+    let manager = BrowserManager::new(BrowserConfig::default());
+
+    assert_eq!(
+        manager.get_browser_type().await,
+        "internal headless Firefox browser (Camoufox/Juggler)"
+    );
+}
+
+#[tokio::test]
+async fn internal_browser_rejects_chrome_cdp_commands() {
+    let manager = BrowserManager::new(BrowserConfig::default());
+
+    let error = manager
+        .execute_cdp("Runtime.evaluate", serde_json::json!({"expression": "1 + 1"}))
+        .await
+        .expect_err("internal Firefox must not expose CDP");
+
+    let message = error.to_string();
+    assert!(message.contains("only available for an external Chrome connection"));
+    assert!(message.contains("Firefox/Camoufox"));
 }
 
 const TEST_PROXY_WS_URL: &str = "ws://proxy.invalid/devtools/browser/proxy";
@@ -150,4 +177,3 @@ async fn cdp_discovery_ignores_proxy_env_vars_child() {
         .expect("discover ws url");
     assert_eq!(discovered, TEST_TARGET_WS_URL);
 }
-

@@ -29,9 +29,7 @@ pub(super) async fn handle_browser_click_selector(
                 return tool_error(call_id_clone.clone(), "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
             let Ok(json) = args else {
@@ -108,9 +106,7 @@ pub(super) async fn handle_browser_type_selector(
                 return tool_error(call_id_clone.clone(), "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
             let Ok(json) = args else {
@@ -183,9 +179,7 @@ pub(super) async fn handle_browser_scroll_into_view(
                 return tool_error(call_id_clone.clone(), "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
             let Ok(json) = args else {
@@ -234,9 +228,7 @@ pub(super) async fn handle_browser_wait_for(
                 return tool_error(call_id_clone.clone(), "Browser is not initialized. Use browser_open to start the browser.");
             };
 
-            let _ = browser_manager
-                .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                .await;
+            let _ = browser_manager.clear_inspection_highlight().await;
 
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
             let Ok(json) = args else {

@@ -92,7 +92,11 @@ impl ImageOutputCell {
             }
         };
         if needs_init {
-            *slot = Some(picker.unwrap_or_else(|| Picker::from_fontsize(font_size)));
+            *slot = Some(
+                picker
+                    .map(crate::tui::force_text_image_protocol)
+                    .unwrap_or_else(|| crate::tui::text_image_picker(font_size)),
+            );
             self.cached_image_protocol.borrow_mut().take();
         }
     }
@@ -112,12 +116,12 @@ impl ImageOutputCell {
     fn ensure_picker(&self) -> Picker {
         let mut picker_ref = self.cached_picker.borrow_mut();
         if picker_ref.is_none() {
-            *picker_ref = Some(Picker::from_fontsize((8, 16)));
+            *picker_ref = Some(crate::tui::text_image_picker((8, 16)));
         }
         picker_ref
             .as_ref()
             .cloned()
-            .unwrap_or_else(|| Picker::from_fontsize((8, 16)))
+            .unwrap_or_else(|| crate::tui::text_image_picker((8, 16)))
     }
 
     fn display_label(&self) -> String {
@@ -635,5 +639,4 @@ impl HistoryCell for ImageOutputCell {
         self.render_card(area, buf, skip_rows);
     }
 }
-
 

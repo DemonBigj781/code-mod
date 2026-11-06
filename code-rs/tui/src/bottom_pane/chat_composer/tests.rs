@@ -358,6 +358,45 @@ fn typed_text_end_shows_insertion_marker_without_replacing_text() {
 }
 
 #[test]
+fn typed_text_cursor_marker_stays_visible_when_moving_between_start_and_end() {
+    let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+    let app_tx = AppEventSender::new(tx);
+    let mut composer = ChatComposer::new(true, app_tx, true);
+    composer.textarea.set_text("hello");
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 4,
+    };
+
+    composer.textarea.set_cursor(0);
+    let mut start_buf = Buffer::empty(area);
+    composer.render_ref(area, &mut start_buf);
+    let (start_x, start_y) = composer
+        .cursor_pos(area)
+        .expect("cursor at the start should remain visible");
+    assert_eq!(
+        start_buf[(start_x, start_y)].symbol(),
+        "▌",
+        "cursor marker should remain visible when it overlays existing text"
+    );
+
+    composer.textarea.set_cursor(composer.textarea.text().len());
+    let mut end_buf = Buffer::empty(area);
+    composer.render_ref(area, &mut end_buf);
+    let (end_x, end_y) = composer
+        .cursor_pos(area)
+        .expect("cursor at the end should remain visible");
+    assert_eq!(end_buf[(end_x, end_y)].symbol(), "▌");
+    assert_eq!(
+        end_buf[(start_x, start_y)].symbol(),
+        "h",
+        "moving away should restore the character previously under the cursor"
+    );
+}
+
+#[test]
 fn insert_selected_path_quotes_and_escapes_internal_quotes() {
     let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
     let app_tx = AppEventSender::new(tx);

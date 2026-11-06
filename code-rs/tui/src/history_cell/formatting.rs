@@ -14,7 +14,7 @@ use code_core::history::state::MAX_EXEC_STREAM_RETAINED_BYTES;
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use std::cell::Cell;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 
 use super::core::CommandOutput;
 use super::layout_cache::LayoutCache;
@@ -25,6 +25,50 @@ const PREVIEW_TAIL_LINES: usize = 5;
 const EXEC_PREVIEW_MAX_CHARS: usize = 16_000;
 pub(crate) const STREAMING_EXIT_CODE: i32 = i32::MIN;
 pub(crate) const OUTPUT_FOLD_THRESHOLD: usize = 40;
+
+fn elapsed_age_value(elapsed: Duration) -> (u64, &'static str, &'static str) {
+    let secs = elapsed.as_secs();
+    if secs < 60 {
+        (secs, "second", "s")
+    } else if secs < 3_600 {
+        (secs / 60, "minute", "m")
+    } else if secs < 86_400 {
+        (secs / 3_600, "hour", "h")
+    } else {
+        (secs / 86_400, "day", "d")
+    }
+}
+
+pub(crate) fn format_elapsed_ago_compact(elapsed: Duration) -> String {
+    let (value, _, suffix) = elapsed_age_value(elapsed);
+    format!("{value}{suffix} ago")
+}
+
+pub(crate) fn format_elapsed_ago_verbose(elapsed: Duration) -> String {
+    let (value, unit, _) = elapsed_age_value(elapsed);
+    let plural = if value == 1 { "" } else { "s" };
+    format!("{value} {unit}{plural} ago")
+}
+
+pub(crate) fn usage_age_bucket(started_at: SystemTime) -> (u64, &'static str) {
+    let elapsed = SystemTime::now()
+        .duration_since(started_at)
+        .unwrap_or_default();
+    let (value, unit, _) = elapsed_age_value(elapsed);
+    (value, unit)
+}
+
+pub(crate) fn usage_age_line(label: &str, started_at: SystemTime) -> Line<'static> {
+    let elapsed = SystemTime::now()
+        .duration_since(started_at)
+        .unwrap_or_default();
+    Line::styled(
+        format!("{label} used {}", format_elapsed_ago_verbose(elapsed)),
+        Style::default()
+            .fg(crate::colors::text_dim())
+            .add_modifier(Modifier::DIM),
+    )
+}
 
 pub(crate) fn describe_exit_code(code: i32) -> &'static str {
     match code {
@@ -797,6 +841,19 @@ pub(crate) fn fold_sections(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn verbose_elapsed_age_uses_seconds_minutes_hours_and_days() {
+        assert_eq!(format_elapsed_ago_verbose(Duration::from_secs(1)), "1 second ago");
+        assert_eq!(format_elapsed_ago_verbose(Duration::from_secs(12)), "12 seconds ago");
+        assert_eq!(format_elapsed_ago_verbose(Duration::from_secs(60)), "1 minute ago");
+        assert_eq!(format_elapsed_ago_verbose(Duration::from_secs(120)), "2 minutes ago");
+        assert_eq!(format_elapsed_ago_verbose(Duration::from_secs(3_600)), "1 hour ago");
+        assert_eq!(format_elapsed_ago_verbose(Duration::from_secs(7_200)), "2 hours ago");
+        assert_eq!(format_elapsed_ago_verbose(Duration::from_secs(86_400)), "1 day ago");
+        assert_eq!(format_elapsed_ago_verbose(Duration::from_secs(345_600)), "4 days ago");
+    }
 
     #[test]
     fn select_preview_from_plain_text_inserts_ellipsis() {

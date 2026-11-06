@@ -97,7 +97,7 @@ impl Default for BrowserConfig {
             segments_max: default_segments_max(),
             idle_timeout_ms: default_idle_timeout_ms(),
             format: default_format(),
-            headless: false, // Prefer headed for fewer false positives
+            headless: true,
             connect_ws: None,
             connect_port: None,
             connect_host: None,
@@ -113,6 +113,21 @@ impl Default for BrowserConfig {
             proxy_bypass_list: None,
             proxy_authorization: None,
         }
+    }
+}
+
+impl BrowserConfig {
+    /// Select Code's built-in browser rather than an external CDP target.
+    ///
+    /// The built-in browser must remain headless. Opening a native Chrome
+    /// window here contradicts the `/browser` contract and leaves terminal
+    /// screenshot previews coupled to a separate desktop window.
+    pub fn configure_internal_mode(&mut self) {
+        self.connect_port = None;
+        self.connect_ws = None;
+        self.enabled = true;
+        self.persist_profile = false;
+        self.headless = true;
     }
 }
 
@@ -183,4 +198,34 @@ fn default_connect_attempt_timeout_ms() -> u64 {
 
 fn default_connect_attempts() -> u32 {
     3
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BrowserConfig;
+
+    #[test]
+    fn internal_browser_defaults_to_headless_rendering() {
+        assert!(BrowserConfig::default().headless);
+    }
+
+    #[test]
+    fn configure_internal_mode_clears_external_connection_and_stays_headless() {
+        let mut config = BrowserConfig {
+            enabled: false,
+            headless: false,
+            connect_ws: Some("ws://127.0.0.1:9222/devtools/browser/test".to_owned()),
+            connect_port: Some(9222),
+            persist_profile: true,
+            ..BrowserConfig::default()
+        };
+
+        config.configure_internal_mode();
+
+        assert!(config.enabled);
+        assert!(config.headless);
+        assert!(!config.persist_profile);
+        assert_eq!(config.connect_ws, None);
+        assert_eq!(config.connect_port, None);
+    }
 }

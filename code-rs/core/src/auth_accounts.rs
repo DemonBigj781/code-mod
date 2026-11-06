@@ -396,12 +396,12 @@ fn accounts_storage_with_mode(
         AuthCredentialsStoreMode::Keyring => Arc::new(KeyringAccountsStorage::new(
             code_home.to_path_buf(),
             paths,
-            code_keyring_store::best_keyring_store(),
+            code_keyring_store::best_keyring_store_for_code_home(code_home),
         )),
         AuthCredentialsStoreMode::Auto => Arc::new(AutoAccountsStorage::new(
             code_home.to_path_buf(),
             paths,
-            code_keyring_store::best_keyring_store(),
+            code_keyring_store::best_keyring_store_for_code_home(code_home),
         )),
         AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAccountsStorage::new(
             code_home.to_path_buf(),

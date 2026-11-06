@@ -460,6 +460,11 @@
                                 widget.handle_project_command(command_args);
                             }
                         }
+                        SlashCommand::Project => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_project_registry_command(command_args);
+                            }
+                        }
                         SlashCommand::Auto => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 let goal = if command_args.is_empty() {

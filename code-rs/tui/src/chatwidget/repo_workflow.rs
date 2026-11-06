@@ -448,8 +448,13 @@ impl ChatWidget<'_> {
         new_cwd: std::path::PathBuf,
         initial_prompt: Option<String>,
     ) {
+        let previous_scope_key = self.repository_scope().key;
         let previous_cwd = self.config.cwd.clone();
         self.config.cwd.clone_from(&new_cwd);
+        let next_scope_key = self.repository_scope().key;
+        if previous_scope_key != next_scope_key {
+            self.invalidate_ghost_snapshots_for_scope_change();
+        }
         remember_cwd_history(&self.config.cwd);
         let ticket = self.make_background_tail_ticket();
 

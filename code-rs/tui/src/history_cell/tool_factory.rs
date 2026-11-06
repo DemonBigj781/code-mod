@@ -344,6 +344,7 @@ pub(crate) fn new_completed_custom_tool_call(
     let state = ToolCallState {
         id: HistoryId::ZERO,
         call_id: None,
+        started_at: None,
         status,
         title: status_title.to_owned(),
         duration: Some(duration),
@@ -400,6 +401,7 @@ fn new_completed_gh_run_wait_tool_call(success: bool, result: &str) -> ToolCallC
     let state = ToolCallState {
         id: HistoryId::ZERO,
         call_id: None,
+        started_at: None,
         status,
         title,
         duration: None,
@@ -438,6 +440,8 @@ pub(crate) fn new_completed_web_fetch_tool_call(
     success: bool,
     result: String,
 ) -> WebFetchToolCell {
+    let now = SystemTime::now();
+    let started_at = now.checked_sub(duration).unwrap_or(now);
     let duration = format_duration(duration);
     let status_str = if success { "Complete" } else { "Error" };
     let title_line = if success {
@@ -505,6 +509,8 @@ pub(crate) fn new_completed_web_fetch_tool_call(
     WebFetchToolCell {
         pre_lines,
         body_lines,
+        started_at,
+        usage_age_bucket: Cell::new(super::formatting::usage_age_bucket(started_at)),
         cell_collapsed: Cell::new(false),
         collapsed_body: Cell::new(collapse_by_default),
         state: if success {
@@ -530,6 +536,8 @@ layout_build_counter!(
 pub(crate) struct WebFetchToolCell {
     pre_lines: Vec<Line<'static>>,  // header/invocation
     body_lines: Vec<Line<'static>>, // bordered, dim preview
+    started_at: SystemTime,
+    usage_age_bucket: Cell<(u64, &'static str)>,
     cell_collapsed: Cell<bool>,
     collapsed_body: Cell<bool>,
     state: ToolCellStatus,
@@ -547,6 +555,13 @@ struct WebFetchLayout {
 }
 
 impl WebFetchToolCell {
+    pub(crate) fn set_started_at(&mut self, started_at: SystemTime) {
+        self.started_at = started_at;
+        self.usage_age_bucket
+            .set(super::formatting::usage_age_bucket(started_at));
+        self.layout_cache.invalidate();
+    }
+
     pub(crate) fn body_collapsed(&self) -> bool {
         self.collapsed_body.get()
     }
@@ -578,20 +593,23 @@ impl WebFetchToolCell {
     }
 
     fn collapsed_summary_lines(&self) -> Vec<Line<'static>> {
-        trim_empty_lines(self.pre_lines.clone())
-            .into_iter()
-            .take(2)
-            .collect()
+        let mut lines = vec![super::formatting::usage_age_line("Tool", self.started_at)];
+        lines.extend(trim_empty_lines(self.pre_lines.clone()).into_iter().take(2));
+        lines
     }
 
     fn expanded_display_lines(&self) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
+        let mut lines = vec![super::formatting::usage_age_line("Tool", self.started_at)];
         lines.extend(self.pre_lines.clone());
         lines.extend(self.folded_body_lines());
         lines
     }
 
     fn layout_for_width(&self, width: u16) -> std::cell::Ref<'_, WebFetchLayout> {
+        let age_bucket = super::formatting::usage_age_bucket(self.started_at);
+        if self.usage_age_bucket.replace(age_bucket) != age_bucket {
+            self.layout_cache.invalidate();
+        }
         self.layout_cache.get_or_compute(width, |w| {
             #[cfg(feature = "test-helpers")]
             bump_web_fetch_layout_builds();
@@ -604,7 +622,8 @@ impl WebFetchToolCell {
             return WebFetchLayout::default();
         }
 
-        let pre = trim_empty_lines(self.pre_lines.clone());
+        let mut pre = vec![super::formatting::usage_age_line("Tool", self.started_at)];
+        pre.extend(trim_empty_lines(self.pre_lines.clone()));
         let body = self.folded_body_lines();
 
         let pre_wrapped = super::word_wrap_lines(&pre, width);
@@ -1050,6 +1069,7 @@ fn new_completed_browser_tool_call(
     let state = ToolCallState {
         id: HistoryId::ZERO,
         call_id: None,
+        started_at: None,
         status,
         title: browser_tool_title(&tool_name).to_owned(),
         duration: Some(duration),
@@ -1147,6 +1167,7 @@ fn new_completed_agent_tool_call(
     let state = ToolCallState {
         id: HistoryId::ZERO,
         call_id: None,
+        started_at: None,
         status,
         title: agent_tool_title(&tool_name, action.as_deref()),
         duration: Some(duration),
@@ -1291,6 +1312,7 @@ pub(crate) fn new_completed_mcp_tool_call(
     let state = ToolCallState {
         id: HistoryId::ZERO,
         call_id: None,
+        started_at: None,
         status,
         title: if success { "Complete" } else { "Error" }.to_owned(),
         duration: Some(duration),

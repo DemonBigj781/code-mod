@@ -1,3 +1,7 @@
+[build]
+# The Steam Deck is the primary local build host. Keep direct Cargo invocations
+# inside the same one-compiler-worker limit enforced by the root makefile.
+jobs = 1
+
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-arg=-mmacosx-version-min=10.14"]
-

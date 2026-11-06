@@ -37,6 +37,13 @@ session-stable random shortlist of up to five eligible models. See the tasks
 below for live-provider and transport boundaries; no installed binary is changed
 by this validation record.
 
+2026-11-04: the built-in Rustwright MCP now drives pinned Camoufox through native
+Juggler pipes instead of Chrome/Chromium CDP. The Linux x86-64 Cosmopolitan APE
+packages Camoufox with Mesa/LLVM software rendering and validates extraction,
+cache recovery, popup-created tabs, workspace-confined file inputs, fingerprint
+surfaces, and non-uniform PNG screenshots. The broader legacy-browser parity
+audit remains open below.
+
 ## Evidence sources
 
 - Prior-session history is authoritative for what was discussed. The key recent
@@ -530,9 +537,9 @@ by this validation record.
         executable, confines file operations to the active workspace, schedules
         calls one at a time, and preserves a case-insensitive user-defined server
         override.
-  - [x] Preserve the existing `code-rs/browser` runtime and native `browser` tool
-        while Rustwright parity is evaluated instead of replacing a working
-        control path speculatively.
+  - [x] Replace the built-in Rustwright Chrome/Chromium CDP launch path with
+        pinned Camoufox controlled through native Juggler pipes. Keep the
+        separate legacy `code-rs/browser` crate isolated from this MCP runtime.
   - [x] Validate the pinned MCP handshake, complete tool discovery, a
         representative browser call, clean shutdown, and the Cosmopolitan APE on
         Linux and Windows through GitHub Actions.
@@ -540,9 +547,16 @@ by this validation record.
         uploads, downloads, dialogs, tabs, cancellation, browser discovery, and
         cleanup against the existing browser tool before deciding whether either
         surface should replace the other.
-  - [ ] Keep Camoufox, crawler, and anti-detect alternatives as separate future
-        evaluations; they are not prerequisites for the native Rustwright MCP
-        integration.
+  - [x] Package pinned Camoufox, Mesa, and LLVM in the Linux x86-64 Cosmopolitan
+        APE, with manifest verification, atomic extraction, cache reuse,
+        corruption recovery, stale-lock recovery, and software-rendered headless
+        screenshots.
+  - [x] Validate popup-created tab discovery, selection, and close; aggregate
+        upload/drop limits; Camoufox fingerprint surfaces; and a visibly
+        non-black screenshot through the packaged MCP protocol.
+  - [ ] Evaluate crawler or other browser backends only if a concrete missing
+        capability remains after the legacy-browser parity audit; they are not
+        prerequisites for the current Camoufox integration.
 
 - [ ] Add an upstream/OpenAI Codex update strategy for internal borrowed code.
   - [ ] Treat `.github/workflows/upstream-merge.yml` as existing infrastructure

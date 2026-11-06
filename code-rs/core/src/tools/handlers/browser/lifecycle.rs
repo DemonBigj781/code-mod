@@ -78,9 +78,7 @@ pub(super) async fn handle_browser_open(
                         // Ensure the browser manager is marked enabled so status reflects reality
                         browser_manager.set_enabled_sync(true);
                         // Clear any lingering node highlight from previous commands
-                        let _ = browser_manager
-                            .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                            .await;
+                        let _ = browser_manager.clear_inspection_highlight().await;
                         // Navigate to the URL with detailed timing logs
                         let step_start = std::time::Instant::now();
                         tracing::info!("[browser_open] begin goto: {}", url);
@@ -155,9 +153,7 @@ pub(super) async fn handle_browser_close(sess: &Session, ctx: &ToolCallCtx) -> R
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
                 // Clear any lingering highlight before closing
-                let _ = browser_manager
-                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                    .await;
+                let _ = browser_manager.clear_inspection_highlight().await;
                 match browser_manager.stop().await {
                     Ok(()) => {
                         // Clear the browser manager from global
@@ -248,9 +244,7 @@ pub(super) async fn handle_browser_status(sess: &Session, ctx: &ToolCallCtx) -> 
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
-                let _ = browser_manager
-                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                    .await;
+                let _ = browser_manager.clear_inspection_highlight().await;
                 let status = browser_manager.get_status().await;
                 let status_msg = if status.enabled {
                     if let Some(url) = status.current_url {
@@ -283,9 +277,7 @@ pub(super) async fn handle_browser_targets(sess: &Session, ctx: &ToolCallCtx) ->
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
-                let _ = browser_manager
-                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                    .await;
+                let _ = browser_manager.clear_inspection_highlight().await;
 
                 match browser_manager.list_page_targets().await {
                     Ok(targets) => {
@@ -397,9 +389,7 @@ pub(super) async fn handle_browser_switch_target(
 
             match browser_manager.switch_to_target(&target_id).await {
                 Ok(()) => {
-                    let _ = browser_manager
-                        .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
-                        .await;
+                    let _ = browser_manager.clear_inspection_highlight().await;
                     let current_url = browser_manager
                         .get_current_url()
                         .await
@@ -504,4 +494,3 @@ pub(super) async fn handle_browser_close_target(
     )
     .await
 }
-

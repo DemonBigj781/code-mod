@@ -30,6 +30,13 @@ impl ChatWidget<'_> {
             config.tui.theme.is_dark,
         );
         config.tui.theme.name = mapped_theme;
+        if discover_repository_roots_with_depth(&config.cwd, 0).is_err()
+            && let Ok(Some(project)) =
+                code_core::project_registry::Registry::new(&config.code_home).active()
+            && project.validate_path().is_ok()
+        {
+            config.cwd = project.path;
+        }
         remember_cwd_history(&config.cwd);
 
         let (code_op_tx, code_op_rx) = unbounded_channel::<Op>();
@@ -69,6 +76,12 @@ impl ChatWidget<'_> {
                 .iter()
                 .map(|command| command.name.clone())
                 .collect(),
+        );
+        bottom_pane.set_project_aliases(
+            code_core::project_registry::Registry::new(&config.code_home)
+                .list()
+                .map(|projects| projects.into_iter().map(|project| project.name).collect())
+                .unwrap_or_default(),
         );
 
         let mut new_widget = Self {

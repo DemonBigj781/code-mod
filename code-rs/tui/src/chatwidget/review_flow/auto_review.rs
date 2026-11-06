@@ -2,16 +2,8 @@ use super::super::*;
 
 impl ChatWidget<'_> {
     pub(in crate::chatwidget) fn auto_review_git_root(&self) -> Option<PathBuf> {
-        self.run_git_command(["rev-parse", "--show-toplevel"], |stdout| {
-            let root = stdout.lines().next().unwrap_or("").trim();
-            if root.is_empty() {
-                Err("auto review git root unavailable".to_owned())
-            } else {
-                Ok(root.to_owned())
-            }
-        })
-        .ok()
-        .map(PathBuf::from)
+        let mut roots = self.repository_scope().repositories;
+        (roots.len() == 1).then(|| roots.remove(0))
     }
 
     pub(in crate::chatwidget) fn auto_review_baseline_path(&self) -> Option<PathBuf> {
@@ -95,14 +87,16 @@ impl ChatWidget<'_> {
             self.take_or_capture_auto_review_baseline()
         };
 
-        if let Some(base) = base_snapshot {
-            self.launch_background_review(Some(base));
-        }
+        self.launch_background_review(base_snapshot);
     }
 
     pub(in crate::chatwidget) fn auto_review_has_changes_since(&self, reviewed: &GhostCommit) -> bool {
+        let Some(repo_path) = self.auto_review_git_root() else {
+            return true;
+        };
         let reviewed_id = reviewed.id();
-        let tracked_changes = match self.run_git_command(
+        let tracked_changes = match self.run_git_command_at(
+            &repo_path,
             ["diff", "--name-only", reviewed_id],
             |stdout| {
                 Ok(stdout.lines().any(|line| !line.trim().is_empty()))
@@ -119,7 +113,8 @@ impl ChatWidget<'_> {
             return true;
         }
 
-        let snapshot_paths = match self.run_git_command(
+        let snapshot_paths = match self.run_git_command_at(
+            &repo_path,
             ["ls-tree", "-r", "--name-only", reviewed_id],
             |stdout| {
                 let mut paths = HashSet::new();
@@ -140,7 +135,8 @@ impl ChatWidget<'_> {
 
         
 
-        match self.run_git_command(
+        match self.run_git_command_at(
+            &repo_path,
             ["ls-files", "--others", "--exclude-standard"],
             |stdout| {
                 Ok(stdout
@@ -179,7 +175,10 @@ impl ChatWidget<'_> {
         if let Some(existing) = self.auto_review_baseline.take() {
             return Some(existing);
         }
-        match self.capture_auto_turn_commit("auto review baseline snapshot", None) {
+        let Some(repo_path) = self.auto_review_git_root() else {
+            return None;
+        };
+        match Self::capture_auto_review_baseline_for_path(repo_path) {
             Ok(commit) => Some(commit),
             Err(err) => {
                 tracing::warn!("failed to capture auto review baseline: {err}");
@@ -262,6 +261,7 @@ impl ChatWidget<'_> {
         let turn_context = self.turn_context_block();
         let prefer_fallback = had_notice || had_fixed_indicator;
         let session_id = self.session_id;
+        let repository_scope = self.repository_scope();
         tokio::spawn(async move {
             run_background_review(
                 session_id,
@@ -270,6 +270,7 @@ impl ChatWidget<'_> {
                 base_snapshot_for_task,
                 turn_context,
                 prefer_fallback,
+                repository_scope,
             )
             .await;
         });
@@ -680,10 +681,15 @@ impl ChatWidget<'_> {
         if let Some(summary_text) = summary_text {
             line.push_str(". ");
             line.push_str(&summary_text);
-        } else {
+        } else if !branch.is_empty() {
             let _ = write!(line, " in '{branch}'");
         }
-        if has_path {
+        if branch.is_empty() {
+            if has_path {
+                let _ = write!(line, " in {path_text}.");
+            }
+            line.push_str(" Review the findings in the active workspace.");
+        } else if has_path {
             line.push(' ');
             let _ = write!(line, "Merge {path_text} to apply fixes.");
         }
@@ -780,6 +786,7 @@ impl ChatWidget<'_> {
             agent_id,
             snapshot,
         } = event;
+        let review_ran = agent_id.is_some();
         // Normalize zero-count "issues" so the indicator and developer notes stay
         // aligned with the overlay: if the parser could not produce a findings list,
         // treat the run as clean instead of "fixed".
@@ -823,16 +830,30 @@ impl ChatWidget<'_> {
             .map(|s| format!("Summary: {s}"));
         let errored = error.is_some();
         let indicator_status = if let Some(err) = error {
-            developer_note = Some(format!(
-                "[developer] Background auto-review failed.\n\nThis auto-review ran in an isolated git worktree and did not modify your current workspace.\n\nWorktree: '{branch}'\nWorktree path: {}\n{snapshot_note}\n{agent_note}\nError: {err}",
-                worktree_path.display(),
-            ));
+            developer_note = Some(if branch.is_empty() {
+                format!(
+                    "[developer] Background auto-review failed.\n\nThis auto-review ran read-only against the active workspace and did not modify it.\n\nWorkspace path: {}\n{agent_note}\nError: {err}",
+                    worktree_path.display(),
+                )
+            } else {
+                format!(
+                    "[developer] Background auto-review failed.\n\nThis auto-review ran in an isolated git worktree and did not modify your current workspace.\n\nWorktree: '{branch}'\nWorktree path: {}\n{snapshot_note}\n{agent_note}\nError: {err}",
+                    worktree_path.display(),
+                )
+            });
             AutoReviewIndicatorStatus::Failed
         } else if has_findings {
-            let mut note = format!(
-                "[developer] Background auto-review completed and reported {findings} issue(s).\n\nA separate LLM ran /review (and may have run auto-resolve) in an isolated git worktree. Any proposed fixes live only in that worktree until you merge them.\n\nNext: Decide if the findings are genuine. If yes, Merge the worktree '{branch}' to apply the changes (or cherry-pick selectively). If not, do not merge.\n\nWorktree path: {}\n{snapshot_note}\n{agent_note}",
-                worktree_path.display(),
-            );
+            let mut note = if branch.is_empty() {
+                format!(
+                    "[developer] Background auto-review completed and reported {findings} issue(s).\n\nA separate LLM reviewed the active workspace in read-only mode. It did not modify files, and no Git worktree or merge is required.\n\nNext: Decide whether the findings are genuine and apply any necessary fixes in the active workspace.\n\nWorkspace path: {}\n{agent_note}",
+                    worktree_path.display(),
+                )
+            } else {
+                format!(
+                    "[developer] Background auto-review completed and reported {findings} issue(s).\n\nA separate LLM ran /review (and may have run auto-resolve) in an isolated git worktree. Any proposed fixes live only in that worktree until you merge them.\n\nNext: Decide if the findings are genuine. If yes, Merge the worktree '{branch}' to apply the changes (or cherry-pick selectively). If not, do not merge.\n\nWorktree path: {}\n{snapshot_note}\n{agent_note}",
+                    worktree_path.display(),
+                )
+            };
             if let Some(summary_note) = summary_note {
                 note.push('\n');
                 note.push_str(&summary_note);
@@ -874,7 +895,18 @@ impl ChatWidget<'_> {
             errored,
             inflight_base,
             inflight_snapshot,
+            review_ran,
         );
+
+        // A workspace-mode review has no Git baseline to queue. If edits arrived while another
+        // review was active, `turn_had_code_edits` remains set; start that deferred review now
+        // instead of dropping it merely because no commit range exists.
+        if self.background_review.is_none()
+            && self.pending_auto_review_range.is_none()
+            && self.turn_had_code_edits
+        {
+            self.maybe_trigger_auto_review();
+        }
 
         // Auto review findings are inserted as history notices, but Auto Drive resumes
         // from cached conversation state. Rebuild before resuming so the coordinator
@@ -893,8 +925,9 @@ impl ChatWidget<'_> {
         errored: bool,
         inflight_base: Option<GhostCommit>,
         snapshot: Option<String>,
+        review_ran: bool,
     ) {
-        let was_skipped = !has_findings && !errored && snapshot.is_none();
+        let was_skipped = !has_findings && !errored && snapshot.is_none() && !review_ran;
 
         if !errored
             && let Some(id) = snapshot.as_ref() {

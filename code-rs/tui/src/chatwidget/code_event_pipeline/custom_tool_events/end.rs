@@ -239,6 +239,14 @@ impl ChatWidget<'_> {
             ctx.content.clone(),
         );
         let mut completed = completed;
+        if let Some(idx) = ctx.resolved_idx
+            && let Some(started_at) = self.history_cells
+                .get(idx)
+                .and_then(|cell| cell.as_any().downcast_ref::<history_cell::RunningToolCallCell>())
+                .map(|running| running.state().started_at)
+        {
+            completed.set_started_at(started_at);
+        }
         completed.parent_call_id.clone_from(&ctx.parent_call_id);
         if let Some(idx) = ctx.resolved_idx {
             self.history_replace_at(idx, Box::new(completed));

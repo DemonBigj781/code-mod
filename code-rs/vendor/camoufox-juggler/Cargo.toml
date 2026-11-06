@@ -1,0 +1,46 @@
+[package]
+name = "camoufox-juggler"
+description = "Native Rust client for Firefox's Juggler automation protocol (pipe transport, browser/page sessions, fingerprint verification)"
+version = "0.9.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MPL-2.0"
+authors = ["Pedro <support@pedrovisk.dev>"]
+repository = "https://github.com/Pedrvisk/camoufox-rust"
+homepage = "https://github.com/Pedrvisk/camoufox-rust"
+documentation = "https://github.com/Pedrvisk/camoufox-rust#readme"
+keywords = ["camoufox", "juggler", "firefox", "automation", "cdp"]
+categories = ["web-programming", "asynchronous"]
+
+[dependencies]
+camoufox-core = { git = "https://github.com/Pedrvisk/camoufox-rust.git", rev = "933ae2e8ba7a00e254b4d4075eb0e85a527289fc", package = "camoufox-core" }
+camoufox = { git = "https://github.com/Pedrvisk/camoufox-rust.git", rev = "933ae2e8ba7a00e254b4d4075eb0e85a527289fc", package = "camoufox" }
+camoufox-store = { git = "https://github.com/Pedrvisk/camoufox-rust.git", rev = "933ae2e8ba7a00e254b4d4075eb0e85a527289fc", package = "camoufox-store" }
+camoufox-virtdisplay = { git = "https://github.com/Pedrvisk/camoufox-rust.git", rev = "933ae2e8ba7a00e254b4d4075eb0e85a527289fc", package = "camoufox-virtdisplay" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "fs", "sync", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+log = "0.4"
+futures-util = "0.3"
+rand = "0.8"
+base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["fs", "signal"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+env_logger = "0.11"
+
+[lib]
+name = "camoufox_juggler"

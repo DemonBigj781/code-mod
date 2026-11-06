@@ -62,12 +62,30 @@ pub(super) async fn install_console_capture(page: &Page, context: &str) {
 impl BrowserManager {
     /// Execute JavaScript code with enhanced return value handling.
     pub async fn execute_javascript(&self, code: &str) -> Result<serde_json::Value> {
+        if !self.is_external_connection().await {
+            let value = self.embedded_browser().await?.evaluate(code).await?;
+            self.update_activity().await;
+            return Ok(serde_json::json!({
+                "success": true,
+                "value": value,
+                "logs": [],
+                "errors": [],
+                "meta": {
+                    "backend": "camoufox-juggler"
+                }
+            }));
+        }
         let page = self.get_or_create_page().await?;
         page.execute_javascript(code).await
     }
 
     /// Capture console logs from the browser, including errors and unhandled rejections.
     pub async fn get_console_logs(&self, lines: Option<usize>) -> Result<serde_json::Value> {
+        if !self.is_external_connection().await {
+            let logs = self.embedded_browser().await?.console_messages(lines).await?;
+            self.update_activity().await;
+            return Ok(logs);
+        }
         let page = self.get_or_create_page().await?;
 
         // 1) Prefer CDP-captured buffer (event-based). If we have entries, return them.

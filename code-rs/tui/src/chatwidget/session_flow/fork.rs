@@ -43,6 +43,12 @@ impl ChatWidget<'_> {
                 .map(|command| command.name.clone())
                 .collect(),
         );
+        bottom_pane.set_project_aliases(
+            code_core::project_registry::Registry::new(&config.code_home)
+                .list()
+                .map(|projects| projects.into_iter().map(|project| project.name).collect())
+                .unwrap_or_default(),
+        );
 
         let mut w = Self {
             app_event_tx,

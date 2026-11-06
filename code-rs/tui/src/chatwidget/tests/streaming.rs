@@ -358,6 +358,7 @@
             let state = ToolCallState {
                 id: HistoryId::ZERO,
                 call_id: Some("tool-1".to_string()),
+                started_at: None,
                 status: ToolStatus::Success,
                 title: "Tool...".to_string(),
                 duration: None,
@@ -618,6 +619,7 @@
             let state = ToolCallState {
                 id: HistoryId::ZERO,
                 call_id: Some("tool-short".to_string()),
+                started_at: None,
                 status: ToolStatus::Success,
                 title: "Tool".to_string(),
                 duration: None,

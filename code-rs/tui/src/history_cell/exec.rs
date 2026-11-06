@@ -37,7 +37,6 @@ layout_build_counter!(
 
 use super::{
     action_enum_from_parsed,
-    exec_command_lines,
     emphasize_shell_command_name,
     first_context_path,
     format_inline_script_for_display,
@@ -81,6 +80,7 @@ pub(crate) struct ExecCell {
     has_bold_command: bool,
     wait_state: std::cell::RefCell<ExecWaitState>,
     layout_cache: super::layout_cache::LayoutCache<ExecRenderLayout>,
+    usage_age_bucket: std::cell::Cell<(u64, &'static str)>,
     cell_collapsed: std::cell::Cell<bool>,
     collapsed_output: std::cell::Cell<bool>,
     pub(crate) parent_call_id: Option<String>,
@@ -348,6 +348,7 @@ impl ExecCell {
             notes: wait_notes_from_record(&record.wait_notes),
         };
         let start_time = matches!(record.status, ExecStatus::Running).then(Instant::now);
+        let usage_age_bucket = super::formatting::usage_age_bucket(record.started_at);
 
         let collapsed_output = should_auto_collapse_output(output.as_ref());
 
@@ -362,6 +363,7 @@ impl ExecCell {
             has_bold_command,
             wait_state: std::cell::RefCell::new(wait_state),
             layout_cache: super::layout_cache::LayoutCache::new(),
+            usage_age_bucket: std::cell::Cell::new(usage_age_bucket),
             cell_collapsed: std::cell::Cell::new(false),
             collapsed_output: std::cell::Cell::new(collapsed_output),
             parent_call_id: None,
@@ -395,6 +397,10 @@ impl ExecCell {
     }
 
     fn layout_for_width(&self, width: u16) -> std::cell::Ref<'_, ExecRenderLayout> {
+        let age_bucket = super::formatting::usage_age_bucket(self.record.started_at);
+        if self.usage_age_bucket.replace(age_bucket) != age_bucket {
+            self.layout_cache.invalidate();
+        }
         self.layout_cache.get_or_compute(width, |w| {
             #[cfg(feature = "test-helpers")]
             bump_exec_layout_builds();
@@ -432,19 +438,18 @@ impl ExecCell {
     }
 
     fn expanded_display_lines(&self) -> Vec<Line<'static>> {
-        exec_command_lines(
-            &self.command,
-            &self.parsed,
-            self.output.as_ref(),
-            self.stream_preview.as_ref(),
-            self.start_time,
-        )
+        let (mut pre, out, status) = self.exec_render_parts();
+        pre.extend(out);
+        if let Some(status) = status {
+            pre.push(status);
+        }
+        pre
     }
 
     fn collapsed_summary_lines(&self) -> Vec<Line<'static>> {
         trim_empty_lines(self.expanded_display_lines())
             .into_iter()
-            .take(1)
+            .take(2)
             .collect()
     }
 
@@ -620,7 +625,7 @@ impl ExecCell {
         let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
 
         let elapsed_since_start = self.elapsed_since_start();
-        let (pre, mut out, status) = if self.parsed.is_empty() {
+        let (mut pre, mut out, status) = if self.parsed.is_empty() {
             self.exec_render_parts_generic(status_label)
         } else {
             match self.parsed_meta.as_ref() {
@@ -641,6 +646,11 @@ impl ExecCell {
                 ),
             }
         };
+
+        pre.insert(
+            0,
+            super::formatting::usage_age_line("Command", self.record.started_at),
+        );
 
         if self.output.is_some() {
             let extra_lines = self.wait_extras(&wait_state);
@@ -913,17 +923,7 @@ pub(crate) fn new_completed_exec_command(
 }
 
 pub(crate) fn display_lines_from_record(record: &ExecRecord) -> Vec<Line<'static>> {
-    let output = super::formatting::record_output(record);
-    let stream_preview = super::formatting::build_streaming_preview(record);
-    let start_time = matches!(record.status, ExecStatus::Running).then(Instant::now);
-    let lines = crate::history_cell::exec_command_lines(
-        &record.command,
-        &record.parsed,
-        output.as_ref(),
-        stream_preview.as_ref(),
-        start_time,
-    );
-    trim_empty_lines(lines)
+    trim_empty_lines(ExecCell::from_record(record.clone()).expanded_display_lines())
 }
 
 
@@ -941,6 +941,7 @@ fn command_has_bold_token(command: &[String]) -> bool {
 mod tests {
     use super::*;
     use crate::history_cell::CollapsedContext;
+    use crate::history_cell::formatting::line_to_plain_text;
 
     fn output_with_lines(count: usize) -> CommandOutput {
         CommandOutput {
@@ -951,6 +952,26 @@ mod tests {
                 .join("\n"),
             stderr: String::new(),
         }
+    }
+
+    #[test]
+    fn command_usage_age_is_rendered_above_the_command() {
+        let mut record = build_exec_record(
+            vec!["echo".to_owned(), "hi".to_owned()],
+            Vec::new(),
+            Some(output_with_lines(1)),
+        );
+        record.started_at = SystemTime::now()
+            .checked_sub(Duration::from_secs(7_200))
+            .expect("two hours before now");
+        let cell = ExecCell::from_record(record);
+        let lines = cell.display_lines();
+
+        assert_eq!(line_to_plain_text(&lines[0]), "Command used 2 hours ago");
+        assert!(
+            line_to_plain_text(&lines[1]).contains("echo hi"),
+            "command should immediately follow its usage timestamp"
+        );
     }
 
     #[test]

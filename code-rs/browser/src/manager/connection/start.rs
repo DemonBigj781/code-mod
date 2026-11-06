@@ -7,6 +7,7 @@ use fs2::FileExt;
 use futures::StreamExt;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tokio::time::Instant;
@@ -113,11 +114,25 @@ fn resolve_chrome_log_path() -> Option<PathBuf> {
 
 impl BrowserManager {
     pub async fn start(&self) -> Result<()> {
-        if self.browser.lock().await.is_some() {
+        if self.browser.lock().await.is_some() || self.embedded_browser.lock().await.is_some() {
             return Ok(());
         }
 
         let config = self.config.read().await.clone();
+
+        let is_external = config.connect_ws.is_some() || config.connect_port.is_some();
+        if !is_external {
+            info!("Launching embedded Camoufox through native Juggler");
+            let browser = Arc::new(code_rustwright_mcp::EmbeddedBrowser::new());
+            browser
+                .resize(config.viewport.width, config.viewport.height)
+                .await?;
+            browser.navigate("about:blank").await?;
+            *self.embedded_browser.lock().await = Some(browser);
+            self.start_idle_monitor().await;
+            self.update_activity().await;
+            return Ok(());
+        }
 
         // 1) Attach to a live Chrome, if requested
         if let Some(ws) = config.connect_ws.clone() {

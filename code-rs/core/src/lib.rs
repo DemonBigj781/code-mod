@@ -183,6 +183,7 @@ mod patch_harness;
 pub mod plan_tool;
 pub mod project_doc;
 pub mod project_features;
+pub mod project_registry;
 mod rollout;
 pub(crate) mod safety;
 pub mod session_catalog;

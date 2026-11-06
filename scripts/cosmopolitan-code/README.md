@@ -5,22 +5,30 @@ It does not replace or alter the native Linux and Windows build outputs.
 
 ## Build
 
-Run from a clean, committed repository checkout. Use the command entry point
-with Python 3, Git, and GitHub CLI (`gh`). On Windows, use `python` instead of
-`python3` if that is the installed command name.
+Use the root `make build` target or the command entry point with Python 3, Git,
+and GitHub CLI (`gh`). Compilation and tests for this repository run only in
+GitHub Actions against the exact committed source revision. Local build and test
+targets fail closed instead of falling back to this machine or another host.
 
-| Command | Behavior |
-| --- | --- |
-| `build-action` | Dispatch the `Main` workflow, wait for Linux and Windows startup checks, and download the single executable and manifest. Push the commit first. |
-| `build-local` | Fetch the pinned SDK sources if absent and compile on Linux x86-64 with one worker. |
-| `test` | Verify the source commit, SDK pins, size, hash, and executable startup on the current host. |
-| `run` | Verify the manifest and forward CLI arguments to the executable. |
-| `publish-prerelease` | Publish an executable identical to the artifact tested on Linux and Windows. |
-| `publish-release` | Promote an existing prerelease with that same executable to the latest stable release. |
+- `build-auto`: Dispatch the active `Main` GitHub workflow for the exact
+  committed revision.
+- `build-action`: Dispatch the `Main` workflow, wait for Linux and Windows
+  startup checks, and download the single executable and manifest. Push the
+  commit first.
+- `build-local`: Refuse with an explanation that local compilation is disabled.
+- `test`: Verify the source commit, SDK pins, size, hash, and executable startup
+  on the current host.
+- `run`: Verify the manifest and forward CLI arguments to the executable.
+- `publish-prerelease`: Publish an executable identical to the artifact tested
+  on Linux and Windows.
+- `publish-release`: Promote an existing prerelease with that same executable
+  to the latest stable release.
+
+make build
+
+python3 scripts/cosmopolitan-code/commands.py build-auto
 
 python3 scripts/cosmopolitan-code/commands.py build-action
-
-python3 scripts/cosmopolitan-code/commands.py build-local
 
 python3 scripts/cosmopolitan-code/commands.py test
 
@@ -41,50 +49,68 @@ On Linux, the shell entry point accepts the same commands, for example:
 
 sh scripts/build-cosmopolitan-code.sh build-action
 
-Calling the shell entry point without a command retains its original local
-build behavior and output directory.
+The low-level shell build remains an implementation detail of the GitHub Actions
+runner. Do not invoke it locally for development validation.
 
 The script verifies the pinned Cosmopolitan fork and Rust-APE source revisions,
 then builds the fork's `toolchain` target for x86-64. Its runtime, C++ library,
-startup objects, headers, APE loader, and linker tools replace the released SDK
-runtime before any Code compilation. Bootstrap GCC binaries remain build tools;
-the final runtime comes from the fork's source, not the release archive.
+startup objects, headers, APE loader, and linker tools replace the bootstrap SDK
+runtime before any Code compilation. The temporary bootstrap is the modified GCC
+14.1.0 Cosmopolitan toolchain produced by the local `projects/cosmo` source tree;
+the final runtime still comes from Code's pinned fork source.
 
-The script creates a disposable copy of the committed Rust workspace and applies
-the APE-specific dependency adjustments and lockfile. Local and self-hosted
-builds use one compiler worker; GitHub-hosted runners may use their available
-workers. The native `code-rs/Cargo.lock` remains unchanged. The source-runtime
-SDK and Cargo outputs use `o/rust-ape-source/`, separate from older prebuilt-runtime
-caches. The release build disables fat LTO and keeps one codegen unit.
+The script creates a disposable source snapshot and applies the APE-specific
+dependency adjustments and lockfile. Actions builds archive the checked-out
+commit and may use all available GitHub-hosted runner workers. The native
+`code-rs/Cargo.lock` remains unchanged. The source-runtime SDK and Cargo outputs
+use a pin-addressed
+`o/rust-ape-source-<cosmopolitan-commit>-<rust-ape-commit>/` directory, separate
+from older or incompatible runtime caches. The release build disables fat LTO
+and keeps one codegen unit.
 
-Local builds require the full Cosmopolitan source checkout at
-`o/cosmopolitan-source` pinned to the revision in `pins.json`. `build-local`
-fetches it if absent; an existing checkout must match the pin and be clean.
-The default-branch GitHub workflow checks it out automatically and configures
-an APE interpreter on its disposable runner for the fork's build helpers.
-Local hosts must already support those helpers; the script does not install a
-system interpreter. Older sparse checkouts must be expanded before building.
+The APE also carries a deterministic Linux x86-64 Camoufox runtime ZIP as its
+final byte range. By default the Actions build packages
+`o/camoufox-runtime-prototype`; `COSMOPOLITAN_BROWSER_RUNTIME_SOURCE` selects an
+equivalent staged tree, and `COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE` selects an
+already packaged ZIP. If no source tree or archive is available, the build
+fails rather than producing an APE whose browser tools depend on host state.
+The packager fixes ZIP timestamps and ordering, excludes browser profiles, and
+records the size, mode, SHA-256, and symlink target of every payload entry.
 
-Compiler bootstrap first tries the SDK's pinned `cosmo.zip` archive, then the
-same version from the official `jart/cosmopolitan` GitHub release if the download
-fails. Both paths must match the SHA-256 in the pinned SDK source before the
-archive enters its cache. A hash mismatch stops the build; it never changes the
-source revision or compiler version to make a download succeed.
+The default-branch GitHub workflow checks out the full Cosmopolitan source at
+the revision pinned in `pins.json` and configures an APE interpreter on its
+disposable runner for the fork's build helpers.
+
+Compiler bootstrap never downloads a released `cosmocc` archive. By default it
+installs `$HOME/projects/cosmo/o/toolchain/compiler-payload/cosmocc-sdk.zip`
+read-only into Code's pin-addressed Rust-APE SDK. The archive's adjacent
+`BUILD.json`, embedded metadata, source commit, complete compiler-tree hash,
+file modes, and contained relative symlinks are validated before an atomic
+install. `COSMOPOLITAN_SOURCE_ROOT`, `COSMOPOLITAN_BOOTSTRAP_SDK`, and
+`COSMOPOLITAN_BOOTSTRAP_PROVENANCE` can select an equivalent local payload; no
+network fallback exists. An unidentified or different existing compiler SDK is
+preserved and rejected instead of overwritten.
+
+The compiler identity is recorded separately from the source-built fork runtime
+in the final artifact manifest. Release validation rejects unidentified or dirty
+compiler inputs.
 
 The output is placed in `o/cosmopolitan-code/`:
 
 - `code.com` — the x86-64 APE artifact.
 - `code.com.json` — source pins, architecture, artifact size, SHA-256, and hashes
-  identifying the source-built runtime, headers, loader, and linker.
+  identifying the source-built runtime, headers, loader, and linker. The
+  manifest also records the embedded browser archive size and SHA-256, runtime
+  tree SHA-256, file count, and Camoufox, Mesa, and LLVM pins.
 
 The build refuses to overwrite an existing output directory. Set
 `COSMOPOLITAN_CODE_OUTPUT` to a new directory to create another artifact.
 
 ## Validation
 
-Run the manifest and command tests with:
-
-python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'
+The `Test explicit project scope and memory Markdown` and existing APE workflow
+jobs run the Python and Rust validation on GitHub Actions. Local `make check`,
+`make test`, and focused Rust test targets intentionally refuse to run.
 
 The build runs `file`, Cosmopolitan `pecheck`, `code.com --version`, and
 `code.com --help` before publishing its output directory. To repeat those
@@ -92,11 +118,21 @@ checks:
 
 sh scripts/cosmopolitan-code/test-artifact.sh o/cosmopolitan-code/code.com o/cosmopolitan-code/code.com.json
 
-The `Main`-branch or manually dispatched workflow is restricted to `Main`. It first builds a
-small source-runtime probe on Linux, verifies its identity and checksum, and
-runs that identical probe on Windows. Only then does it build and test Code and
-run the identical Code artifact on Windows. A runtime failure therefore blocks
-the expensive full build without bypassing any final verification.
+The manifest validator also opens the appended ZIP, verifies that it is the
+exact artifact suffix, checks its inventory against the embedded runtime
+manifest, and rechecks the pinned component identities. On first browser use,
+Code extracts that same inventory under `$CODE_HOME/browser/runtime` using a
+lock and staging directory. Every cached file, mode, relative symlink, size,
+and SHA-256 is validated before reuse; an invalid cache is quarantined and
+replaced atomically. `CODE_BROWSER_RUNTIME_DIR` can point development builds at
+an unpacked runtime with the same manifest contract.
+
+The `Main`-branch or manually dispatched workflow is restricted to `Main`. It
+first builds a small source-runtime probe on Linux, verifies its identity and
+checksum, and runs that identical probe on Windows. Only then does it build and
+test Code and run the identical Code artifact on Windows. A runtime failure
+therefore blocks the expensive full build without bypassing any final
+verification.
 
 The runtime stage is also available as `sh scripts/build-cosmopolitan-runtime.sh`
 and writes `o/cosmopolitan-runtime/`. The full build uses the same preparation

@@ -352,6 +352,15 @@ struct GhostSnapshotsDisabledReason {
     hint: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RepositoryScope {
+    key: String,
+    label: String,
+    root: PathBuf,
+    repositories: Vec<PathBuf>,
+    error: Option<String>,
+}
+
 #[derive(Clone, Copy)]
 struct ConversationSnapshot {
     user_turns: usize,
@@ -1137,7 +1146,7 @@ impl BackgroundOrderTicket {
 
 #[derive(Clone)]
 struct GhostSnapshot {
-    commit: GhostCommit,
+    repositories: Vec<(PathBuf, GhostCommit)>,
     captured_at: DateTime<Local>,
     summary: Option<String>,
     conversation: ConversationSnapshot,
@@ -1152,7 +1161,7 @@ enum UndoPreviewRole {
 
 impl GhostSnapshot {
     fn new(
-        commit: GhostCommit,
+        repositories: Vec<(PathBuf, GhostCommit)>,
         summary: Option<String>,
         conversation: ConversationSnapshot,
         history: HistorySnapshot,
@@ -1165,8 +1174,9 @@ impl GhostSnapshot {
                 Some(trimmed.to_owned())
             }
         });
+        debug_assert!(!repositories.is_empty());
         Self {
-            commit,
+            repositories,
             captured_at: Local::now(),
             summary,
             conversation,
@@ -1175,11 +1185,15 @@ impl GhostSnapshot {
     }
 
     fn commit(&self) -> &GhostCommit {
-        &self.commit
+        &self.repositories[0].1
+    }
+
+    fn repositories(&self) -> &[(PathBuf, GhostCommit)] {
+        &self.repositories
     }
 
     fn short_id(&self) -> String {
-        let id = self.commit.id();
+        let id = self.commit().id();
         id[..id.len().min(8)].to_string()
     }
 
@@ -1221,6 +1235,7 @@ struct GhostSnapshotRequest {
     conversation: ConversationSnapshot,
     history: HistorySnapshot,
     started_at: Instant,
+    scope: RepositoryScope,
 }
 
 impl GhostSnapshotRequest {
@@ -1228,12 +1243,14 @@ impl GhostSnapshotRequest {
         summary: Option<String>,
         conversation: ConversationSnapshot,
         history: HistorySnapshot,
+        scope: RepositoryScope,
     ) -> Self {
         Self {
             summary,
             conversation,
             history,
             started_at: Instant::now(),
+            scope,
         }
     }
 }

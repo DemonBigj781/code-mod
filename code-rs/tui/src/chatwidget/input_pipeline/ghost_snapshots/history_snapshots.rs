@@ -2,7 +2,7 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_ghost_snapshot_finished(
         &mut self,
         job_id: u64,
-        result: Result<GhostCommit, GitToolingError>,
+        result: Result<Vec<(PathBuf, GhostCommit)>, GitToolingError>,
         elapsed: Duration,
     ) {
         let Some((active_id, request)) = self.active_ghost_snapshot.take() else {

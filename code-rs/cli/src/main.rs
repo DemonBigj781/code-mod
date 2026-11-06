@@ -1013,7 +1013,8 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         Some(Subcommand::Secrets(secrets_cli)) => {
             let code_home = code_core::config::find_code_home()
                 .context("failed to resolve CODE_HOME for secrets store")?;
-            let keyring_store = code_keyring_store::best_keyring_store();
+            let keyring_store =
+                code_keyring_store::best_keyring_store_for_code_home(&code_home);
 
             let scope_selection = |scope: SecretsScopeArg,
                                    cwd: Option<PathBuf>,

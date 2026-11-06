@@ -1,6 +1,5 @@
 """Exercise the shipped native history worker without credentials or real stores."""
 
-import errno
 import json
 import os
 from pathlib import Path
@@ -8,18 +7,21 @@ import subprocess
 import sys
 import tempfile
 
+from commands import artifact_process
+
 
 def run_worker(artifact, payload, env):
-    command = [str(artifact), "--code-session-history-worker"]
-    try:
-        result = subprocess.run(command, input=payload, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, env=env, timeout=40, check=False)
-    except OSError as error:
-        if os.name != "posix" or error.errno != errno.ENOEXEC:
-            raise
-        result = subprocess.run(["sh", *command], input=payload, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, env=env, timeout=40, check=False)
-    return result
+    return artifact_process(
+        subprocess.run,
+        artifact,
+        ["--code-session-history-worker"],
+        input=payload,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        timeout=40,
+        check=False,
+    )
 
 
 def invoke(artifact, payload, env):
@@ -30,15 +32,15 @@ def invoke(artifact, payload, env):
 
 
 def check_worker_deadline(artifact, env):
-    command = [str(artifact), "--code-session-history-worker"]
-    try:
-        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, env=env)
-    except OSError as error:
-        if os.name != "posix" or error.errno != errno.ENOEXEC:
-            raise
-        process = subprocess.Popen(["sh", *command], stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    process = artifact_process(
+        subprocess.Popen,
+        artifact,
+        ["--code-session-history-worker"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
     try:
         # Keep stdin open: the worker itself must terminate a blocked request,
         # rather than relying on this test or the normal parent supervisor.

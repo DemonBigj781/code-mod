@@ -12,13 +12,20 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import Callable
+from typing import TypeVar
 
-from artifact_contract import ArtifactContractError, validate_artifact
+from artifact_contract import (
+    ArtifactContractError,
+    validate_artifact,
+    validate_development_artifact,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = "cosmopolitan-code-ape.yml"
 ARTIFACT = "cosmopolitan-code-ape"
+ProcessResult = TypeVar("ProcessResult")
 DEFAULT_BRANCH = "Main"
 
 
@@ -49,20 +56,40 @@ def artifact_files(output: Path) -> tuple[Path, Path]:
     return output / "code.com", output / "code.com.json"
 
 
-def artifact_command(artifact: Path, args: list[str]) -> int:
-    if os.name != "nt":
-        artifact.chmod(artifact.stat().st_mode | 0o111)
+def artifact_process(
+    factory: Callable[..., ProcessResult],
+    artifact: Path,
+    args: list[str],
+    **kwargs,
+) -> ProcessResult:
+    command = [str(artifact), *args]
     try:
-        return subprocess.run([str(artifact), *args], cwd=ROOT).returncode
+        return factory(command, **kwargs)
     except OSError as error:
         if os.name == "nt" or error.errno != errno.ENOEXEC:
             raise
-        return subprocess.run(["sh", str(artifact), *args], cwd=ROOT).returncode
+        return factory(["sh", *command], **kwargs)
+
+
+def artifact_command(artifact: Path, args: list[str]) -> int:
+    if os.name != "nt":
+        artifact.chmod(artifact.stat().st_mode | 0o111)
+    return artifact_process(subprocess.run, artifact, args, cwd=ROOT).returncode
+
+
+def validate_output_artifact(output: Path, commit: str) -> dict:
+    artifact, manifest = artifact_files(output)
+    try:
+        metadata = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ArtifactContractError(f"cannot read manifest {manifest}: {error}") from error
+    validator = validate_artifact if metadata.get("source_clean") is True else validate_development_artifact
+    return validator(artifact, manifest, expected_source_commit=commit)
 
 
 def test_artifact(output: Path, commit: str) -> dict:
-    artifact, manifest = artifact_files(output)
-    result = validate_artifact(artifact, manifest, expected_source_commit=commit)
+    artifact, _ = artifact_files(output)
+    result = validate_output_artifact(output, commit)
     for args in (["--version"], ["--help"]):
         if artifact_command(artifact, args):
             raise ValueError(f"Artifact startup failed: {' '.join(args)}")
@@ -89,6 +116,13 @@ def require_cross_platform_build(commit: str) -> dict:
 
 
 def build_action(output: Path, commit: str) -> None:
+    if command(["git", "status", "--porcelain"], capture=True):
+        raise ValueError(
+            "GitHub Actions cannot build uncommitted source until the exact-source "
+            "snapshot workflow is committed; local builds are disabled for this repository."
+        )
+    if source_commit() != commit:
+        raise ValueError("Actions can only build the unchanged committed source revision.")
     if command(["git", "branch", "--show-current"], capture=True) != DEFAULT_BRANCH:
         raise ValueError(f"Actions builds are restricted to {DEFAULT_BRANCH}.")
     remote = command(["git", "ls-remote", "origin", f"refs/heads/{DEFAULT_BRANCH}"], capture=True)
@@ -121,19 +155,15 @@ def build_action(output: Path, commit: str) -> None:
 
 
 def build_local(output: Path) -> None:
-    if output.exists():
-        raise ValueError(f"Refusing to overwrite artifact directory: {output}")
-    source = ROOT / "o/cosmopolitan-source"
-    if not source.exists():
-        pins = json.loads((Path(__file__).with_name("pins.json")).read_text(encoding="utf-8"))
-        source.parent.mkdir(parents=True, exist_ok=True)
-        command(["git", "clone", "--filter=blob:none", "--no-checkout",
-                 pins["cosmopolitan_repository"], str(source)])
-        command(["git", "-C", str(source), "checkout", "--detach", pins["cosmopolitan_commit"]])
-    env = os.environ.copy()
-    env.update(COSMOPOLITAN_CODE_OUTPUT=str(output), CARGO_BUILD_JOBS="1",
-               CMAKE_BUILD_PARALLEL_LEVEL="1", MAKEFLAGS="-j1")
-    command(["sh", str(ROOT / "scripts/build-cosmopolitan-code.sh")], env=env)
+    del output
+    raise ValueError(
+        "Local builds are disabled for this repository. Use GitHub Actions against the exact "
+        "intended source revision."
+    )
+
+
+def build_auto(output: Path, commit: str) -> None:
+    build_action(output, commit)
 
 
 def publish(output: Path, commit: str, tag: str, *, prerelease: bool) -> None:
@@ -191,8 +221,9 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
     for name, help_text in (
+        ("build-auto", "Build through GitHub Actions for the exact committed revision."),
         ("build-action", "Build on GitHub and test the same executable on Linux and Windows."),
-        ("build-local", "Build locally with one compiler worker."),
+        ("build-local", "Explain that local builds are disabled for this repository."),
         ("test", "Check the manifest, source commit, hash, and executable startup."),
         ("run", "Run the validated executable with CLI arguments."),
         ("publish-prerelease", "Publish the artifact tested on Linux and Windows as a prerelease."),
@@ -210,17 +241,23 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
-        commit = require_clean_source() if args.command.startswith(("build-", "publish-")) else source_commit()
+        commit = (
+            require_clean_source()
+            if args.command == "build-action" or args.command.startswith("publish-")
+            else source_commit()
+        )
         output = output_path(args.output, commit)
-        if args.command == "build-action":
+        if args.command == "build-auto":
+            build_auto(output, commit)
+        elif args.command == "build-action":
             build_action(output, commit)
         elif args.command == "build-local":
             build_local(output)
         elif args.command == "test":
             test_artifact(output, commit)
         elif args.command == "run":
-            artifact, manifest = artifact_files(output)
-            validate_artifact(artifact, manifest, expected_source_commit=commit)
+            artifact, _ = artifact_files(output)
+            validate_output_artifact(output, commit)
             forwarded = args.args[1:] if args.args[:1] == ["--"] else args.args
             return artifact_command(artifact, forwarded)
         else:

@@ -1,5 +1,7 @@
 mod actor;
+mod camoufox_runtime;
 mod config;
+mod embedded;
 mod server;
 mod shaping;
 mod tools;
@@ -8,6 +10,13 @@ mod transport;
 use rmcp::ServiceExt;
 use server::BrowserServer;
 use transport::LifecycleStdio;
+
+pub use actor::EmbeddedTab;
+pub use embedded::EmbeddedBrowser;
+pub use embedded::EmbeddedPageInfo;
+pub use embedded::EmbeddedScreenshot;
+pub use rustwright_agent::BrowserError;
+pub use rustwright_agent::ScreenshotType;
 
 /// Serve the pinned native Rustwright MCP implementation over process stdio.
 pub async fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {

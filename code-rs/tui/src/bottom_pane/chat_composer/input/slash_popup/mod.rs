@@ -9,6 +9,7 @@ enum SlashPopupSelection {
     Builtin(SlashCommand),
     UserPrompt(Option<String>),
     Subagent(Option<String>),
+    Project(Option<String>),
 }
 
 impl ChatComposer {

@@ -12,6 +12,8 @@ mod platform;
 pub use errors::GitToolingError;
 pub use ghost_commits::CreateGhostCommitOptions;
 pub use ghost_commits::create_ghost_commit;
+pub use ghost_commits::discover_repository_roots;
+pub use ghost_commits::discover_repository_roots_with_depth;
 pub use ghost_commits::restore_ghost_commit;
 pub use ghost_commits::restore_to_commit;
 pub use platform::create_symlink;

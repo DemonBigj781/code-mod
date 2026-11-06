@@ -908,6 +908,113 @@
     }
     
     #[test]
+    fn auto_review_launches_without_a_git_repository() {
+    let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let workspace = tempfile::tempdir().expect("non-git workspace");
+
+    let launches = Arc::new(AtomicUsize::new(0));
+    let launches_clone = launches.clone();
+    let _stub = AutoReviewStubGuard::install(move || {
+        launches_clone.fetch_add(1, Ordering::SeqCst);
+    });
+
+    chat.config.cwd = workspace.path().to_path_buf();
+    chat.config.tui.auto_review_enabled = true;
+    chat.turn_had_code_edits = true;
+
+    chat.maybe_trigger_auto_review();
+
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    let running = chat.background_review.as_ref().expect("auto review running");
+    assert!(running.base.is_none(), "workspace mode does not require a Git baseline");
+    }
+
+    #[test]
+    fn completed_workspace_auto_review_is_not_treated_as_a_git_skip() {
+    let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let workspace = tempfile::tempdir().expect("non-git workspace");
+
+    chat.config.cwd = workspace.path().to_path_buf();
+    chat.background_review = Some(BackgroundReviewState {
+        worktree_path: workspace.path().to_path_buf(),
+        branch: String::new(),
+        agent_id: Some("workspace-review".to_owned()),
+        snapshot: None,
+        base: Some(GhostCommit::new("old-baseline".to_owned(), None)),
+        last_seen: Instant::now(),
+    });
+
+    chat.on_background_review_finished(BackgroundReviewFinishedEvent {
+        worktree_path: workspace.path().to_path_buf(),
+        branch: String::new(),
+        has_findings: false,
+        findings: 0,
+        summary: None,
+        error: None,
+        agent_id: Some("workspace-review".to_owned()),
+        snapshot: None,
+    });
+
+    assert!(chat.pending_auto_review_range.is_none());
+    assert_eq!(
+        chat.auto_review_status.map(|status| status.status),
+        Some(AutoReviewIndicatorStatus::Clean)
+    );
+    }
+
+    #[test]
+    fn workspace_auto_review_defers_edits_while_another_review_is_running() {
+    let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
+    let _rt = enter_test_runtime_guard();
+    let mut harness = ChatWidgetHarness::new();
+    let chat = harness.chat();
+    let workspace = tempfile::tempdir().expect("non-git workspace");
+
+    let launches = Arc::new(AtomicUsize::new(0));
+    let launches_clone = launches.clone();
+    let _stub = AutoReviewStubGuard::install(move || {
+        launches_clone.fetch_add(1, Ordering::SeqCst);
+    });
+
+    chat.config.cwd = workspace.path().to_path_buf();
+    chat.config.tui.auto_review_enabled = true;
+    chat.turn_had_code_edits = true;
+    chat.background_review = Some(BackgroundReviewState {
+        worktree_path: workspace.path().to_path_buf(),
+        branch: String::new(),
+        agent_id: Some("first-workspace-review".to_owned()),
+        snapshot: None,
+        base: None,
+        last_seen: Instant::now(),
+    });
+
+    chat.maybe_trigger_auto_review();
+    assert_eq!(launches.load(Ordering::SeqCst), 0);
+    assert!(chat.turn_had_code_edits, "deferred workspace edits must remain pending");
+
+    chat.on_background_review_finished(BackgroundReviewFinishedEvent {
+        worktree_path: workspace.path().to_path_buf(),
+        branch: String::new(),
+        has_findings: false,
+        findings: 0,
+        summary: None,
+        error: None,
+        agent_id: Some("first-workspace-review".to_owned()),
+        snapshot: None,
+    });
+
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    assert!(!chat.turn_had_code_edits, "launching the deferred review consumes the edit flag");
+    assert!(chat.background_review.is_some());
+    }
+
+    #[test]
     fn skipped_auto_review_with_findings_defers_to_next_turn() {
     let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
     let _rt = enter_test_runtime_guard();

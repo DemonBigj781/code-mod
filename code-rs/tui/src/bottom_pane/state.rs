@@ -58,6 +58,10 @@ impl<'a> BottomPane<'a> {
         self.composer.set_subagent_commands(names);
     }
 
+    pub(crate) fn set_project_aliases(&mut self, names: Vec<String>) {
+        self.composer.set_project_aliases(names);
+    }
+
     pub(crate) fn custom_prompts(&self) -> &[CustomPrompt] {
         &self.custom_prompts
     }

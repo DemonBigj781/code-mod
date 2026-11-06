@@ -10,12 +10,20 @@ workspace = true
 
 [dependencies]
 base64 = "=0.22.1"
+camoufox = { git = "https://github.com/Pedrvisk/camoufox-rust.git", rev = "933ae2e8ba7a00e254b4d4075eb0e85a527289fc", package = "camoufox" }
+camoufox-core = { git = "https://github.com/Pedrvisk/camoufox-rust.git", rev = "933ae2e8ba7a00e254b4d4075eb0e85a527289fc", package = "camoufox-core" }
+camoufox-juggler = { path = "../vendor/camoufox-juggler" }
+camoufox-pkgman = { git = "https://github.com/Pedrvisk/camoufox-rust.git", rev = "933ae2e8ba7a00e254b4d4075eb0e85a527289fc", package = "camoufox-pkgman" }
+image = { workspace = true, features = ["jpeg", "png"] }
 rmcp = { version = "=2.2.0", default-features = false, features = ["server", "transport-io"] }
 rustwright = { git = "https://github.com/Skyvern-AI/rustwright", rev = "7d8f4c092cfa3f26d5307b5385233160e70e86a2", package = "rustwright" }
 rustwright-agent = { git = "https://github.com/Skyvern-AI/rustwright", rev = "7d8f4c092cfa3f26d5307b5385233160e70e86a2", package = "rustwright-agent" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+zip = { workspace = true }
 
 [dev-dependencies]
 rustwright-agent = { git = "https://github.com/Skyvern-AI/rustwright", rev = "7d8f4c092cfa3f26d5307b5385233160e70e86a2", package = "rustwright-agent", features = ["test-support"] }
+tempfile = { workspace = true }

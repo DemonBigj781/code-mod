@@ -778,10 +778,21 @@ fn render_memory_summary_from_refs(selected: &[&Stage1EpochRecord]) -> String {
 
     body.push_str("Recent interactive memory epochs retained for memory prompts:\n\n");
     for record in selected {
-        body.push_str(&render_prompt_entry(record));
-        body.push_str("\n\n");
+        body.push_str(&render_memory_summary_entry(record));
+        body.push('\n');
     }
     body
+}
+
+fn render_memory_summary_entry(record: &Stage1EpochRecord) -> String {
+    let entry = render_prompt_entry(record);
+    let mut markdown = String::with_capacity(entry.len() + 16);
+    for line in entry.lines() {
+        markdown.push_str("> ");
+        markdown.push_str(line);
+        markdown.push('\n');
+    }
+    markdown
 }
 
 fn render_raw_memories(selected: &[Stage1EpochRecord]) -> String {
@@ -1985,6 +1996,14 @@ mod tests {
         assert!(
             summary.contains("/tmp/project"),
             "summary should contain workspace"
+        );
+        assert!(
+            summary.contains("> [/tmp/project @ main]"),
+            "summary entries should use CommonMark blockquotes"
+        );
+        assert!(
+            summary.contains("> remember fallback"),
+            "summary snippet should remain inside the blockquote"
         );
         assert!(
             prompt_entry.contains("/tmp/project"),

@@ -77,7 +77,7 @@ pub(crate) fn load_oauth_tokens(
     url: &str,
     store_mode: OAuthCredentialsStoreMode,
 ) -> Result<Option<StoredOAuthTokens>> {
-    let keyring_store = code_keyring_store::best_keyring_store();
+    let keyring_store = code_keyring_store::best_keyring_store_for_code_home(code_home);
     match store_mode {
         OAuthCredentialsStoreMode::Auto => load_oauth_tokens_from_keyring_with_fallback_to_file(
             keyring_store.as_ref(),
@@ -163,7 +163,7 @@ pub fn save_oauth_tokens(
     tokens: &StoredOAuthTokens,
     store_mode: OAuthCredentialsStoreMode,
 ) -> Result<()> {
-    let keyring_store = code_keyring_store::best_keyring_store();
+    let keyring_store = code_keyring_store::best_keyring_store_for_code_home(code_home);
     match store_mode {
         OAuthCredentialsStoreMode::Auto => save_oauth_tokens_with_keyring_with_fallback_to_file(
             keyring_store.as_ref(),
@@ -225,7 +225,7 @@ pub fn delete_oauth_tokens(
     url: &str,
     store_mode: OAuthCredentialsStoreMode,
 ) -> Result<bool> {
-    let keyring_store = code_keyring_store::best_keyring_store();
+    let keyring_store = code_keyring_store::best_keyring_store_for_code_home(code_home);
     delete_oauth_tokens_from_keyring_and_file(keyring_store.as_ref(), code_home, store_mode, server_name, url)
 }
 

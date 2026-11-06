@@ -30,6 +30,24 @@ pub(super) fn is_controllable_target_url(url: &str) -> bool {
 
 impl BrowserManager {
     pub async fn list_page_targets(&self) -> Result<Vec<BrowserTargetSummary>> {
+        if !self.is_external_connection().await {
+            let tabs = self.embedded_browser().await?.tabs().await?;
+            return Ok(tabs
+                .into_iter()
+                .enumerate()
+                .map(|(index, tab)| BrowserTargetSummary {
+                    index: index + 1,
+                    target_id: tab.target_id,
+                    title: tab.title,
+                    controllable: is_controllable_target_url(&tab.url),
+                    url: tab.url,
+                    attached: true,
+                    opener_id: None,
+                    subtype: None,
+                    active: tab.active,
+                })
+                .collect());
+        }
         let active_target_id = self.page.lock().await.as_ref().map(|page| page.target_id());
 
         let mut browser_guard = self.browser.lock().await;
@@ -82,6 +100,15 @@ impl BrowserManager {
         self.ensure_browser().await?;
         self.update_activity().await;
 
+        if !self.is_external_connection().await {
+            return self
+                .embedded_browser()
+                .await?
+                .new_tab(url)
+                .await
+                .map_err(Into::into);
+        }
+
         let browser_guard = self.browser.lock().await;
         let browser = browser_guard.as_ref().ok_or(BrowserError::NotInitialized)?;
         let cdp_page = browser.new_page(url).await?;
@@ -114,6 +141,11 @@ impl BrowserManager {
     pub async fn switch_to_target(&self, target_id: &str) -> Result<()> {
         self.ensure_browser().await?;
         self.update_activity().await;
+
+        if !self.is_external_connection().await {
+            self.embedded_browser().await?.select_target(target_id).await?;
+            return Ok(());
+        }
 
         let browser_guard = self.browser.lock().await;
         let browser = browser_guard.as_ref().ok_or(BrowserError::NotInitialized)?;
@@ -180,6 +212,11 @@ impl BrowserManager {
         self.ensure_browser().await?;
         self.update_activity().await;
 
+        if !self.is_external_connection().await {
+            self.embedded_browser().await?.close_target(target_id).await?;
+            return Ok(());
+        }
+
         let active_target_id = self.page.lock().await.as_ref().map(|page| page.target_id());
 
         let browser_guard = self.browser.lock().await;
@@ -214,6 +251,11 @@ impl BrowserManager {
     }
 
     pub async fn activate_target(&self, target_id: &str) -> Result<()> {
+        if !self.is_external_connection().await {
+            self.embedded_browser().await?.select_target(target_id).await?;
+            self.update_activity().await;
+            return Ok(());
+        }
         let _ = self
             .execute_cdp_browser(
                 "Target.activateTarget",
@@ -224,6 +266,15 @@ impl BrowserManager {
     }
 
     pub async fn close_page(&self) -> Result<()> {
+        if !self.is_external_connection().await {
+            let browser = self.embedded_browser().await?;
+            let active = browser.tabs().await?.into_iter().find(|tab| tab.active);
+            if let Some(tab) = active {
+                browser.close_target(&tab.target_id).await?;
+            }
+            self.update_activity().await;
+            return Ok(());
+        }
         let mut page_guard = self.page.lock().await;
         if let Some(page) = page_guard.take() {
             page.close()?;
@@ -231,4 +282,3 @@ impl BrowserManager {
         Ok(())
     }
 }
-

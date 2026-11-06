@@ -121,6 +121,7 @@ mod overlay_rendering;
 mod perf;
 mod rate_limit_refresh;
 mod repo_workflow;
+mod project_registry_flow;
 mod review_flow;
 mod session_flow;
 mod shell_config_flow;
@@ -451,6 +452,7 @@ impl ChatWidget<'_> {
 }
 use code_git_tooling::{
     create_ghost_commit,
+    discover_repository_roots_with_depth,
     restore_ghost_commit,
     CreateGhostCommitOptions,
     GhostCommit,
@@ -496,6 +498,7 @@ async fn run_background_review(
     base_snapshot: Option<GhostCommit>,
     turn_context: Option<String>,
     prefer_fallback: bool,
+    repository_scope: RepositoryScope,
 ) {
     background_review::run_background_review_inner(
         session_id,
@@ -504,6 +507,7 @@ async fn run_background_review(
         base_snapshot,
         turn_context,
         prefer_fallback,
+        repository_scope,
     )
     .await;
 }

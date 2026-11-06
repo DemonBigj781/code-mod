@@ -2,7 +2,6 @@ use crate::Result;
 use crate::assets::AssetManager;
 use crate::assets::ImageRef;
 use crate::manager::BrowserManager;
-use crate::page::ScreenshotMode;
 use std::sync::Arc;
 use tracing::debug;
 use tracing::info;
@@ -36,33 +35,8 @@ impl BrowserInjector {
 
         debug!("Browser enabled, capturing pre-LLM screenshot");
 
-        let page = if let Ok(p) = self.manager.get_or_create_page().await { p } else {
-            info!("No active page, using about:blank");
-            let page = self.manager.get_or_create_page().await?;
-            page.goto("about:blank", None).await?;
-            page
-        };
-
         let config = self.manager.get_config().await;
-        let mode = if config.fullpage {
-            ScreenshotMode::FullPage {
-                segments_max: Some(config.segments_max),
-            }
-        } else {
-            ScreenshotMode::Viewport
-        };
-
-        let screenshots = page.screenshot(mode).await?;
-        let ttl_ms = 86_400_000; // keep screenshots for 24 hours
-        let images = self
-            .asset_manager
-            .store_screenshots(screenshots, ttl_ms)
-            .await?;
-
-        let current_url = page
-            .get_current_url()
-            .await
-            .unwrap_or_else(|_| "about:blank".to_owned());
+        let (images, current_url) = self.manager.capture_screenshot_refs_with_url().await?;
 
         let system_hint = format!(
             "A fresh screenshot of the active page ({current_url}) is attached; use browser_* tools to navigate or capture more."

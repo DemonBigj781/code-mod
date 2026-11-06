@@ -21,6 +21,8 @@ pub(crate) enum CommandItem {
     UserPrompt(usize),
     // Index into `subagents`
     Subagent(usize),
+    // Index into `projects`
+    Project(usize),
 }
 
 pub(crate) struct CommandPopup {
@@ -29,6 +31,7 @@ pub(crate) struct CommandPopup {
     prompts: Vec<CustomPrompt>,
     state: ScrollState,
     subagents: Vec<String>,
+    projects: Vec<String>,
 }
 
 impl CommandPopup {
@@ -44,6 +47,7 @@ impl CommandPopup {
             prompts: Vec::new(),
             state: ScrollState::new(),
             subagents: Vec::new(),
+            projects: Vec::new(),
         }
     }
 
@@ -67,6 +71,10 @@ impl CommandPopup {
         self.subagents.get(idx).map(std::string::String::as_str)
     }
 
+    pub(crate) fn project_name(&self, idx: usize) -> Option<&str> {
+        self.projects.get(idx).map(String::as_str)
+    }
+
     /// Supply custom subagent command names (e.g., ["demo", "ship"]) to include in the
     /// slash popup. Built-ins should already be excluded by the caller.
     pub(crate) fn set_subagent_commands(&mut self, mut names: Vec<String>) {
@@ -75,6 +83,13 @@ impl CommandPopup {
         names.retain(|n| seen.insert(n.to_ascii_lowercase()));
         self.subagents = names;
         // Clamp selection relative to new item count
+        self.state.clamp_selection(self.filtered_items().len());
+    }
+
+    pub(crate) fn set_project_aliases(&mut self, mut names: Vec<String>) {
+        let mut seen = HashSet::new();
+        names.retain(|name| seen.insert(name.to_ascii_lowercase()));
+        self.projects = names;
         self.state.clamp_selection(self.filtered_items().len());
     }
 
@@ -130,6 +145,9 @@ impl CommandPopup {
             for (idx, _) in self.subagents.iter().enumerate() {
                 out.push((CommandItem::Subagent(idx), None, 0));
             }
+            for (idx, _) in self.projects.iter().enumerate() {
+                out.push((CommandItem::Project(idx), None, 0));
+            }
             // Then prompts, already sorted by name.
             for idx in 0..self.prompts.len() {
                 out.push((CommandItem::UserPrompt(idx), None, 0));
@@ -145,6 +163,11 @@ impl CommandPopup {
         for (idx, name) in self.subagents.iter().enumerate() {
             if let Some((indices, score)) = fuzzy_match(name, filter) {
                 out.push((CommandItem::Subagent(idx), Some(indices), score));
+            }
+        }
+        for (idx, name) in self.projects.iter().enumerate() {
+            if let Some((indices, score)) = fuzzy_match(name, filter) {
+                out.push((CommandItem::Project(idx), Some(indices), score));
             }
         }
         for (idx, p) in self.prompts.iter().enumerate() {
@@ -178,7 +201,8 @@ impl CommandPopup {
             let rank = |item: &CommandItem| match item {
                 CommandItem::Builtin(_) => 0,
                 CommandItem::Subagent(_) => 1,
-                CommandItem::UserPrompt(_) => 2,
+                CommandItem::Project(_) => 2,
+                CommandItem::UserPrompt(_) => 3,
             };
             let rank_cmp = rank(&a.0).cmp(&rank(&b.0));
             if rank_cmp != Ordering::Equal {
@@ -189,11 +213,13 @@ impl CommandPopup {
                 CommandItem::Builtin(c) => c.command(),
                 CommandItem::UserPrompt(i) => &self.prompts[i].name,
                 CommandItem::Subagent(i) => &self.subagents[i],
+                CommandItem::Project(i) => &self.projects[i],
             };
             let bn = match b.0 {
                 CommandItem::Builtin(c) => c.command(),
                 CommandItem::UserPrompt(i) => &self.prompts[i].name,
                 CommandItem::Subagent(i) => &self.subagents[i],
+                CommandItem::Project(i) => &self.projects[i],
             };
             an.cmp(bn)
         });
@@ -274,6 +300,10 @@ impl WidgetRef for CommandPopup {
                         CommandItem::Subagent(i) => (
                             format!("/{}", self.subagents[i]),
                             Some("custom subagent".to_owned()),
+                        ),
+                        CommandItem::Project(i) => (
+                            format!("/{}", self.projects[i]),
+                            Some("registered project".to_owned()),
                         ),
                     };
                     GenericDisplayRow {

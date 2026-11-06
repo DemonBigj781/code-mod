@@ -43,6 +43,30 @@ class CommandTests(unittest.TestCase):
                                         check=True, env={"GITHUB_ACTIONS": actions, "RUNNER_ENVIRONMENT": runner})
                 self.assertEqual(result.stdout, f"{expected},{expected},-j{expected}")
 
+    def test_default_rust_ape_cache_is_isolated_by_source_pins(self):
+        script = (Path(__file__).resolve().parents[1] / "prepare-runtime.sh").read_text()
+        assignment = (
+            'build_root=${COSMO_RUST_BUILD_ROOT:-'
+            '"$repo_root/o/rust-ape-source-$cosmo_commit-$rust_ape_commit"}'
+        )
+        self.assertIn(assignment, script)
+        self.assertLess(script.index("rust_ape_commit=$(read_pin rust_ape_commit)"), script.index(assignment))
+
+    def test_ape_build_uses_a_current_lock_with_patched_runtime_dependencies(self):
+        support = Path(__file__).resolve().parents[1]
+        script = (support.parent / "build-cosmopolitan-code.sh").read_text()
+        lock = tomllib.loads((support / "Cargo.lock").read_text())
+        packages = {package["name"]: package for package in lock["package"]}
+        self.assertIn('cp "$support_dir/Cargo.lock"', script)
+        self.assertIn("--locked", script)
+        self.assertEqual(packages["libc"]["version"], "0.2.189")
+        self.assertNotIn("source", packages["libc"])
+        self.assertEqual(packages["errno"]["version"], "0.3.14")
+        self.assertNotIn("source", packages["errno"])
+        self.assertNotIn("source", packages["rama-tls-rustls"])
+        self.assertIn("libc", packages["code-git-tooling"]["dependencies"])
+        self.assertIn("code-rustwright-mcp", packages["code-browser"]["dependencies"])
+
     def setUp(self):
         fixture = test_artifact_contract.ArtifactContractTests()
         fixture.setUp()
@@ -55,6 +79,42 @@ class CommandTests(unittest.TestCase):
         with patch.object(commands, "command", return_value=" M code-rs/core/src/openai_tools.rs"):
             with self.assertRaisesRegex(ValueError, "Commit source changes"):
                 commands.require_clean_source()
+
+    def test_auto_build_rejects_dirty_source_without_contacting_github(self):
+        calls = []
+
+        def run(args, **kwargs):
+            calls.append(args)
+            if args[:3] == ["git", "status", "--porcelain"]:
+                return " M code-rs/core/src/openai_tools.rs"
+            raise AssertionError(f"unexpected command: {args}")
+
+        with patch.object(commands, "command", side_effect=run):
+            with self.assertRaisesRegex(ValueError, "GitHub Actions cannot build uncommitted source"):
+                commands.build_auto(self.output / "auto", self.commit)
+
+        self.assertFalse(any(args[0] == "gh" for args in calls))
+
+    def test_auto_build_delegates_only_to_github_actions(self):
+        output = self.output / "auto"
+        with patch.object(commands, "build_action") as build, \
+             patch.object(commands, "build_local") as local_build:
+            commands.build_auto(output, self.commit)
+
+        build.assert_called_once_with(output, self.commit)
+        local_build.assert_not_called()
+
+    def test_actions_build_rechecks_source_state_before_dispatch(self):
+        with patch.object(commands, "command", return_value=" M code-rs/core/src/openai_tools.rs") as run:
+            with self.assertRaisesRegex(ValueError, "GitHub Actions cannot build uncommitted source"):
+                commands.build_action(self.output / "actions", self.commit)
+        run.assert_called_once_with(["git", "status", "--porcelain"], capture=True)
+
+    def test_local_build_is_disabled(self):
+        with patch.object(commands, "command") as run:
+            with self.assertRaisesRegex(ValueError, "Local builds are disabled"):
+                commands.build_local(self.output / "local")
+        run.assert_not_called()
 
     def test_successful_workflow_with_skipped_windows_job_cannot_publish(self):
         run = {"headSha": self.commit, "conclusion": "success", "databaseId": 42}
@@ -92,6 +152,25 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(commands.artifact_command(self.output / "code.com", ["--version"]), 0)
             self.assertEqual(run.call_args.args[0], ["sh", str(self.output / "code.com"), "--version"])
 
+    def test_popen_linux_ape_without_binfmt_uses_shell(self):
+        expected = object()
+        with patch.object(commands.os, "name", "posix"), \
+             patch.object(commands.subprocess, "Popen", side_effect=[
+                 OSError(errno.ENOEXEC, "Exec format error"),
+                 expected,
+             ]) as popen:
+            actual = commands.artifact_process(
+                commands.subprocess.Popen,
+                self.output / "code.com",
+                ["rustwright-mcp"],
+                stdin=commands.subprocess.PIPE,
+            )
+        self.assertIs(actual, expected)
+        self.assertEqual(
+            popen.call_args.args[0],
+            ["sh", str(self.output / "code.com"), "rustwright-mcp"],
+        )
+
     def test_publish_rejects_an_executable_different_from_actions(self):
         manifest = commands.validate_artifact(*commands.artifact_files(self.output), expected_source_commit=self.commit)
         calls = []
@@ -102,9 +181,15 @@ class CommandTests(unittest.TestCase):
                 return ""
             destination = Path(args[args.index("--dir") + 1])
             destination.mkdir()
-            (destination / "code.com").write_bytes(b"different tested executable")
-            changed = dict(manifest, artifact_sha256=hashlib.sha256(b"different tested executable").hexdigest(),
-                           artifact_size_bytes=len(b"different tested executable"))
+            archive_size = manifest["browser_runtime"]["archive_size_bytes"]
+            browser_archive = (self.output / "code.com").read_bytes()[-archive_size:]
+            different = b"different tested executable" + browser_archive
+            (destination / "code.com").write_bytes(different)
+            changed = dict(
+                manifest,
+                artifact_sha256=hashlib.sha256(different).hexdigest(),
+                artifact_size_bytes=len(different),
+            )
             (destination / "code.com.json").write_text(json.dumps(changed), encoding="utf-8")
             return ""
 

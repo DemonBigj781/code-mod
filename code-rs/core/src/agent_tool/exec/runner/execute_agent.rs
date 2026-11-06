@@ -80,6 +80,7 @@ pub(crate) async fn execute_agent(agent_id: String, config: Option<AgentConfig>)
     let context = agent.context.clone();
     let output_goal = agent.output_goal.clone();
     let files = agent.files.clone();
+    let working_dir = agent.working_dir.clone();
     let reasoning_effort = agent.reasoning_effort;
     let source_kind = agent.source_kind.clone();
     let log_tag = agent.log_tag.clone();
@@ -149,7 +150,7 @@ pub(crate) async fn execute_agent(agent_id: String, config: Option<AgentConfig>)
                 model: &model,
                 prompt: &full_prompt,
                 read_only: true,
-                working_dir: None,
+                working_dir,
                 config,
                 reasoning_effort,
                 review_output_json_path: None,

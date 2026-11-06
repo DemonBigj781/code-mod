@@ -5,29 +5,26 @@ use crate::config::WaitStrategy;
 use crate::manager::BrowserManager;
 use crate::page::ScreenshotMode;
 use crate::page::ScreenshotRegion;
-use crate::page::SetViewportParams;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
 
 pub struct BrowserTools {
     manager: Arc<BrowserManager>,
-    asset_manager: Arc<AssetManager>,
 }
 
 impl BrowserTools {
-    pub fn new(manager: Arc<BrowserManager>, asset_manager: Arc<AssetManager>) -> Self {
-        Self {
-            manager,
-            asset_manager,
-        }
+    pub fn new(manager: Arc<BrowserManager>, _asset_manager: Arc<AssetManager>) -> Self {
+        Self { manager }
     }
 
     pub async fn handle_tool_call(&self, call: BrowserToolCall) -> Result<BrowserToolResult> {
         match call {
             BrowserToolCall::Goto { url, wait } => {
-                let page = self.manager.get_or_create_page().await?;
-                let result = page.goto(&url, wait).await?;
+                if let Some(wait) = wait {
+                    self.manager.update_config(|config| config.wait = wait).await?;
+                }
+                let result = self.manager.goto(&url).await?;
                 Ok(BrowserToolResult::Goto(result))
             }
 
@@ -38,10 +35,8 @@ impl BrowserTools {
                 inject_js,
                 format: _,
             } => {
-                let page = self.manager.get_or_create_page().await?;
-
                 if let Some(script) = inject_js {
-                    page.inject_js(&script).await?;
+                    self.manager.execute_javascript(&script).await?;
                 }
 
                 let screenshot_mode = match mode.as_deref() {
@@ -61,11 +56,9 @@ impl BrowserTools {
                     }
                 };
 
-                let screenshots = page.screenshot(screenshot_mode).await?;
-                let ttl_ms = 86_400_000; // 24 hours
-                let images = self
-                    .asset_manager
-                    .store_screenshots(screenshots, ttl_ms)
+                let (images, _) = self
+                    .manager
+                    .capture_screenshot_refs_mode(screenshot_mode)
                     .await?;
 
                 Ok(BrowserToolResult::Screenshot(ScreenshotResult { images }))
@@ -77,15 +70,6 @@ impl BrowserTools {
                 device_scale_factor,
                 mobile,
             } => {
-                let page = self.manager.get_or_create_page().await?;
-                let result = page
-                    .set_viewport(SetViewportParams {
-                        width,
-                        height,
-                        device_scale_factor,
-                        mobile,
-                    })
-                    .await?;
                 // Update manager config to reflect the new viewport (no auto-resyncs)
                 let dpr = device_scale_factor.unwrap_or(1.0);
                 let mob = mobile.unwrap_or(false);
@@ -98,6 +82,7 @@ impl BrowserTools {
                         cfg.viewport.mobile = mob;
                     })
                     .await;
+                let result = crate::page::ViewportResult { width, height, dpr };
                 Ok(BrowserToolResult::SetViewport(result))
             }
 

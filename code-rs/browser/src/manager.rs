@@ -1,5 +1,6 @@
 use crate::config::BrowserConfig;
 use crate::page::Page;
+use code_rustwright_mcp::EmbeddedBrowser;
 use chromiumoxide::Browser;
 use serde::Serialize;
 use std::sync::Arc;
@@ -29,6 +30,7 @@ type LastAppliedMetricsSlot = Arc<Mutex<LastAppliedMetrics>>;
 pub struct BrowserManager {
     pub config: Arc<RwLock<BrowserConfig>>,
     browser: Arc<Mutex<Option<Browser>>>,
+    embedded_browser: Arc<Mutex<Option<Arc<EmbeddedBrowser>>>>,
     page: Arc<Mutex<Option<Arc<Page>>>>,
     // Dedicated background page for screenshots to prevent focus stealing
     background_page: Arc<Mutex<Option<Arc<Page>>>>,
@@ -45,6 +47,7 @@ pub struct BrowserManager {
     auto_viewport_correction_enabled: Arc<tokio::sync::RwLock<bool>>,
     /// Track last applied device metrics to avoid redundant overrides
     last_metrics_applied: LastAppliedMetricsSlot,
+    cursor_position: Arc<Mutex<(f64, f64)>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +70,7 @@ impl BrowserManager {
         Self {
             config: Arc::new(RwLock::new(config)),
             browser: Arc::new(Mutex::new(None)),
+            embedded_browser: Arc::new(Mutex::new(None)),
             page: Arc::new(Mutex::new(None)),
             background_page: Arc::new(Mutex::new(None)),
             last_activity: Arc::new(Mutex::new(Instant::now())),
@@ -80,7 +84,28 @@ impl BrowserManager {
             viewport_monitor_handle: Arc::new(Mutex::new(None)),
             auto_viewport_correction_enabled: Arc::new(tokio::sync::RwLock::new(true)),
             last_metrics_applied: Arc::new(Mutex::new(None)),
+            cursor_position: Arc::new(Mutex::new((512.0, 384.0))),
         }
+    }
+
+    pub(crate) async fn is_external_connection(&self) -> bool {
+        let config = self.config.read().await;
+        config.connect_port.is_some() || config.connect_ws.is_some()
+    }
+
+    pub(crate) async fn embedded_browser(&self) -> crate::Result<Arc<EmbeddedBrowser>> {
+        if self.is_external_connection().await {
+            return Err(crate::BrowserError::ConfigError(
+                "the embedded Firefox backend is unavailable for an external Chrome connection"
+                    .to_owned(),
+            ));
+        }
+        self.ensure_browser().await?;
+        self.embedded_browser
+            .lock()
+            .await
+            .clone()
+            .ok_or(crate::BrowserError::NotInitialized)
     }
 
 }

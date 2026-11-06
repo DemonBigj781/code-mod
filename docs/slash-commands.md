@@ -121,6 +121,28 @@ message. The title remains unchanged unless the AI or user explicitly updates it
 - `/cloud`: browse Code Cloud tasks, view details, apply patches, and create
   new tasks from the TUI.
 - `/cmd <name>`: run a project command defined for the current workspace.
+- `/project`: list registered project scopes and show the active selection.
+- `/project add <master|group|single> <dir> <name> <git_search_depth>`:
+  register an explicit project scope. `single` targets exactly one Git
+  repository and requires depth `0`; `group` searches for repositories only up
+  to the supplied depth; the sole `master` entry behaves like a group and is
+  the default fallback when the active entry is removed. Paths and names may be
+  shell-quoted.
+- `/project use <name>` or `/project <name>`: select a registered project and
+  switch the session working directory to it.
+- `/<name>`: each registered project name is also a direct slash command. Names
+  that collide with built-in commands, custom prompts, subagents, or configured
+  `/cmd` entries are rejected when registered.
+- `/project remove <name>`: remove a registered project. The full validation
+  form `/project remove <master|group|single> <dir> <name> <git_search_depth>`
+  removes the entry only when every supplied field matches.
+
+Registered scopes are stored in `CODE_HOME/projects.json`. They are the
+authoritative repository scope for Git snapshots, `/undo` file previews, and
+automatic reviews. When Code starts from a broad non-Git directory, it uses the
+active registered project instead of recursively scanning the startup directory.
+If no project is registered, Code falls back only when the current directory is
+already inside a Git repository; it does not recursively search child folders.
 
 ## UX & Display
 

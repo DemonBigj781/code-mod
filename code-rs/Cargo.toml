@@ -52,6 +52,7 @@ members = [
     "otel",
     "terminal-detection",
     "tui",
+    "vendor/camoufox-juggler",
     "vendor/crossterm",
     "git-apply",
     "utils/absolute-path",
@@ -340,18 +341,27 @@ strip = "symbols"
 # See https://github.com/openai/codex/issues/1411 for details.
 codegen-units = 1
 
+# Keep accidental plain `cargo build/test/check` invocations from recreating
+# the former 200+ GB debug tree. The canonical local workflow uses dev-fast,
+# while this bounded fallback disables the two largest disk multipliers.
+[profile.dev]
+debug = 0
+incremental = false
+codegen-units = 256
+lto = "off"
+
 [patch.crates-io]
 # ratatui = { path = "../../ratatui" }
 crossterm = { path = "vendor/crossterm" }
 ratatui = { git = "https://github.com/nornagon/ratatui", branch = "nornagon-v0.29.0-patch" }
 
-# Custom build profiles used by build-fast.sh
+# Custom build profiles used by the root makefile and compatibility scripts.
 [profile.dev-fast]
 inherits = "dev"
 opt-level = 1
 debug = 1
 # Rust incremental builds have been flaky on macOS (missing dep-graph.part.bin).
-# dev-fast is only used by build-fast.sh; prefer reliability over incremental speed.
+# Prefer reliability and bounded disk usage over incremental state.
 incremental = false
 codegen-units = 256
 lto = "off"

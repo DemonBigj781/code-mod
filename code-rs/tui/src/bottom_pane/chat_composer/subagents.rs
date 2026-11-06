@@ -9,5 +9,13 @@ impl ChatComposer {
             popup.set_subagent_commands(self.subagent_commands.clone());
         }
     }
-}
 
+    pub(crate) fn set_project_aliases(&mut self, mut names: Vec<String>) {
+        names.sort();
+        names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+        self.project_aliases = names;
+        if let ActivePopup::Command(popup) = &mut self.active_popup {
+            popup.set_project_aliases(self.project_aliases.clone());
+        }
+    }
+}

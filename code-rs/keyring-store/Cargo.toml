@@ -11,9 +11,16 @@ workspace = true
 cosmopolitan-ape = []
 
 [dependencies]
+age = { workspace = true }
+base64 = { workspace = true }
+fs2 = "0.4"
 keyring = { workspace = true, features = ["crypto-rust"] }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
+zeroize = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { workspace = true, features = ["linux-native-async-persistent"] }
@@ -27,3 +34,6 @@ keyring = { workspace = true, features = ["windows-native"] }
 
 [target.'cfg(any(target_os = "freebsd", target_os = "openbsd"))'.dependencies]
 keyring = { workspace = true, features = ["sync-secret-service"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -4,7 +4,6 @@ use super::render_image_placeholder;
 use ratatui::widgets::Widget;
 use ratatui_image::Image;
 use ratatui_image::Resize;
-use ratatui_image::picker::Picker;
 
 impl ChatWidget<'_> {
     pub(in super::super) fn render_screenshot_highlevel(
@@ -29,7 +28,7 @@ impl ChatWidget<'_> {
         let mut cached_picker = self.cached_picker.borrow_mut();
         if cached_picker.is_none() {
             // If we didn't get a picker from terminal query at startup, create one from font size.
-            let p = Picker::from_fontsize((cell_w, cell_h));
+            let p = crate::tui::text_image_picker((cell_w, cell_h));
             *cached_picker = Some(p);
         }
         let Some(picker) = cached_picker.as_ref() else {

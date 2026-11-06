@@ -33,6 +33,9 @@ pub(super) fn confirm_slash_popup_selection_inner(view: &mut ChatComposer) -> (I
             CommandItem::Subagent(i) => {
                 SlashPopupSelection::Subagent(popup.subagent_name(i).map(str::to_owned))
             }
+            CommandItem::Project(i) => {
+                SlashPopupSelection::Project(popup.project_name(i).map(str::to_owned))
+            }
         }
     };
 
@@ -75,6 +78,15 @@ pub(super) fn confirm_slash_popup_selection_inner(view: &mut ChatComposer) -> (I
             }
             (InputResult::None, true)
         }
+        SlashPopupSelection::Project(project_name) => {
+            view.history.record_local_submission(&original_text);
+            view.textarea.set_text("");
+            view.active_popup = ActivePopup::None;
+            if let Some(name) = project_name {
+                (InputResult::Submitted(format!("/{name}")), true)
+            } else {
+                (InputResult::None, true)
+            }
+        }
     }
 }
-

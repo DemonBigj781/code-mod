@@ -159,7 +159,7 @@ impl ChatWidget<'_> {
         };
 
         let conversation_lines = Self::conversation_preview_lines_from_snapshot(&snapshot.history);
-        let file_lines = self.timeline_file_lines_for_commit(snapshot.commit().id());
+        let file_lines = self.timeline_file_lines_for_snapshot(snapshot);
 
         UndoTimelineEntry {
             label,
@@ -307,44 +307,88 @@ impl ChatWidget<'_> {
         crate::text_formatting::truncate_chars_with_ellipsis(&text, limit)
     }
 
-    pub(in super::super) fn timeline_file_lines_for_commit(&self, commit_id: &str) -> Vec<Line<'static>> {
-        match self.git_numstat(["show", "--numstat", "--format=", commit_id]) {
-            Ok(entries) => Self::file_change_lines(entries),
-            Err(err) => vec![Line::from(Span::styled(
-                err,
-                crate::colors::style_error(),
-            ))],
+    pub(in super::super) fn timeline_file_lines_for_snapshot(
+        &self,
+        snapshot: &GhostSnapshot,
+    ) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        let show_repository_labels = snapshot.repositories().len() > 1;
+        for (repo_path, commit) in snapshot.repositories() {
+            if show_repository_labels {
+                lines.push(Line::styled(
+                    format!("Repository: {}", repo_path.display()),
+                    crate::colors::style_text_dim(),
+                ));
+            }
+            match self.git_numstat_at(
+                repo_path,
+                ["show", "--numstat", "--format=", commit.id()],
+            ) {
+                Ok(entries) => lines.extend(Self::file_change_lines(entries)),
+                Err(err) => lines.push(Line::from(Span::styled(
+                    err,
+                    crate::colors::style_error(),
+                ))),
+            }
         }
+        lines
     }
 
     pub(in super::super) fn timeline_file_lines_for_current(&self) -> Vec<Line<'static>> {
-        match self.git_numstat(["diff", "--numstat", "HEAD"]) {
-            Ok(entries) => {
-                if entries.is_empty() {
-                    vec![Line::from(Span::styled(
-                        "Working tree clean",
-                        crate::colors::style_text_dim(),
-                    ))]
-                } else {
-                    Self::file_change_lines(entries)
-                }
-            }
-            Err(err) => vec![Line::from(Span::styled(
-                err,
+        let scope = self.repository_scope();
+        if let Some(error) = scope.error {
+            return vec![Line::from(Span::styled(
+                error,
                 crate::colors::style_error(),
-            ))],
+            ))];
         }
+        let repo_paths = scope.repositories;
+        if repo_paths.is_empty() {
+            return vec![Line::from(Span::styled(
+                "No repositories are present in the active project scope.",
+                crate::colors::style_text_dim(),
+            ))];
+        };
+        let show_repository_labels = repo_paths.len() > 1;
+        let mut lines = Vec::new();
+        let mut any_changes = false;
+        for repo_path in repo_paths {
+            if show_repository_labels {
+                lines.push(Line::styled(
+                    format!("Repository: {}", repo_path.display()),
+                    crate::colors::style_text_dim(),
+                ));
+            }
+            match self.git_numstat_at(&repo_path, ["diff", "--numstat", "HEAD"]) {
+                Ok(entries) => {
+                    any_changes |= !entries.is_empty();
+                    lines.extend(Self::file_change_lines(entries));
+                }
+                Err(err) => lines.push(Line::from(Span::styled(
+                    err,
+                    crate::colors::style_error(),
+                ))),
+            }
+        }
+        if !any_changes {
+            lines.push(Line::from(Span::styled(
+                "Working trees clean",
+                crate::colors::style_text_dim(),
+            )));
+        }
+        lines
     }
 
-    pub(in super::super) fn git_numstat<I, S>(
+    pub(in super::super) fn git_numstat_at<I, S>(
         &self,
+        repo_path: &Path,
         args: I,
     ) -> Result<Vec<NumstatRow>, String>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        self.run_git_command(args, |stdout| {
+        self.run_git_command_at(repo_path, args, |stdout| {
             let mut out = Vec::new();
             for line in stdout.lines() {
                 let trimmed = line.trim();
@@ -367,7 +411,12 @@ impl ChatWidget<'_> {
         })
     }
 
-    pub(in super::super) fn run_git_command<I, S, F, T>(&self, args: I, parser: F) -> Result<T, String>
+    pub(in super::super) fn run_git_command_at<I, S, F, T>(
+        &self,
+        repo_path: &Path,
+        args: I,
+        parser: F,
+    ) -> Result<T, String>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -375,7 +424,7 @@ impl ChatWidget<'_> {
     {
         let args_vec: Vec<String> = args.into_iter().map(|s| s.as_ref().to_owned()).collect();
         let output = Command::new("git")
-            .current_dir(&self.config.cwd)
+            .current_dir(repo_path)
             .args(&args_vec)
             .output()
             .map_err(|err| format!("git {} failed: {err}", args_vec.join(" ")))?;
@@ -384,7 +433,7 @@ impl ChatWidget<'_> {
                 .iter()
                 .any(|arg| matches!(arg.as_str(), "pull" | "checkout" | "merge" | "apply"))
             {
-                bump_snapshot_epoch_for(&self.config.cwd);
+                bump_snapshot_epoch_for(repo_path);
             }
             parser(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {

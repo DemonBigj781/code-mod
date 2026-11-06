@@ -149,7 +149,7 @@ impl ChatWidget<'_> {
         app_event_tx.send_background_event_with_ticket(&ticket, visible_message);
 
         let command_text = format!(
-            "/code The /browser command failed to {failure_context}. Recent error: {truncated}. Please diagnose and fix the environment (for example, install or configure Chrome) so /browser works in this workspace."
+            "/code The /browser command failed to {failure_context}. Recent error: {truncated}. Please diagnose and fix the embedded Firefox/Camoufox runtime so /browser works in this workspace."
         );
         app_event_tx.send(AppEvent::DispatchCommand(
             SlashCommand::Code,
@@ -202,11 +202,7 @@ impl ChatWidget<'_> {
                     {
                         // Configure cleanly for internal mode
                         let mut cfg = browser_manager.config.write().await;
-                        cfg.connect_port = None;
-                        cfg.connect_ws = None;
-                        cfg.enabled = true;
-                        cfg.persist_profile = false;
-                        cfg.headless = true;
+                        cfg.configure_internal_mode();
                     }
 
                     if let Err(e) = browser_manager.start().await {
@@ -295,9 +291,7 @@ impl ChatWidget<'_> {
                     browser_manager.set_enabled_sync(true);
                     {
                         let mut config = browser_manager.config.write().await;
-                        config.headless = false; // Ensure browser is visible when navigating to URL
-                        config.connect_port = None; // Ensure we're not trying to connect to CDP
-                        config.connect_ws = None; // Ensure we're not trying to connect via WebSocket
+                        config.configure_internal_mode();
                     }
 
                     // IMPORTANT: Start the browser manager first before navigating
@@ -616,7 +610,7 @@ impl ChatWidget<'_> {
                 }
             }
         } else {
-            "Browser commands (built-in headless browser):\n• /browser         - Toggle internal browser on/off\n• /browser <url>   - Open URL in headless browser\n• /browser off     - Disable browser mode\n• /browser status  - Show current status\n• /browser fullpage [on|off] - Toggle full-page screenshots\n• /browser config <key> <value> - Update settings (viewport, segments_max)\n\nTo connect to your own Chrome instead, use /chrome [port]".to_owned()
+            "Browser commands (built-in headless Firefox/Camoufox):\n• /browser         - Toggle internal browser on/off\n• /browser <url>   - Open URL in Firefox/Camoufox\n• /browser off     - Disable browser mode\n• /browser status  - Show current status\n• /browser fullpage [on|off] - Toggle full-page screenshots\n• /browser config <key> <value> - Update settings (viewport, segments_max)\n\nTo connect to your own Chrome through CDP instead, use /chrome [port]".to_owned()
         };
 
         // Add the response to the UI as a ticketed background event so it stays with

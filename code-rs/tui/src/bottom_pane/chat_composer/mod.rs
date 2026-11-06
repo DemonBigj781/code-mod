@@ -165,6 +165,7 @@ pub(crate) struct ChatComposer {
     using_chatgpt_auth: bool,
     custom_prompts: Vec<CustomPrompt>,
     subagent_commands: Vec<String>,
+    project_aliases: Vec<String>,
     // Ephemeral footer notice and its expiry
     footer_notice: Option<(std::borrow::Cow<'static, str>, std::time::Instant)>,
     // Persistent hint for specific modes (e.g., standard terminal mode)
@@ -266,6 +267,7 @@ impl ChatComposer {
             using_chatgpt_auth,
             custom_prompts: Vec::new(),
             subagent_commands: Vec::new(),
+            project_aliases: Vec::new(),
             footer_notice: None,
             standard_terminal_hint: None,
             auto_review_status: None,

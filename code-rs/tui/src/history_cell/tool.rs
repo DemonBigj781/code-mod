@@ -29,6 +29,15 @@ pub(crate) struct ToolCallCell {
 impl ToolCallCell {
     pub(crate) fn new(state: ToolCallState) -> Self {
         let mut state = state;
+        if state.started_at.is_none() {
+            let now = SystemTime::now();
+            state.started_at = Some(
+                state
+                    .duration
+                    .and_then(|duration| now.checked_sub(duration))
+                    .unwrap_or(now),
+            );
+        }
         // Successful tool calls are often noisy (arguments + result previews). Default
         // to collapsed details so history stays readable; failures remain expanded.
         let collapse_by_default = matches!(state.status, HistoryToolStatus::Success);
@@ -103,6 +112,12 @@ impl ToolCallCell {
     }
 
     pub(crate) fn retint(&self, _old: &crate::theme::Theme, _new: &crate::theme::Theme) {}
+
+    fn usage_age_line(&self) -> Option<Line<'static>> {
+        self.state
+            .started_at
+            .map(|started_at| super::formatting::usage_age_line("Tool", started_at))
+    }
 
     fn header_line(&self, summarize_details: bool) -> Line<'static> {
         let s_text_dim = crate::colors::style_text_dim();
@@ -217,7 +232,12 @@ impl ToolCallCell {
     }
 
     fn collapsed_summary_lines(&self) -> Vec<Line<'static>> {
-        vec![self.header_line(true)]
+        let mut lines = Vec::with_capacity(2);
+        if let Some(age_line) = self.usage_age_line() {
+            lines.push(age_line);
+        }
+        lines.push(self.header_line(true));
+        lines
     }
 
     fn expanded_detail_lines(&self) -> Vec<Line<'static>> {
@@ -257,6 +277,9 @@ impl ToolCallCell {
 
     fn expanded_display_lines(&self) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
+        if let Some(age_line) = self.usage_age_line() {
+            lines.push(age_line);
+        }
         lines.push(self.header_line(self.details_collapsed()));
         if self.details_collapsed() {
             lines.extend(self.collapsed_detail_lines());
@@ -617,7 +640,7 @@ impl RunningToolCallCell {
     fn collapsed_summary_lines(&self) -> Vec<Line<'static>> {
         trim_empty_lines(self.render_lines())
             .into_iter()
-            .take(1)
+            .take(2)
             .collect()
     }
 }
@@ -678,7 +701,10 @@ impl HistoryCell for RunningToolCallCell {
 impl RunningToolCallCell {
     fn render_lines(&self) -> Vec<Line<'static>> {
         let elapsed = self.elapsed_duration();
-        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut lines: Vec<Line<'static>> = vec![super::formatting::usage_age_line(
+            "Tool",
+            self.state.started_at,
+        )];
         if self.state.title == "Waiting" {
             let show_elapsed = !self.state.wait_has_target;
             let mut spans = Vec::new();
@@ -750,6 +776,7 @@ fn render_argument(arg: &ToolArgument) -> Line<'static> {
 mod tests {
     use super::*;
     use crate::history::state::{HistoryId, ToolResultPreview};
+    use crate::history_cell::formatting::line_to_plain_text;
     use std::time::SystemTime;
 
     fn text_arg(name: &str, value: &str) -> ToolArgument {
@@ -760,10 +787,51 @@ mod tests {
     }
 
     #[test]
+    fn completed_tool_usage_age_is_rendered_above_the_tool() {
+        let cell = ToolCallCell::new(ToolCallState {
+            id: HistoryId::ZERO,
+            call_id: Some("tool-aged".to_owned()),
+            started_at: None,
+            status: HistoryToolStatus::Success,
+            title: "Tool".to_owned(),
+            duration: Some(Duration::from_secs(7_200)),
+            arguments: Vec::new(),
+            result_preview: None,
+            error_message: None,
+        });
+        let lines = cell.display_lines();
+
+        assert_eq!(line_to_plain_text(&lines[0]), "Tool used 2 hours ago");
+        assert_eq!(line_to_plain_text(&lines[1]), "Tool, duration: 2h 00m");
+    }
+
+    #[test]
+    fn running_tool_usage_age_is_rendered_above_the_tool() {
+        let started_at = SystemTime::now()
+            .checked_sub(Duration::from_secs(120))
+            .expect("two minutes before now");
+        let cell = RunningToolCallCell::new(RunningToolState {
+            id: HistoryId::ZERO,
+            call_id: Some("tool-running-aged".to_owned()),
+            title: "Running".to_owned(),
+            started_at,
+            wait_cap_ms: None,
+            wait_has_target: false,
+            wait_has_call_id: false,
+            arguments: Vec::new(),
+        });
+        let lines = cell.display_lines();
+
+        assert_eq!(line_to_plain_text(&lines[0]), "Tool used 2 minutes ago");
+        assert!(line_to_plain_text(&lines[1]).starts_with("Running ("));
+    }
+
+    #[test]
     fn single_argument_tool_chevron_collapse_reduces_height() {
         let cell = ToolCallCell::new(ToolCallState {
             id: HistoryId::ZERO,
             call_id: Some("tool-1".to_owned()),
+            started_at: None,
             status: HistoryToolStatus::Success,
             title: "Tool".to_owned(),
             duration: None,
@@ -789,6 +857,7 @@ mod tests {
         let cell = ToolCallCell::new(ToolCallState {
             id: HistoryId::ZERO,
             call_id: Some("tool-2".to_owned()),
+            started_at: None,
             status: HistoryToolStatus::Success,
             title: "Tool".to_owned(),
             duration: None,
@@ -842,6 +911,7 @@ mod tests {
         let cell = ToolCallCell::new(ToolCallState {
             id: HistoryId::ZERO,
             call_id: Some("tool-empty".to_owned()),
+            started_at: None,
             status: HistoryToolStatus::Success,
             title: "Tool".to_owned(),
             duration: None,

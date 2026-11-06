@@ -78,6 +78,7 @@ pub(crate) enum SlashCommand {
     Diff,
     Mention,
     Cmd,
+    Project,
     Status,
     Statusline,
     Limits,
@@ -137,7 +138,7 @@ impl SlashCommand {
     pub(crate) fn description(self) -> &'static str {
         match self {
             SlashCommand::Chrome => "connect to your running Chrome via DevTools (CDP)",
-            SlashCommand::Browser => "launch built-in headless browser for screenshots & automation",
+            SlashCommand::Browser => "launch built-in Firefox/Camoufox for screenshots & automation",
             SlashCommand::Resume => "resume a past session for this folder",
             SlashCommand::Rename => "rename the current session",
             SlashCommand::Plan => "create a comprehensive plan (multiple agents)",
@@ -157,6 +158,7 @@ impl SlashCommand {
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
             SlashCommand::Cmd => "run a project command",
+            SlashCommand::Project => "register or select explicit project scopes",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Statusline => {
                 "configure status line fields (/statusline [primary|secondary|top|bottom])"

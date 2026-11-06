@@ -53,4 +53,10 @@ impl From<chromiumoxide::error::CdpError> for BrowserError {
     }
 }
 
+impl From<code_rustwright_mcp::BrowserError> for BrowserError {
+    fn from(error: code_rustwright_mcp::BrowserError) -> Self {
+        BrowserError::CdpError(format!("Camoufox/Juggler error: {error}"))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, BrowserError>;

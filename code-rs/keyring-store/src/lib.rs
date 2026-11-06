@@ -20,11 +20,18 @@ use std::ffi::CString;
 use std::fmt;
 use std::fmt::Debug;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::trace;
 
 #[cfg(target_os = "macos")]
 mod macos;
+
+#[cfg(target_os = "linux")]
+mod embedded;
+
+#[cfg(target_os = "linux")]
+pub use embedded::EmbeddedKeyringStore;
 
 #[derive(Debug)]
 pub enum CredentialStoreError {
@@ -86,33 +93,45 @@ pub trait KeyringStore: Debug + Send + Sync {
 
 /// Return the best available [`KeyringStore`] for the current platform.
 ///
-/// On macOS, this returns a store backed by the Data Protection Keychain,
-/// which integrates with Touch ID and avoids the legacy "Allow/Deny/Always
-/// Allow" Keychain Access dialogs.  On all other platforms, it returns the
-/// default `keyring`-crate-backed store.
+/// On Linux (including the Cosmopolitan APE target), persistent credentials
+/// live in Code's embedded encrypted vault. Platform stores remain available
+/// only as migration sources.
 pub fn best_keyring_store() -> Arc<dyn KeyringStore> {
+    let code_home = std::env::var_os("CODE_HOME")
+        .or_else(|| std::env::var_os("CODEX_HOME"))
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".code")))
+        .unwrap_or_else(|| std::env::temp_dir().join("code"));
+    best_keyring_store_for_code_home(&code_home)
+}
+
+/// Return the best credential store while keeping all persistent Linux
+/// credentials inside the selected `CODE_HOME`.
+pub fn best_keyring_store_for_code_home(code_home: &Path) -> Arc<dyn KeyringStore> {
     #[cfg(target_os = "macos")]
     {
         Arc::new(macos::DataProtectionKeyringStore)
     }
-    #[cfg(all(
-        target_arch = "x86_64",
-        target_env = "musl",
-        target_os = "linux",
-        feature = "cosmopolitan-ape"
-    ))]
+    #[cfg(target_os = "linux")]
     {
-        Arc::new(LinuxApeKernelKeyringStore)
-    }
-    #[cfg(not(any(
-        target_os = "macos",
-        all(
+        #[cfg(all(
             target_arch = "x86_64",
             target_env = "musl",
-            target_os = "linux",
             feature = "cosmopolitan-ape"
-        )
-    )))]
+        ))]
+        let legacy: Arc<dyn KeyringStore> = Arc::new(LinuxApeKernelKeyringStore);
+        #[cfg(not(all(
+            target_arch = "x86_64",
+            target_env = "musl",
+            feature = "cosmopolitan-ape"
+        )))]
+        let legacy: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
+        Arc::new(EmbeddedKeyringStore::new(
+            code_home.to_path_buf(),
+            Some(legacy),
+        ))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         Arc::new(DefaultKeyringStore)
     }
@@ -455,11 +474,9 @@ pub mod tests {
         feature = "cosmopolitan-ape"
     ))]
     #[test]
-    fn cosmopolitan_ape_uses_the_raw_linux_keyring_backend() {
-        assert_eq!(
-            format!("{:?}", super::best_keyring_store()),
-            "LinuxApeKernelKeyringStore"
-        );
+    fn cosmopolitan_ape_uses_the_embedded_persistent_backend() {
+        assert!(format!("{:?}", super::best_keyring_store())
+            .starts_with("EmbeddedKeyringStore"));
     }
 
     #[cfg(all(
@@ -470,7 +487,7 @@ pub mod tests {
     ))]
     #[test]
     fn cosmopolitan_ape_kernel_keyring_round_trip() {
-        let store = super::best_keyring_store();
+        let store = super::LinuxApeKernelKeyringStore;
         let account = format!(
             "code-keyring-store-test-{}-{}",
             std::process::id(),
@@ -620,5 +637,62 @@ pub mod tests {
             guard.remove(account);
             Ok(removed)
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod embedded_tests {
+    use super::EmbeddedKeyringStore;
+    use super::KeyringStore;
+    use super::tests::MockKeyringStore;
+    use std::sync::Arc;
+
+    #[test]
+    fn embedded_store_round_trips_without_plaintext_in_the_vault() {
+        let code_home = tempfile::tempdir().unwrap();
+        let store = EmbeddedKeyringStore::new(code_home.path().to_path_buf(), None);
+
+        store.save("Code Test", "account", "very-secret-value").unwrap();
+
+        assert_eq!(
+            store.load("Code Test", "account").unwrap().as_deref(),
+            Some("very-secret-value")
+        );
+        let ciphertext = std::fs::read(store.vault_path()).unwrap();
+        assert!(!ciphertext
+            .windows(b"very-secret-value".len())
+            .any(|window| window == b"very-secret-value"));
+        assert!(store.delete("Code Test", "account").unwrap());
+        assert_eq!(store.load("Code Test", "account").unwrap(), None);
+    }
+
+    #[test]
+    fn embedded_store_migrates_legacy_kde_entries_once() {
+        let code_home = tempfile::tempdir().unwrap();
+        let legacy = Arc::new(MockKeyringStore::default());
+        legacy
+            .save("Code Test", "legacy-account", "migrated-secret")
+            .unwrap();
+        let store = EmbeddedKeyringStore::new(
+            code_home.path().to_path_buf(),
+            Some(legacy.clone()),
+        );
+
+        assert_eq!(
+            store
+                .load("Code Test", "legacy-account")
+                .unwrap()
+                .as_deref(),
+            Some("migrated-secret")
+        );
+
+        legacy.delete("Code Test", "legacy-account").unwrap();
+        assert_eq!(
+            store
+                .load("Code Test", "legacy-account")
+                .unwrap()
+                .as_deref(),
+            Some("migrated-secret")
+        );
     }
 }

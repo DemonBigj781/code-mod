@@ -1,20 +1,37 @@
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Child;
 use std::process::Command;
+use std::process::Stdio;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 use crate::GitToolingError;
 
 pub(crate) fn ensure_git_repository(path: &Path) -> Result<(), GitToolingError> {
-    match run_git_for_stdout(
+    ensure_git_repository_with_timeout(path, None)
+}
+
+pub(crate) fn ensure_git_repository_with_timeout(
+    path: &Path,
+    timeout: Option<Duration>,
+) -> Result<(), GitToolingError> {
+    match run_git_for_stdout_with_timeout(
         path,
         vec![
             OsString::from("rev-parse"),
             OsString::from("--is-inside-work-tree"),
         ],
         None,
+        timeout,
     ) {
         Ok(output) if output.trim() == "true" => Ok(()),
         Ok(_) => Err(GitToolingError::NotAGitRepository {
@@ -29,8 +46,11 @@ pub(crate) fn ensure_git_repository(path: &Path) -> Result<(), GitToolingError> 
     }
 }
 
-pub(crate) fn resolve_head(path: &Path) -> Result<Option<String>, GitToolingError> {
-    match run_git_for_stdout(
+pub(crate) fn resolve_head_with_timeout(
+    path: &Path,
+    timeout: Option<Duration>,
+) -> Result<Option<String>, GitToolingError> {
+    match run_git_for_stdout_with_timeout(
         path,
         vec![
             OsString::from("rev-parse"),
@@ -38,6 +58,7 @@ pub(crate) fn resolve_head(path: &Path) -> Result<Option<String>, GitToolingErro
             OsString::from("HEAD"),
         ],
         None,
+        timeout,
     ) {
         Ok(sha) => Ok(Some(sha)),
         Err(GitToolingError::GitCommand { status, .. }) if status.code() == Some(128) => Ok(None),
@@ -78,13 +99,21 @@ pub(crate) fn normalize_relative_path(path: &Path) -> Result<PathBuf, GitTooling
 }
 
 pub(crate) fn resolve_repository_root(path: &Path) -> Result<PathBuf, GitToolingError> {
-    let root = run_git_for_stdout(
+    resolve_repository_root_with_timeout(path, None)
+}
+
+pub(crate) fn resolve_repository_root_with_timeout(
+    path: &Path,
+    timeout: Option<Duration>,
+) -> Result<PathBuf, GitToolingError> {
+    let root = run_git_for_stdout_with_timeout(
         path,
         vec![
             OsString::from("rev-parse"),
             OsString::from("--show-toplevel"),
         ],
         None,
+        timeout,
     )?;
     Ok(PathBuf::from(root))
 }
@@ -139,10 +168,25 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    run_git(dir, args, env)?;
+    run_git(dir, args, env, None)?;
     Ok(())
 }
 
+pub(crate) fn run_git_for_status_with_timeout<I, S>(
+    dir: &Path,
+    args: I,
+    env: Option<&[(OsString, OsString)]>,
+    timeout: Option<Duration>,
+) -> Result<(), GitToolingError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    run_git(dir, args, env, timeout)?;
+    Ok(())
+}
+
+#[cfg(test)]
 pub(crate) fn run_git_for_stdout<I, S>(
     dir: &Path,
     args: I,
@@ -152,7 +196,20 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let run = run_git(dir, args, env)?;
+    run_git_for_stdout_with_timeout(dir, args, env, None)
+}
+
+pub(crate) fn run_git_for_stdout_with_timeout<I, S>(
+    dir: &Path,
+    args: I,
+    env: Option<&[(OsString, OsString)]>,
+    timeout: Option<Duration>,
+) -> Result<String, GitToolingError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let run = run_git(dir, args, env, timeout)?;
     String::from_utf8(run.output.stdout)
         .map(|value| value.trim().to_owned())
         .map_err(|source| GitToolingError::GitOutputUtf8 {
@@ -165,6 +222,7 @@ fn run_git<I, S>(
     dir: &Path,
     args: I,
     env: Option<&[(OsString, OsString)]>,
+    timeout: Option<Duration>,
 ) -> Result<GitRun, GitToolingError>
 where
     I: IntoIterator<Item = S>,
@@ -185,7 +243,10 @@ where
         }
     }
     command.args(&args_vec);
-    let output = command.output()?;
+    let output = match timeout {
+        Some(timeout) => run_command_with_timeout(&mut command, &command_string, timeout)?,
+        None => command.output()?,
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(GitToolingError::GitCommand {
@@ -198,6 +259,88 @@ where
         command: command_string,
         output,
     })
+}
+
+fn run_command_with_timeout(
+    command: &mut Command,
+    command_string: &str,
+    timeout: Duration,
+) -> Result<std::process::Output, GitToolingError> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
+
+    let mut child = command.spawn()?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        std::io::Error::other(format!("failed to capture stdout for `{command_string}`"))
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        std::io::Error::other(format!("failed to capture stderr for `{command_string}`"))
+    })?;
+    let stdout_reader = thread::spawn(move || read_all(stdout));
+    let stderr_reader = thread::spawn(move || read_all(stderr));
+    let deadline = Instant::now() + timeout;
+
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            terminate_child_tree(&mut child);
+            let _ = join_reader(stdout_reader, command_string, "stdout")?;
+            let _ = join_reader(stderr_reader, command_string, "stderr")?;
+            return Err(GitToolingError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("git command `{command_string}` exceeded {timeout:?}"),
+            )));
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    Ok(std::process::Output {
+        status,
+        stdout: join_reader(stdout_reader, command_string, "stdout")?,
+        stderr: join_reader(stderr_reader, command_string, "stderr")?,
+    })
+}
+
+fn read_all(mut reader: impl Read) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn join_reader(
+    reader: thread::JoinHandle<std::io::Result<Vec<u8>>>,
+    command: &str,
+    stream: &str,
+) -> Result<Vec<u8>, GitToolingError> {
+    reader
+        .join()
+        .map_err(|_| {
+            GitToolingError::Io(std::io::Error::other(format!(
+                "{stream} reader panicked for `{command}`"
+            )))
+        })?
+        .map_err(GitToolingError::Io)
+}
+
+fn terminate_child_tree(child: &mut Child) {
+    #[cfg(unix)]
+    unsafe {
+        let process_group = -(child.id() as i32);
+        let _ = libc::kill(process_group, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn build_command_string(args: &[OsString]) -> String {

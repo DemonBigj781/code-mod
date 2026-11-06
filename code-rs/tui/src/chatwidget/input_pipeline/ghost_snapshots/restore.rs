@@ -186,6 +186,7 @@ impl ChatWidget<'_> {
         }
 
         let mut files_restored = false;
+        let mut files_restore_complete = false;
         let mut conversation_rewind_requested = false;
         let mut errors: Vec<String> = Vec::new();
         let mut pre_restore_snapshot: Option<GhostSnapshot> = None;
@@ -199,23 +200,29 @@ impl ChatWidget<'_> {
                 pre_restore_snapshot = Some(snapshot);
             }
 
-            match restore_ghost_commit(&self.config.cwd, snapshot.commit()) {
-                Ok(()) => {
-                    files_restored = true;
-                    self.ghost_snapshots.truncate(index);
-                    if let Some(pre) = pre_restore_snapshot {
-                        self.ghost_snapshots.push(pre);
-                        if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
-                            self.ghost_snapshots.remove(0);
-                        }
+            let mut restored_repositories = 0usize;
+            for (repo_path, commit) in snapshot.repositories() {
+                match restore_ghost_commit(repo_path, commit) {
+                    Ok(()) => restored_repositories = restored_repositories.saturating_add(1),
+                    Err(err) => errors.push(format!(
+                        "Failed to restore repository {}: {err}",
+                        repo_path.display()
+                    )),
+                }
+            }
+
+            files_restored = restored_repositories > 0;
+            files_restore_complete = restored_repositories == snapshot.repositories().len();
+            if files_restore_complete {
+                self.ghost_snapshots.truncate(index);
+                if let Some(pre) = pre_restore_snapshot {
+                    self.ghost_snapshots.push(pre);
+                    if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
+                        self.ghost_snapshots.remove(0);
                     }
                 }
-                Err(err) => {
-                    if added_snapshot && !self.ghost_snapshots.is_empty() {
-                        self.ghost_snapshots.pop();
-                    }
-                    errors.push(format!("Failed to restore workspace files: {err}"));
-                }
+            } else if !files_restored && added_snapshot && !self.ghost_snapshots.is_empty() {
+                self.ghost_snapshots.pop();
             }
         }
 
@@ -256,7 +263,14 @@ impl ChatWidget<'_> {
         }
 
         if files_restored {
-            let mut message = format!("Restored workspace files to snapshot {}", snapshot.short_id());
+            let mut message = if files_restore_complete {
+                format!("Restored workspace files to snapshot {}", snapshot.short_id())
+            } else {
+                format!(
+                    "Partially restored workspace files to snapshot {}",
+                    snapshot.short_id()
+                )
+            };
             if let Some(snippet) = snapshot.summary_snippet(60) {
                 let _ = write!(message, " • {snippet}");
             }

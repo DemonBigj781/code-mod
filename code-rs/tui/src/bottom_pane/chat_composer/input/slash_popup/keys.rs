@@ -53,6 +53,9 @@ pub(super) fn handle_key_event_with_slash_popup_inner(
                     CommandItem::Subagent(i) => {
                         SlashPopupSelection::Subagent(popup.subagent_name(i).map(str::to_owned))
                     }
+                    CommandItem::Project(i) => {
+                        SlashPopupSelection::Project(popup.project_name(i).map(str::to_owned))
+                    }
                 })
             }) else {
                 return (InputResult::None, true);
@@ -92,6 +95,11 @@ pub(super) fn handle_key_event_with_slash_popup_inner(
                             let _ = super::completion::apply_subagent_completion(view, name);
                         }
                     }
+                    SlashPopupSelection::Project(project_name) => {
+                        if let Some(name) = project_name {
+                            view.textarea.set_text(&format!("/{name}"));
+                        }
+                    }
                 }
                 // After completing, place the cursor at the end of the
                 // slash command so the user can immediately type args.
@@ -115,4 +123,3 @@ pub(super) fn handle_key_event_with_slash_popup_inner(
         input => view.handle_input_basic(input),
     }
 }
-
