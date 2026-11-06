@@ -57,6 +57,12 @@ class CommandTests(unittest.TestCase):
         script = (support.parent / "build-cosmopolitan-code.sh").read_text()
         lock = tomllib.loads((support / "Cargo.lock").read_text())
         packages = {package["name"]: package for package in lock["package"]}
+        source_lock = tomllib.loads(
+            (support.parents[1] / "code-rs/Cargo.lock").read_text()
+        )
+        source_packages = {
+            package["name"]: package for package in source_lock["package"]
+        }
         self.assertIn('cp "$support_dir/Cargo.lock"', script)
         self.assertIn("--locked", script)
         self.assertEqual(packages["libc"]["version"], "0.2.189")
@@ -66,6 +72,10 @@ class CommandTests(unittest.TestCase):
         self.assertNotIn("source", packages["rama-tls-rustls"])
         self.assertIn("libc", packages["code-git-tooling"]["dependencies"])
         self.assertIn("code-rustwright-mcp", packages["code-browser"]["dependencies"])
+        self.assertEqual(
+            packages["code-tui"]["dependencies"],
+            source_packages["code-tui"]["dependencies"],
+        )
 
     def setUp(self):
         fixture = test_artifact_contract.ArtifactContractTests()
