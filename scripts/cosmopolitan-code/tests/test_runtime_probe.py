@@ -52,8 +52,17 @@ class RuntimeProbeTests(unittest.TestCase):
     def test_windows_runtime_gate_precedes_full_build(self):
         root = Path(__file__).resolve().parents[3]
         workflow = (root / ".github/workflows/cosmopolitan-code-ape.yml").read_text()
-        self.assertIn("needs: runtime-windows", workflow)
-        self.assertEqual(workflow.count("if: github.ref == 'refs/heads/Main'"), 4)
+        build_job = workflow.split("\n  build:\n", 1)[1].split(
+            "\n  windows-smoke:\n", 1
+        )[0]
+        self.assertIn("needs:\n      - project-scope\n      - runtime-windows", build_job)
+        self.assertEqual(workflow.count("if: github.ref == 'refs/heads/Main'"), 5)
+        self.assertEqual(
+            workflow.count(
+                "-p code-tui --lib --no-default-features --features code-fork"
+            ),
+            3,
+        )
         self.assertIn("ref: ${{ steps.fork-pin.outputs.sha }}", workflow)
 
 
