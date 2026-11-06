@@ -81,7 +81,7 @@ class CompilerBootstrapRecordTests(unittest.TestCase):
     def test_rejects_unpinned_installed_tree(self):
         self.pin_values["compiler_bootstrap_installed_tree_sha256"] = "0" * 64
         self.write_pins()
-        with self.assertRaisesRegex(ValueError, "installed official compiler tree"):
+        with self.assertRaisesRegex(ValueError, "Installed official compiler tree"):
             record_bootstrap(
                 self.config, self.pins, self.archive, self.sdk, self.output
             )
