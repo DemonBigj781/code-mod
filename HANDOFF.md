@@ -4,10 +4,9 @@
 
 > **Status:** The requested browser/display work was validated in the portable
 > `code.com` artifact on 2026-11-04. Explicit project scopes, bounded Git
-> snapshots/reviews, Actions-only validation, and memory-summary Markdown are
-> implemented in the dirty worktree as of 2026-11-06, but the current bytes have
-> not run in GitHub Actions because no commit or push was authorized. No branch,
-> commit, push, or PR was made.
+> snapshots/reviews, Actions-only validation, and memory-summary Markdown were
+> committed to `Main` on 2026-11-06. Compilation and test evidence for the current
+> revision is provided by the `Cosmopolitan Code APE` GitHub Actions workflow.
 
 ## Requested Outcome
 
@@ -34,9 +33,10 @@ product. The deliverable is Code's built-in browser tool.
 - Resolved repository root:
   `/run/media/jack/5e90bafb-087a-4fbc-8e81-0a09dee62978/projects/AI_Project/code`
 - Branch: `Main`
-- HEAD: `fef5163e5444ecf1fb30c4ae6ed04be91ae7f7b7`
-- Current state: large pre-existing dirty/untracked/deleted worktree; inspect
-  `git status --short` instead of relying on a stale count.
+- Current revision: inspect `git rev-parse HEAD` and the corresponding
+  `Cosmopolitan Code APE` workflow run rather than relying on a copied SHA.
+- Current state: inspect `git status --short`; the unrelated pre-existing deletion
+  of `build-fast.zsh.backup` remains intentionally uncommitted.
 - Nested repositories: none found by the handoff inventory.
 - `build-fast.zsh.backup` was already deleted before this work; do not restore or
   otherwise alter it implicitly.
