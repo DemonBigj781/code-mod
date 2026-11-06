@@ -69,13 +69,21 @@ from older or incompatible runtime caches. The release build disables fat LTO
 and keeps one codegen unit.
 
 The APE also carries a deterministic Linux x86-64 Camoufox runtime ZIP as its
-final byte range. By default the Actions build packages
-`o/camoufox-runtime-prototype`; `COSMOPOLITAN_BROWSER_RUNTIME_SOURCE` selects an
-equivalent staged tree, and `COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE` selects an
-already packaged ZIP. If no source tree or archive is available, the build
-fails rather than producing an APE whose browser tools depend on host state.
-The packager fixes ZIP timestamps and ordering, excludes browser profiles, and
-records the size, mode, SHA-256, and symlink target of every payload entry.
+final byte range. Clean Actions runners download the versioned GitHub release
+asset pinned in `pins.json`, then fail closed unless its URL, byte size,
+SHA-256, file count, tree SHA-256, embedded component identities, and ZIP
+inventory all match. Existing cache entries receive the same validation and a
+tampered entry is preserved and rejected rather than silently replaced.
+
+When the local `o/camoufox-runtime-prototype` staging tree exists, the low-level
+packager regenerates the same deterministic archive before compilation.
+`COSMOPOLITAN_BROWSER_RUNTIME_SOURCE` selects an equivalent staged tree,
+`COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE` selects an explicitly supplied packaged
+ZIP, and `COSMOPOLITAN_BROWSER_RUNTIME_CACHE` changes the download cache
+directory. These are development inputs; the GitHub workflow uses the pinned
+release asset. The packager fixes ZIP timestamps and ordering, excludes browser
+profiles, and records the size, mode, SHA-256, and symlink target of every
+payload entry.
 
 The default-branch GitHub workflow checks out the full Cosmopolitan source at
 the revision pinned in `pins.json` and configures an APE interpreter on its

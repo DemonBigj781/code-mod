@@ -20,6 +20,27 @@ tmp_dir=$(mktemp -d "$repo_root/o/cosmopolitan-code-build.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 workspace="$tmp_dir/source"
 mkdir -p "$workspace"
+
+browser_runtime_source=${COSMOPOLITAN_BROWSER_RUNTIME_SOURCE:-"$repo_root/o/camoufox-runtime-prototype"}
+browser_runtime_archive=${COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE:-}
+if [ -n "$browser_runtime_archive" ]; then
+    if [ ! -f "$browser_runtime_archive" ]; then
+        echo "Configured browser runtime archive is missing: $browser_runtime_archive" >&2
+        exit 1
+    fi
+elif [ -d "$browser_runtime_source" ]; then
+    browser_runtime_archive="$tmp_dir/browser-runtime.zip"
+    python3 "$support_dir/package-browser-runtime.py" \
+        "$browser_runtime_source" "$browser_runtime_archive" \
+        --pins "$support_dir/pins.json" \
+        --report "$tmp_dir/browser-runtime-report.json"
+else
+    browser_runtime_cache=${COSMOPOLITAN_BROWSER_RUNTIME_CACHE:-"$repo_root/o/camoufox-runtime-cache"}
+    browser_runtime_archive=$(PYTHONDONTWRITEBYTECODE=1 python3 \
+        "$support_dir/cache_browser_runtime.py" \
+        "$support_dir/pins.json" "$browser_runtime_cache")
+fi
+
 source_snapshot_sha256=
 if [ "$source_mode" = working-tree ]; then
     source_snapshot_sha256=$(python3 "$support_dir/snapshot_worktree.py" "$repo_root" "$workspace")
@@ -102,26 +123,6 @@ tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-t
 debug_elf="$build_root/build/x86_64-unknown-linux-musl/release/code.com.dbg"
 if [ ! -f "$debug_elf" ]; then
     echo "Cosmopolitan Rust executable is missing: $debug_elf" >&2
-    exit 1
-fi
-
-browser_runtime_source=${COSMOPOLITAN_BROWSER_RUNTIME_SOURCE:-"$repo_root/o/camoufox-runtime-prototype"}
-browser_runtime_archive=${COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE:-}
-if [ -n "$browser_runtime_archive" ]; then
-    if [ ! -f "$browser_runtime_archive" ]; then
-        echo "Configured browser runtime archive is missing: $browser_runtime_archive" >&2
-        exit 1
-    fi
-elif [ -d "$browser_runtime_source" ]; then
-    browser_runtime_archive="$tmp_dir/browser-runtime.zip"
-    python3 "$support_dir/package-browser-runtime.py" \
-        "$browser_runtime_source" "$browser_runtime_archive" \
-        --pins "$support_dir/pins.json" \
-        --report "$tmp_dir/browser-runtime-report.json"
-elif [ -f "$repo_root/o/camoufox-runtime/browser-runtime.zip" ]; then
-    browser_runtime_archive="$repo_root/o/camoufox-runtime/browser-runtime.zip"
-else
-    echo "Camoufox runtime input is missing. Set COSMOPOLITAN_BROWSER_RUNTIME_SOURCE or COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE." >&2
     exit 1
 fi
 

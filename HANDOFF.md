@@ -111,6 +111,26 @@ records the official tag commit, archive identity, compatibility stamp, and fres
 installed-tree fingerprint before replacing the bootstrap runtime with the runtime
 built from Code's pinned `DemonBigj781/cosmopolitan` fork.
 
+Clean Actions runners obtain the deterministic schema-2 browser runtime from the
+versioned GitHub release asset pinned in `pins.json`. The cache helper accepts only
+HTTPS and verifies the archive byte size, SHA-256, embedded component identities,
+file count, tree SHA-256, and ZIP inventory before the expensive Rust compile. The
+current contract is:
+
+- Release tag: `cosmopolitan-browser-runtime-v1`
+- Asset: `browser-runtime_x86_64.zip`
+- Archive size: `813836364` bytes
+- Archive SHA-256:
+  `d1b2c46f7916e4cdd07bb4ee09ba1931f9901f5095e06a2536eef9b016dd866f`
+- Runtime files: `1364`
+- Runtime tree SHA-256:
+  `1acea8b7ead597408baf475432c1abcfdf18319b62e6288bc9e68dcbe8eecc89`
+
+The preserved `o/camoufox-runtime-prototype` tree regenerates exactly those bytes
+with `package-browser-runtime.py`. The older local
+`o/camoufox-runtime/browser-runtime.zip` is a schema-1 archive and is not a valid
+input for the current contract.
+
 ## Historical Portable Artifact
 
 This artifact predates the Actions-only policy and remains historical acceptance
