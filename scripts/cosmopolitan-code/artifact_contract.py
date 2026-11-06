@@ -253,45 +253,43 @@ def validate_compiler_bootstrap(bootstrap: Any, pins: dict[str, Any]) -> dict[st
         raise ArtifactContractError("compiler_bootstrap kind does not match the pin")
     if bootstrap.get("source_commit") != pins.get("compiler_bootstrap_source_commit"):
         raise ArtifactContractError("compiler_bootstrap source_commit does not match the pin")
-    if bootstrap.get("cosmocc_tree_sha256") != pins.get(
-        "compiler_bootstrap_cosmocc_tree_sha256"
-    ):
-        raise ArtifactContractError("compiler_bootstrap compiler tree does not match the pin")
+    if bootstrap.get("version") != pins.get("compiler_bootstrap_version"):
+        raise ArtifactContractError("compiler_bootstrap version does not match the pin")
+    if bootstrap.get("archive_url") != pins.get("compiler_bootstrap_archive_url"):
+        raise ArtifactContractError("compiler_bootstrap archive URL does not match the pin")
     if bootstrap.get("archive_sha256") != pins.get("compiler_bootstrap_archive_sha256"):
         raise ArtifactContractError("compiler_bootstrap archive does not match the pin")
     if bootstrap.get("installed_tree_sha256") != pins.get(
-        "compiler_bootstrap_extracted_tree_sha256"
+        "compiler_bootstrap_installed_tree_sha256"
     ):
         raise ArtifactContractError("compiler_bootstrap installed tree does not match the pin")
-    if type(bootstrap.get("source_worktree_dirty")) is not bool:
-        raise ArtifactContractError("compiler_bootstrap source_worktree_dirty must be a boolean")
+    if bootstrap.get("source_worktree_dirty") is not False:
+        raise ArtifactContractError("compiler_bootstrap source_worktree_dirty must be false")
     verification = bootstrap.get("cosmocc_verification")
-    if not isinstance(verification, str) or not verification:
-        raise ArtifactContractError("compiler_bootstrap must identify compiler verification")
-    for field in (
-        "archive_sha256",
-        "compatibility_archive_sha256",
-        "provenance_sha256",
-    ):
-        value = bootstrap.get(field)
-        if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+    if verification != pins.get("compiler_bootstrap_verification"):
+        raise ArtifactContractError("compiler_bootstrap verification does not match the pin")
+    for field in ("archive_sha256", "installed_tree_sha256"):
+        if not isinstance(bootstrap.get(field), str) or not SHA256_RE.fullmatch(
+            bootstrap[field]
+        ):
             raise ArtifactContractError(f"compiler_bootstrap has an invalid {field}")
     compatibility = bootstrap.get("upstream_compatibility_stamp")
-    if not isinstance(compatibility, str) or not compatibility.startswith("cosmocc-"):
+    expected_compatibility = (
+        f"cosmocc-{pins.get('compiler_bootstrap_version')} "
+        f"sha256:{pins.get('compiler_bootstrap_archive_sha256')}"
+    )
+    if compatibility != expected_compatibility:
         raise ArtifactContractError("compiler_bootstrap has no upstream compatibility stamp")
     return {
         "schema_version": 1,
         "kind": bootstrap["kind"],
+        "version": bootstrap["version"],
         "source_commit": bootstrap["source_commit"],
         "source_worktree_dirty": bootstrap["source_worktree_dirty"],
-        "cosmocc_tree_sha256": bootstrap["cosmocc_tree_sha256"],
+        "archive_url": bootstrap["archive_url"],
+        "archive_sha256": bootstrap["archive_sha256"],
         "installed_tree_sha256": bootstrap["installed_tree_sha256"],
         "cosmocc_verification": verification,
-        "archive_sha256": bootstrap["archive_sha256"],
-        "compatibility_archive_sha256": bootstrap[
-            "compatibility_archive_sha256"
-        ],
-        "provenance_sha256": bootstrap["provenance_sha256"],
         "upstream_compatibility_stamp": compatibility,
     }
 
@@ -434,14 +432,6 @@ def validate_artifact(
     )
     if manifest.get("source_clean") is not True:
         raise ArtifactContractError("artifact must be built from a clean committed source tree")
-    compiler_bootstrap = manifest["compiler_bootstrap"]
-    if compiler_bootstrap["source_worktree_dirty"] is not False or compiler_bootstrap[
-        "cosmocc_verification"
-    ] == "unverified-local-input":
-        raise ArtifactContractError(
-            "release compiler bootstrap must come from a clean, verified Cosmopolitan SDK"
-        )
-
     return manifest
 
 

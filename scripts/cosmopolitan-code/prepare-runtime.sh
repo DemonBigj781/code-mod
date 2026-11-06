@@ -21,10 +21,10 @@ artifact_name=$(read_pin artifact_name)
 build_root=${COSMO_RUST_BUILD_ROOT:-"$repo_root/o/rust-ape-source-$cosmo_commit-$rust_ape_commit"}
 sdk="$build_root/sdk"
 sdk_bin="$sdk/vendor/cosmocc/bin"
-compiler_bootstrap_metadata="$sdk/generated/local-cosmocc-bootstrap.json"
-local_cosmo_root=${COSMOPOLITAN_SOURCE_ROOT:-"$HOME/projects/cosmo"}
-local_compiler_archive=${COSMOPOLITAN_BOOTSTRAP_SDK:-"$local_cosmo_root/o/toolchain/compiler-payload/cosmocc-sdk.zip"}
-local_compiler_provenance=${COSMOPOLITAN_BOOTSTRAP_PROVENANCE:-"$(dirname "$local_compiler_archive")/BUILD.json"}
+compiler_config="$cosmo_source/third_party/rust_ape/upstream/xtask/src/config.rs"
+compiler_version=$(read_pin compiler_bootstrap_version)
+compiler_archive="$sdk/cache/cosmocc-$compiler_version.zip"
+compiler_bootstrap_metadata="$sdk/generated/cosmocc-bootstrap.json"
 source_commit=$(git -C "$repo_root" rev-parse HEAD)
 source_mode=${COSMOPOLITAN_CODE_SOURCE_MODE:-clean}
 
@@ -102,11 +102,11 @@ prepare_runtime() {
     fi
     if [ ! -f "$sdk/generated/x86_64-unknown-linux-musl.json" ] || \
         [ ! -x "$sdk_bin/apelink" ] || [ ! -f "$compiler_bootstrap_metadata" ]; then
-        python3 "$support_dir/stage_local_cosmocc.py" \
-            "$local_compiler_archive" "$local_compiler_provenance" \
-            "$cosmo_source/third_party/rust_ape/upstream/xtask/src/config.rs" \
-            "$pins" "$sdk"
+        python3 "$support_dir/cache_cosmocc.py" "$compiler_config" "$pins" "$sdk/cache"
         bash "$run_script" setup
+        python3 "$support_dir/record_cosmocc_bootstrap.py" \
+            "$compiler_config" "$pins" "$compiler_archive" "$sdk" \
+            "$compiler_bootstrap_metadata"
     fi
 
     python3 "$support_dir/build_fork_runtime.py" "$cosmo_source" "$sdk" "$cosmo_commit" "$build_jobs"

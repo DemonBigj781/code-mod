@@ -109,19 +109,19 @@ class ArtifactContractTests(unittest.TestCase):
         self.bootstrap = {
             "schema_version": 1,
             "kind": PINS["compiler_bootstrap_kind"],
+            "version": PINS["compiler_bootstrap_version"],
             "source_commit": PINS["compiler_bootstrap_source_commit"],
             "source_worktree_dirty": False,
-            "cosmocc_tree_sha256": PINS["compiler_bootstrap_cosmocc_tree_sha256"],
-            "installed_tree_sha256": PINS[
-                "compiler_bootstrap_extracted_tree_sha256"
-            ],
-            "cosmocc_verification": "bootstrap-record-matches-tree",
-            "archive_path": "/local/cosmocc-sdk.zip",
+            "archive_url": PINS["compiler_bootstrap_archive_url"],
             "archive_sha256": PINS["compiler_bootstrap_archive_sha256"],
-            "compatibility_archive_sha256": "e" * 64,
-            "provenance_path": "/local/BUILD.json",
-            "provenance_sha256": "c" * 64,
-            "upstream_compatibility_stamp": "cosmocc-4.0.2 sha256:" + "d" * 64,
+            "installed_tree_sha256": PINS[
+                "compiler_bootstrap_installed_tree_sha256"
+            ],
+            "cosmocc_verification": PINS["compiler_bootstrap_verification"],
+            "upstream_compatibility_stamp": (
+                f"cosmocc-{PINS['compiler_bootstrap_version']} "
+                f"sha256:{PINS['compiler_bootstrap_archive_sha256']}"
+            ),
         }
         self.write_manifest()
 
@@ -191,21 +191,23 @@ class ArtifactContractTests(unittest.TestCase):
             {},
             dict(self.bootstrap, kind="official-release"),
             dict(self.bootstrap, source_commit="f" * 40),
-            dict(self.bootstrap, cosmocc_tree_sha256="0" * 64),
+            dict(self.bootstrap, version="4.0.1"),
+            dict(self.bootstrap, archive_url="https://example.com/cosmocc.zip"),
+            dict(self.bootstrap, installed_tree_sha256="0" * 64),
         ):
             with self.subTest(bootstrap=bootstrap):
                 self.write_manifest(compiler_bootstrap=bootstrap)
                 with self.assertRaisesRegex(ArtifactContractError, "compiler_bootstrap"):
                     validate_artifact(self.artifact, self.manifest)
 
-    def test_release_rejects_dirty_or_unverified_local_compiler(self):
+    def test_rejects_dirty_or_unverified_compiler_identity(self):
         for bootstrap in (
             dict(self.bootstrap, source_worktree_dirty=True),
             dict(self.bootstrap, cosmocc_verification="unverified-local-input"),
         ):
             with self.subTest(bootstrap=bootstrap):
                 self.write_manifest(compiler_bootstrap=bootstrap)
-                with self.assertRaisesRegex(ArtifactContractError, "release compiler bootstrap"):
+                with self.assertRaisesRegex(ArtifactContractError, "compiler_bootstrap"):
                     validate_artifact(self.artifact, self.manifest)
 
     def test_rejects_missing_or_malformed_manifest(self):
@@ -265,16 +267,10 @@ class ArtifactContractTests(unittest.TestCase):
             validate_artifact(self.artifact, self.manifest)
 
     def test_accepts_identified_working_tree_artifact_for_local_development(self):
-        development_bootstrap = dict(
-            self.bootstrap,
-            source_worktree_dirty=True,
-            cosmocc_verification="unverified-local-input",
-        )
         self.write_manifest(
             source_clean=False,
             development_build=True,
             source_snapshot_sha256="e" * 64,
-            compiler_bootstrap=development_bootstrap,
         )
 
         result = validate_development_artifact(self.artifact, self.manifest)
@@ -323,8 +319,8 @@ class ArtifactContractTests(unittest.TestCase):
         self.assertTrue(result["development_build"])
         self.assertEqual(result["source_snapshot_sha256"], "e" * 64)
         self.assertEqual(
-            result["compiler_bootstrap"]["compatibility_archive_sha256"],
-            "e" * 64,
+            result["compiler_bootstrap"]["archive_url"],
+            PINS["compiler_bootstrap_archive_url"],
         )
         self.assertEqual(
             result["browser_runtime"]["archive_sha256"],

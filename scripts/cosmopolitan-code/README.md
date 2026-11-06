@@ -55,9 +55,9 @@ runner. Do not invoke it locally for development validation.
 The script verifies the pinned Cosmopolitan fork and Rust-APE source revisions,
 then builds the fork's `toolchain` target for x86-64. Its runtime, C++ library,
 startup objects, headers, APE loader, and linker tools replace the bootstrap SDK
-runtime before any Code compilation. The temporary bootstrap is the modified GCC
-14.1.0 Cosmopolitan toolchain produced by the local `projects/cosmo` source tree;
-the final runtime still comes from Code's pinned fork source.
+runtime before any Code compilation. The temporary compiler is the official
+Cosmocc 4.0.2 release archive, pinned by exact URL and SHA-256; the final runtime
+still comes from Code's pinned fork source.
 
 The script creates a disposable source snapshot and applies the APE-specific
 dependency adjustments and lockfile. Actions builds archive the checked-out
@@ -81,15 +81,13 @@ The default-branch GitHub workflow checks out the full Cosmopolitan source at
 the revision pinned in `pins.json` and configures an APE interpreter on its
 disposable runner for the fork's build helpers.
 
-Compiler bootstrap never downloads a released `cosmocc` archive. By default it
-installs `$HOME/projects/cosmo/o/toolchain/compiler-payload/cosmocc-sdk.zip`
-read-only into Code's pin-addressed Rust-APE SDK. The archive's adjacent
-`BUILD.json`, embedded metadata, source commit, complete compiler-tree hash,
-file modes, and contained relative symlinks are validated before an atomic
-install. `COSMOPOLITAN_SOURCE_ROOT`, `COSMOPOLITAN_BOOTSTRAP_SDK`, and
-`COSMOPOLITAN_BOOTSTRAP_PROVENANCE` can select an equivalent local payload; no
-network fallback exists. An unidentified or different existing compiler SDK is
-preserved and rejected instead of overwritten.
+Compiler bootstrap downloads only the official Cosmocc release URL pinned in
+`pins.json`, with the matching official GitHub release as a network fallback.
+Both locations must provide the exact SHA-256 required by the pinned Rust-APE
+configuration. Existing cache entries are reused only after the same hash check;
+tampered or unidentified entries are preserved and rejected instead of silently
+replaced. After Rust-APE installs the archive, the build verifies the complete
+compiler-tree fingerprint and compatibility stamp before recording provenance.
 
 The compiler identity is recorded separately from the source-built fork runtime
 in the final artifact manifest. Release validation rejects unidentified or dirty

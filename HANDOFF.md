@@ -104,6 +104,13 @@ Important paths:
 Do not replace the canonical APE build with direct Cargo. Compilation and tests are
 GitHub-Actions-only for this repository.
 
+Rust-APE bootstraps with the official Cosmocc 4.0.2 release from the exact HTTPS
+URL and SHA-256 pinned in `scripts/cosmopolitan-code/pins.json`; the matching
+official GitHub release is only a network fallback for the same bytes. The build
+records the official tag commit, archive identity, compatibility stamp, and fresh
+installed-tree fingerprint before replacing the bootstrap runtime with the runtime
+built from Code's pinned `DemonBigj781/cosmopolitan` fork.
+
 ## Historical Portable Artifact
 
 This artifact predates the Actions-only policy and remains historical acceptance
