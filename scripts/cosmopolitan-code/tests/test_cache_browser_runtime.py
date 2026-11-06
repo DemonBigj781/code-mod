@@ -90,7 +90,7 @@ class BrowserRuntimeCacheTests(unittest.TestCase):
             {
                 "archive_url": (
                     "https://github.com/example/project/releases/download/"
-                    "cosmopolitan-browser-runtime-v1/browser-runtime-x86_64.zip"
+                    "cosmopolitan-browser-runtime-v1/browser-runtime_x86_64.zip"
                 ),
                 "archive_sha256": hashlib.sha256(self.payload).hexdigest(),
                 "archive_size_bytes": len(self.payload),
@@ -121,7 +121,9 @@ class BrowserRuntimeCacheTests(unittest.TestCase):
 
     def test_valid_cache_never_downloads(self):
         self.cache.mkdir()
-        archive = self.cache / "browser-runtime_x86_64.zip"
+        distribution = cache_browser_runtime.read_distribution(self.pins)
+        self.assertEqual(distribution["name"], "browser-runtime_x86_64.zip")
+        archive = self.cache / distribution["name"]
         archive.write_bytes(self.payload)
 
         with patch.object(cache_browser_runtime.subprocess, "run") as download:
@@ -133,7 +135,9 @@ class BrowserRuntimeCacheTests(unittest.TestCase):
 
     def test_tampered_cache_is_preserved_and_rejected(self):
         self.cache.mkdir()
-        archive = self.cache / "browser-runtime_x86_64.zip"
+        distribution = cache_browser_runtime.read_distribution(self.pins)
+        self.assertEqual(distribution["name"], "browser-runtime_x86_64.zip")
+        archive = self.cache / distribution["name"]
         archive.write_bytes(b"invalid")
 
         with patch.object(cache_browser_runtime.subprocess, "run") as download:
