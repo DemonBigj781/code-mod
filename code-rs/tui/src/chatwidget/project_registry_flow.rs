@@ -91,7 +91,7 @@ fn resolve_repository_scope(code_home: &Path, cwd: &Path) -> RepositoryScope {
                 "unregistered working directory".to_owned(),
                 cwd.to_path_buf(),
                 format!(
-                    "No project is selected and {} is not inside a Git repository. Register the intended scope with {HELP}",
+                    "No project is selected and {} is not inside a Git repository. Register the intended scope with /project add <master|group|single> <dir> <name> <git_search_depth>.",
                     cwd.display()
                 ),
             ),
