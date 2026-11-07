@@ -36,6 +36,19 @@ TRACE_BUILD=1 ./build-fast.zsh
 ./build-fast.zsh --target aarch64-unknown-linux-musl
 ```
 
+### TUI Draw Diagnostics
+
+Normal builds compile out the per-frame `tui-draw.md` diagnostic logging. To
+include it in a diagnostic build, enable the non-default `debug-logs` Cargo
+feature on `code-cli`:
+
+```bash
+cd code-rs && cargo build -p code-cli --features debug-logs
+```
+
+The feature also enables the other verbose TUI debug logging guarded by
+`code-tui/debug-logs`.
+
 ### Options
 
 ```bash

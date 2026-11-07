@@ -15,6 +15,7 @@ path = "src/lib.rs"
 default = ["managed-network-proxy", "browser-automation", "code-tui/code-fork", "code-tui/native-picker"]
 browser-automation = ["dep:code-rustwright-mcp", "code-core/browser-automation", "code-login/browser-automation", "code-tui/browser-automation"]
 cosmopolitan-ape = ["code-core/cosmopolitan-ape", "code-tui/cosmopolitan-ape", "code-tui/code-fork", "browser-automation", "managed-network-proxy"]
+debug-logs = ["code-tui/debug-logs"]
 managed-network-proxy = ["code-core/managed-network-proxy", "code-tui/managed-network-proxy"]
 
 [lints]

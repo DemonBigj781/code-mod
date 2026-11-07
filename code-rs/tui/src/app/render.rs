@@ -197,6 +197,7 @@ impl App<'_> {
 
         let completed_frame = completed_frame?;
         self.tab_hits = tab_hits;
+        #[cfg(feature = "debug-logs")]
         if let AppState::Chat { widget } = &self.app_state {
             let area = completed_frame.buffer.area;
             let _ = code_core::markdown_logs::append(
