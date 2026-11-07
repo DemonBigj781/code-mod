@@ -53,8 +53,8 @@ jobs:
           cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork project_registry -j"$jobs"
           cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork workspace_snapshot_tests -j"$jobs"
           cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork repository_mode_tests -j"$jobs"
-          cargo +1.93.0 test --locked -p code-cli --test feature_contract -j"$jobs"
-          cargo +1.93.0 check --locked -p code-cli --features debug-logs -j"$jobs"
+          cargo +1.93.0 test --locked -p code-cli --test feature_contract --no-default-features -j"$jobs"
+          cargo +1.93.0 check --locked -p code-cli --no-default-features --features debug-logs -j"$jobs"
 
   runtime:
     name: Build source runtime probe on Linux
