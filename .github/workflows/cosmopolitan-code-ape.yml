@@ -49,6 +49,7 @@ jobs:
           jobs=$(getconf _NPROCESSORS_ONLN)
           cargo +1.93.0 test --locked -p code-core project_registry -j"$jobs"
           cargo +1.93.0 test --locked -p code-core memory_summary -j"$jobs"
+          cargo +1.93.0 test --locked -p code-session-history -j"$jobs"
           cargo +1.93.0 test --locked -p code-git-tooling repository_discovery -j"$jobs"
           cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork project_registry -j"$jobs"
           cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork workspace_snapshot_tests -j"$jobs"

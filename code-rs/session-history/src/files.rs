@@ -43,6 +43,19 @@ pub(crate) fn visit_records(
     path: &Path,
     mut visit: impl FnMut(usize, Value) -> bool,
 ) -> Result<()> {
+    visit_record_bytes(path, |ordinal, line| {
+        let text = String::from_utf8_lossy(line);
+        let Ok(value) = serde_json::from_str::<Value>(&text) else {
+            return true;
+        };
+        !value.is_object() || visit(ordinal, value)
+    })
+}
+
+pub(crate) fn visit_record_bytes(
+    path: &Path,
+    mut visit: impl FnMut(usize, &[u8]) -> bool,
+) -> Result<()> {
     let mut reader = BufReader::new(open_regular(path)?);
     let mut ordinal = 0;
     loop {
@@ -61,11 +74,7 @@ pub(crate) fn visit_records(
             ));
         }
         ordinal += 1;
-        let text = String::from_utf8_lossy(&line);
-        let Ok(value) = serde_json::from_str::<Value>(&text) else {
-            continue;
-        };
-        if value.is_object() && !visit(ordinal, value) {
+        if !visit(ordinal, &line) {
             break;
         }
     }

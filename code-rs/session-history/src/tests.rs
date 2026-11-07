@@ -132,6 +132,24 @@ fn rollout_search_pagination_turns_and_redaction() {
 }
 
 #[test]
+fn message_only_rollout_visit_skips_non_message_payload_decoding() {
+    let dir = tempfile::tempdir().expect("temporary root");
+    let settings = settings(dir.path());
+    let path = rollout(&settings.stores[0].root, "selective-decode");
+    let mut items = Vec::new();
+    let stats = normalize::visit_rollout("code", "selective-decode", &path, false, &mut |item| {
+        items.push(item);
+        true
+    })
+    .expect("visit rollout");
+
+    assert_eq!(stats.full_record_decodes, 2);
+    assert_eq!(stats.skipped_records, 6);
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| item["kind"] == "message"));
+}
+
+#[test]
 fn duplicate_store_ids_require_qualified_refs_and_history_fallback_works() {
     let dir = tempfile::tempdir().expect("test operation succeeds");
     let settings = settings(dir.path());

@@ -1,5 +1,6 @@
 use crate::{Error, Result, files};
 use code_secrets::{redact_json, redact_secrets};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
@@ -118,31 +119,119 @@ pub(crate) fn rollout_metadata(store: &str, path: &Path) -> Result<Value> {
     metadata.ok_or_else(|| Error::new("source_error", "rollout has no valid session metadata"))
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct RolloutVisitStats {
+    pub(crate) full_record_decodes: usize,
+    pub(crate) skipped_records: usize,
+}
+
+#[derive(Deserialize)]
+struct RolloutRecordHeader {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    payload: Option<RolloutPayloadHeader>,
+}
+
+#[derive(Deserialize)]
+struct RolloutPayloadHeader {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    role: Option<String>,
+    turn_id: Option<Value>,
+    channel: Option<String>,
+    metadata: Option<Value>,
+}
+
+enum RolloutRecordAction {
+    Decode,
+    SetTurn(Value),
+    Skip,
+}
+
+fn private_message_header(payload: &RolloutPayloadHeader) -> bool {
+    let metadata = payload.metadata.as_ref().unwrap_or(&Value::Null);
+    let channel = payload
+        .channel
+        .as_deref()
+        .filter(|channel| !channel.is_empty())
+        .or(metadata["channel"].as_str());
+    let hidden = |value: &Value| !value.is_null() && value != &Value::Bool(false);
+    channel.is_some_and(|channel| {
+        ["analysis", "reasoning", "justify", "confidence", "summary"]
+            .iter()
+            .any(|name| channel.eq_ignore_ascii_case(name))
+    }) || hidden(&metadata["is_visually_hidden_from_conversation"])
+        || hidden(&metadata["is_user_system_message"])
+}
+
+fn rollout_record_action(line: &[u8], include_tools: bool) -> RolloutRecordAction {
+    let text = String::from_utf8_lossy(line);
+    let Ok(header) = serde_json::from_str::<RolloutRecordHeader>(&text) else {
+        return RolloutRecordAction::Skip;
+    };
+    let Some(payload) = header.payload else {
+        return RolloutRecordAction::Skip;
+    };
+    match header.kind.as_deref() {
+        Some("turn_context" | "event" | "event_msg") => {
+            if payload.turn_id.as_ref().is_some_and(|id| {
+                id.is_string() || (header.kind.as_deref() == Some("turn_context") && id.is_null())
+            }) {
+                RolloutRecordAction::SetTurn(payload.turn_id.unwrap_or(Value::Null))
+            } else {
+                RolloutRecordAction::Skip
+            }
+        }
+        Some("response_item") => match payload.kind.as_deref() {
+            Some("message")
+                if matches!(payload.role.as_deref(), Some("user" | "assistant"))
+                    && !private_message_header(&payload) =>
+            {
+                RolloutRecordAction::Decode
+            }
+            Some(
+                "function_call"
+                | "custom_tool_call"
+                | "function_call_output"
+                | "custom_tool_call_output",
+            ) if include_tools => RolloutRecordAction::Decode,
+            _ => RolloutRecordAction::Skip,
+        },
+        _ => RolloutRecordAction::Skip,
+    }
+}
+
 pub(crate) fn visit_rollout(
     store: &str,
     session: &str,
     path: &Path,
     include_tools: bool,
     visit: &mut dyn FnMut(Value) -> bool,
-) -> Result<()> {
+) -> Result<RolloutVisitStats> {
     let mut turn = Value::Null;
     let mut names = HashMap::<String, String>::new();
-    files::visit_records(path, |ordinal, record| {
+    let mut stats = RolloutVisitStats::default();
+    files::visit_record_bytes(path, |ordinal, line| {
+        match rollout_record_action(line, include_tools) {
+            RolloutRecordAction::SetTurn(id) => {
+                turn = id;
+                stats.skipped_records += 1;
+                return true;
+            }
+            RolloutRecordAction::Skip => {
+                stats.skipped_records += 1;
+                return true;
+            }
+            RolloutRecordAction::Decode => {}
+        }
+        stats.full_record_decodes += 1;
+        let text = String::from_utf8_lossy(line);
+        let Ok(record) = serde_json::from_str::<Value>(&text) else {
+            return true;
+        };
         let payload = &record["payload"];
         if !payload.is_object() {
             return true;
-        }
-        match record["type"].as_str() {
-            Some("turn_context" | "event" | "event_msg") => {
-                if let Some(id) = payload.get("turn_id") {
-                    if id.is_string() || (record["type"] == "turn_context" && id.is_null()) {
-                        turn = id.clone();
-                    }
-                }
-                return true;
-            }
-            Some("response_item") => {}
-            _ => return true,
         }
         if private_message(payload) {
             return true;
@@ -193,7 +282,8 @@ pub(crate) fn visit_rollout(
             _ => return true,
         }
         visit(clean(item))
-    })
+    })?;
+    Ok(stats)
 }
 
 pub(crate) fn projected_items(base: Value, payload: &Value, include_tools: bool) -> Vec<Value> {
@@ -377,5 +467,48 @@ impl Page {
     }
     pub(crate) fn output(self) -> Value {
         json!({"next_offset":self.offset+self.items.len(),"items":self.items,"truncated":self.truncated})
+    }
+}
+
+#[cfg(test)]
+mod rollout_header_tests {
+    use super::*;
+
+    #[test]
+    fn skips_irrelevant_payloads_before_full_decode() {
+        let large = "x".repeat(1024 * 1024);
+        let ignored_event = serde_json::to_vec(&json!({
+            "type":"event",
+            "payload":{"msg":{"type":"turn_diff","unified_diff":large}}
+        }))
+        .expect("event fixture");
+        assert!(matches!(
+            rollout_record_action(&ignored_event, false),
+            RolloutRecordAction::Skip
+        ));
+
+        let tool_output = serde_json::to_vec(&json!({
+            "type":"response_item",
+            "payload":{"type":"function_call_output","output":"large output"}
+        }))
+        .expect("tool fixture");
+        assert!(matches!(
+            rollout_record_action(&tool_output, false),
+            RolloutRecordAction::Skip
+        ));
+        assert!(matches!(
+            rollout_record_action(&tool_output, true),
+            RolloutRecordAction::Decode
+        ));
+
+        let message = serde_json::to_vec(&json!({
+            "type":"response_item",
+            "payload":{"type":"message","role":"assistant","content":"visible"}
+        }))
+        .expect("message fixture");
+        assert!(matches!(
+            rollout_record_action(&message, false),
+            RolloutRecordAction::Decode
+        ));
     }
 }
