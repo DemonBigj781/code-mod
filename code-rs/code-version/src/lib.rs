@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use serde_json::Value;
 
 include!("../default_version.rs");
+include!("../default_mod_version.rs");
 
 // Compile-time embedded version string.
 // Prefer the CODE_VERSION provided by CI; use the pinned stable CLI
@@ -14,6 +15,15 @@ pub const CODE_VERSION: &str = {
         None => DEFAULT_CODE_VERSION,
     }
 };
+
+pub const MOD_VERSION: &str = {
+    match option_env!("CODE_MOD_VERSION") {
+        Some(v) => v,
+        None => DEFAULT_MOD_VERSION,
+    }
+};
+
+pub const BUILD_ATTEMPT_COUNT: Option<&str> = option_env!("CODE_BUILD_ATTEMPT_COUNT");
 
 const ANNOUNCEMENT_TIP: &str = include_str!("../../../announcement_tip.toml");
 const MODELS_MANIFEST: &str = include_str!("../../../codex-rs/models-manager/models.json");
@@ -31,6 +41,21 @@ static MIN_WIRE_COMPAT_VERSION: LazyLock<String> = LazyLock::new(|| {
 
 static MODEL_MINIMUM_CLIENT_VERSIONS: LazyLock<HashMap<String, String>> =
     LazyLock::new(|| parse_model_minimum_client_versions(MODELS_MANIFEST));
+static DISPLAY_VERSION: LazyLock<String> =
+    LazyLock::new(|| format_display_version(CODE_VERSION, MOD_VERSION, BUILD_ATTEMPT_COUNT));
+
+fn format_display_version(
+    codex_version: &str,
+    mod_version: &str,
+    build_attempt_count: Option<&str>,
+) -> String {
+    let mut version = format!("codex version: {codex_version} Mod version: {mod_version}");
+    if let Some(attempt) = build_attempt_count.filter(|value| !value.is_empty()) {
+        version.push_str(" build attempts: ");
+        version.push_str(attempt);
+    }
+    version
+}
 
 fn max_semver<'a>(current: &'a str, candidate: &'a str) -> &'a str {
     let Some(current_triplet) = parse_semver_triplet(current) else {
@@ -137,6 +162,11 @@ pub fn version() -> &'static str {
 }
 
 #[inline]
+pub fn display_version() -> &'static str {
+    DISPLAY_VERSION.as_str()
+}
+
+#[inline]
 pub fn min_wire_compat_version() -> &'static str {
     MIN_WIRE_COMPAT_VERSION.as_str()
 }
@@ -164,6 +194,45 @@ mod tests {
     #[test]
     fn local_build_fallback_matches_current_stable_cli() {
         assert_eq!(DEFAULT_CODE_VERSION, "0.153.4");
+    }
+
+    #[test]
+    fn local_build_fallback_matches_current_mod_release() {
+        assert_eq!(DEFAULT_MOD_VERSION, "0.6.197b");
+    }
+
+    #[test]
+    fn mod_version_requires_newer_fork_marker() {
+        assert!(valid_mod_version("0.6.197b"));
+        assert!(!valid_mod_version("0.6.196b"));
+        assert!(!valid_mod_version("0.6.197"));
+        assert!(!valid_mod_version("0.6.197b-beta.1"));
+        assert!(!valid_mod_version("00.6.197b"));
+    }
+
+    #[test]
+    fn build_attempt_count_is_canonical_positive_integer() {
+        assert!(valid_build_attempt_count("1"));
+        assert!(valid_build_attempt_count("42"));
+        assert!(!valid_build_attempt_count("0"));
+        assert!(!valid_build_attempt_count("01"));
+        assert!(!valid_build_attempt_count("one"));
+    }
+
+    #[test]
+    fn stable_display_version_omits_build_attempts() {
+        assert_eq!(
+            format_display_version("0.153.4", "0.6.197b", None),
+            "codex version: 0.153.4 Mod version: 0.6.197b"
+        );
+    }
+
+    #[test]
+    fn prerelease_display_version_includes_build_attempts() {
+        assert_eq!(
+            format_display_version("0.153.4", "0.6.197b", Some("3")),
+            "codex version: 0.153.4 Mod version: 0.6.197b build attempts: 3"
+        );
     }
 
     #[test]

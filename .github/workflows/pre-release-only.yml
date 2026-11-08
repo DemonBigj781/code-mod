@@ -44,21 +44,19 @@ jobs:
       - name: Attach exact source revision to Main
         shell: bash
         run: git switch -C Main "$GITHUB_SHA"
-      - name: Download validated artifact
+      - name: Obtain validated prerelease artifact
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$OUTPUT_DIR"
-          if [[ -n "$ARTIFACT_RUN_ID" ]]; then
-            gh run download "$ARTIFACT_RUN_ID" --name code.com --dir "$OUTPUT_DIR"
+          if [[ -z "$ARTIFACT_RUN_ID" ]]; then
+            python3 scripts/cosmopolitan-code/commands.py build-action \
+              --output "$OUTPUT_DIR" \
+              --mod-version "${{ inputs.tag }}" \
+              --build-attempt-count "$GITHUB_RUN_ATTEMPT"
             exit 0
           fi
-          run_id=$(gh run list --workflow cosmopolitan-code-ape.yml --branch Main --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId')
-          if [[ -z "$run_id" ]]; then
-            echo "No successful Cosmopolitan Code APE run exists for $GITHUB_SHA." >&2
-            exit 1
-          fi
-          gh run download "$run_id" --name cosmopolitan-code-ape --dir "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
+          gh run download "$ARTIFACT_RUN_ID" --name code.com --dir "$OUTPUT_DIR"
       - name: Publish prerelease
         shell: bash
         run: python3 scripts/cosmopolitan-code/commands.py publish-prerelease --output "$OUTPUT_DIR" --tag "${{ inputs.tag }}"

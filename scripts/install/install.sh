@@ -437,7 +437,7 @@ version_from_binary() {
     return 1
   fi
 
-  "$codex_path" --version 2>/dev/null | sed -n 's/.* \([0-9][0-9A-Za-z.+-]*\)$/\1/p' | head -n 1
+  "$codex_path" --version 2>/dev/null | sed -n 's/^codex version: \([0-9][0-9A-Za-z.+-]*\) Mod version: .*/\1/p' | head -n 1
 }
 
 current_installed_version() {

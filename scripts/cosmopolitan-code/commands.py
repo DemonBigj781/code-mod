@@ -8,6 +8,7 @@ import errno
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,16 @@ WORKFLOW = "cosmopolitan-code-ape.yml"
 ARTIFACT = "cosmopolitan-code-ape"
 ProcessResult = TypeVar("ProcessResult")
 DEFAULT_BRANCH = "Main"
+ORIGINAL_CODE_MOD_VERSION = (0, 6, 196)
+MOD_VERSION_RE = re.compile(
+    r"(?P<major>0|[1-9][0-9]*)\."
+    r"(?P<minor>0|[1-9][0-9]*)\."
+    r"(?P<patch>0|[1-9][0-9]*)b\Z"
+)
+DISPLAY_VERSION_RE = re.compile(
+    r"codex version: (?P<codex>\S+) Mod version: (?P<mod>\S+)"
+    r"(?: build attempts: (?P<attempt>[1-9][0-9]*))?\Z"
+)
 
 
 def command(args: list[str], *, capture: bool = False, **kwargs) -> str:
@@ -77,6 +88,78 @@ def artifact_command(artifact: Path, args: list[str]) -> int:
     return artifact_process(subprocess.run, artifact, args, cwd=ROOT).returncode
 
 
+def artifact_output(artifact: Path, args: list[str]) -> str:
+    if os.name != "nt":
+        artifact.chmod(artifact.stat().st_mode | 0o111)
+    result = artifact_process(
+        subprocess.run,
+        artifact,
+        args,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        raise ValueError(f"Artifact startup failed: {' '.join(args)}")
+    return result.stdout.strip()
+
+
+def parse_display_version(output: str) -> dict[str, str | None]:
+    match = DISPLAY_VERSION_RE.fullmatch(output.strip())
+    if match is None:
+        raise ValueError(f"Artifact reported an invalid version string: {output!r}")
+    return match.groupdict()
+
+
+def artifact_version(artifact: Path) -> dict[str, str | None]:
+    return parse_display_version(artifact_output(artifact, ["--version"]))
+
+
+def normalize_mod_version(value: str) -> str:
+    normalized = value.strip()
+    if normalized.startswith("v"):
+        normalized = normalized[1:]
+    match = MOD_VERSION_RE.fullmatch(normalized)
+    if match is None:
+        raise ValueError(
+            "Mod version must use X.Y.Zb with the trailing b fork marker."
+        )
+    numeric = tuple(int(match.group(name)) for name in ("major", "minor", "patch"))
+    if numeric <= ORIGINAL_CODE_MOD_VERSION:
+        raise ValueError("Mod version must be newer than the original Code-mod 0.6.196 baseline.")
+    return normalized
+
+
+def normalize_build_attempt_count(value: str) -> str:
+    normalized = value.strip()
+    if not normalized.isascii() or not normalized.isdigit() or normalized.startswith("0"):
+        raise ValueError("Build attempt count must be a positive integer.")
+    return normalized
+
+
+def dispatch_run_id(output: str) -> int | None:
+    match = re.search(r"/actions/runs/(?P<run_id>[1-9][0-9]*)(?:/|\Z)", output.strip())
+    return int(match.group("run_id")) if match is not None else None
+
+
+def validate_requested_artifact_version(
+    version: dict[str, str | None],
+    *,
+    mod_version: str | None,
+    build_attempt_count: str | None,
+) -> None:
+    actual_mod = normalize_mod_version(version["mod"] or "")
+    if mod_version is not None and actual_mod != normalize_mod_version(mod_version):
+        raise ValueError("Actions artifact mod version does not match the requested build.")
+    expected_attempt = (
+        normalize_build_attempt_count(build_attempt_count)
+        if build_attempt_count is not None
+        else None
+    )
+    if version["attempt"] != expected_attempt:
+        raise ValueError("Actions artifact build attempt does not match the requested build.")
+
+
 def validate_output_artifact(output: Path, commit: str) -> dict:
     artifact, manifest = artifact_files(output)
     try:
@@ -90,9 +173,9 @@ def validate_output_artifact(output: Path, commit: str) -> dict:
 def test_artifact(output: Path, commit: str) -> dict:
     artifact, _ = artifact_files(output)
     result = validate_output_artifact(output, commit)
-    for args in (["--version"], ["--help"]):
-        if artifact_command(artifact, args):
-            raise ValueError(f"Artifact startup failed: {' '.join(args)}")
+    artifact_version(artifact)
+    if artifact_command(artifact, ["--help"]):
+        raise ValueError("Artifact startup failed: --help")
     return result
 
 
@@ -104,18 +187,50 @@ def workflow_runs(commit: str) -> list[dict]:
     ], capture=True))
 
 
-def require_cross_platform_build(commit: str) -> dict:
+def require_cross_platform_build(
+    commit: str,
+    expected_artifact_sha256: str | None = None,
+) -> dict:
     for run in workflow_runs(commit):
         if run["headSha"] == commit and run["conclusion"] == "success":
             jobs = json.loads(command(["gh", "run", "view", str(run["databaseId"]),
                                        "--json", "jobs"], capture=True))["jobs"]
             completed = {job["name"] for job in jobs if job["conclusion"] == "success"}
             if {"Build APE on Linux", "Run same APE on Windows"} <= completed:
-                return run
+                if expected_artifact_sha256 is None:
+                    return run
+                with tempfile.TemporaryDirectory(prefix="cosmopolitan-tested-") as temp:
+                    tested = Path(temp) / "tested"
+                    try:
+                        command([
+                            "gh", "run", "download", str(run["databaseId"]),
+                            "--name", ARTIFACT, "--dir", str(tested),
+                        ])
+                        tested_artifact, tested_manifest = artifact_files(tested)
+                        metadata = validate_artifact(
+                            tested_artifact,
+                            tested_manifest,
+                            expected_source_commit=commit,
+                        )
+                    except (ArtifactContractError, OSError, subprocess.CalledProcessError):
+                        continue
+                    if metadata["artifact_sha256"] == expected_artifact_sha256:
+                        return run
+    if expected_artifact_sha256 is not None:
+        raise ValueError(
+            "Publishing requires a successful Linux and Windows Actions run for "
+            "these exact artifact bytes."
+        )
     raise ValueError("Publishing requires a successful APE Linux and Windows Actions run for this commit.")
 
 
-def build_action(output: Path, commit: str) -> None:
+def build_action(
+    output: Path,
+    commit: str,
+    *,
+    mod_version: str | None = None,
+    build_attempt_count: str | None = None,
+) -> None:
     if command(["git", "status", "--porcelain"], capture=True):
         raise ValueError(
             "GitHub Actions cannot build uncommitted source until the exact-source "
@@ -130,18 +245,30 @@ def build_action(output: Path, commit: str) -> None:
         raise ValueError(f"Push this commit to origin/{DEFAULT_BRANCH} before building it on Actions.")
     if output.exists():
         raise ValueError(f"Refusing to overwrite artifact directory: {output}")
+    workflow_args = ["gh", "workflow", "run", WORKFLOW, "--ref", DEFAULT_BRANCH]
+    if mod_version is not None:
+        workflow_args.extend(["-f", f"mod_version={normalize_mod_version(mod_version)}"])
+    if build_attempt_count is not None:
+        workflow_args.extend([
+            "-f",
+            f"build_attempt_count={normalize_build_attempt_count(build_attempt_count)}",
+        ])
     previous_ids = {run["databaseId"] for run in workflow_runs(commit)}
-    command(["gh", "workflow", "run", WORKFLOW, "--ref", DEFAULT_BRANCH])
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        runs = [run for run in workflow_runs(commit)
-                if run["databaseId"] not in previous_ids and run["event"] == "workflow_dispatch"]
-        if runs:
-            run = runs[0]
-            break
-        time.sleep(5)
+    dispatch_output = command(workflow_args, capture=True)
+    run_id = dispatch_run_id(dispatch_output)
+    if run_id is not None:
+        run = {"databaseId": run_id, "url": dispatch_output.strip()}
     else:
-        raise ValueError("Actions did not report the dispatched build within 120 seconds.")
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            runs = [run for run in workflow_runs(commit)
+                    if run["databaseId"] not in previous_ids and run["event"] == "workflow_dispatch"]
+            if runs:
+                run = runs[0]
+                break
+            time.sleep(5)
+        else:
+            raise ValueError("Actions did not report the dispatched build within 120 seconds.")
     print(run["url"], flush=True)
     command(["gh", "run", "watch", str(run["databaseId"]), "--exit-status"])
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -150,6 +277,11 @@ def build_action(output: Path, commit: str) -> None:
         command(["gh", "run", "download", str(run["databaseId"]),
                  "--name", ARTIFACT, "--dir", str(staged)])
         test_artifact(staged, commit)
+        validate_requested_artifact_version(
+            artifact_version(staged / "code.com"),
+            mod_version=mod_version,
+            build_attempt_count=build_attempt_count,
+        )
         staged.rename(output)
     print(f"Artifact: {output / 'code.com'}", flush=True)
 
@@ -169,6 +301,7 @@ def build_auto(output: Path, commit: str) -> None:
 def publish(output: Path, commit: str, tag: str, *, prerelease: bool) -> None:
     if tag.startswith("-"):
         raise ValueError("A release tag cannot start with a hyphen.")
+    tag_mod_version = normalize_mod_version(tag)
     command(["git", "check-ref-format", f"refs/tags/{tag}"])
     refs = command(["git", "ls-remote", "--tags", "origin",
                     f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"], capture=True)
@@ -177,17 +310,16 @@ def publish(output: Path, commit: str, tag: str, *, prerelease: bool) -> None:
     if tag_commit is not None and tag_commit != commit:
         raise ValueError("Release tag already refers to a different source commit.")
     manifest = test_artifact(output, commit)
-    run = require_cross_platform_build(commit)
     artifact, manifest_path = artifact_files(output)
-    # Compare the proposed asset with the artifact tested on both hosted runners.
+    version = artifact_version(artifact)
+    if version["mod"] != tag_mod_version:
+        raise ValueError("Artifact mod version does not match the release tag.")
+    if prerelease and version["attempt"] is None:
+        raise ValueError("Prerelease artifacts must report their build attempt count.")
+    if not prerelease and version["attempt"] is not None:
+        raise ValueError("Stable release artifacts must not report a build attempt count.")
+    run = require_cross_platform_build(commit, manifest["artifact_sha256"])
     with tempfile.TemporaryDirectory(prefix="cosmopolitan-release-") as temp:
-        tested = Path(temp) / "tested"
-        command(["gh", "run", "download", str(run["databaseId"]),
-                 "--name", ARTIFACT, "--dir", str(tested)])
-        tested_artifact, tested_manifest = artifact_files(tested)
-        expected = validate_artifact(tested_artifact, tested_manifest, expected_source_commit=commit)
-        if expected["artifact_sha256"] != manifest["artifact_sha256"]:
-            raise ValueError("Proposed executable differs from the artifact tested on Linux and Windows.")
         if prerelease:
             notes = Path(temp) / "notes.md"
             summary = command(["git", "log", "-1", "--format=%s"], capture=True)
@@ -211,9 +343,18 @@ def publish(output: Path, commit: str, tag: str, *, prerelease: bool) -> None:
             released = Path(temp) / "released"
             command(["gh", "release", "download", tag, "--pattern", "code.com*", "--dir", str(released)])
             released_artifact, released_manifest = artifact_files(released)
-            published = validate_artifact(released_artifact, released_manifest, expected_source_commit=commit)
-            if published["artifact_sha256"] != manifest["artifact_sha256"]:
-                raise ValueError("Prerelease executable differs from the validated artifact.")
+            validate_artifact(released_artifact, released_manifest, expected_source_commit=commit)
+            prerelease_version = artifact_version(released_artifact)
+            if prerelease_version["attempt"] is None:
+                raise ValueError("Existing prerelease does not report a build attempt count.")
+            if prerelease_version["codex"] != version["codex"]:
+                raise ValueError("Stable artifact Codex version differs from the prerelease.")
+            if prerelease_version["mod"] != version["mod"]:
+                raise ValueError("Stable artifact mod version differs from the prerelease.")
+            command([
+                "gh", "release", "upload", tag, str(artifact), str(manifest_path),
+                "--clobber",
+            ])
             command(["gh", "release", "edit", tag, "--prerelease=false", "--latest"])
 
 
@@ -233,6 +374,15 @@ def parser() -> argparse.ArgumentParser:
         item.add_argument("--output", help="Artifact directory (default: o/cosmopolitan-code/<commit>).")
         if name.startswith("publish-"):
             item.add_argument("--tag", required=True, help="GitHub release tag.")
+        if name == "build-action":
+            item.add_argument(
+                "--mod-version",
+                help="Code-mod version to embed (a leading v is removed).",
+            )
+            item.add_argument(
+                "--build-attempt-count",
+                help="Positive workflow attempt count to expose in prerelease output.",
+            )
         if name == "run":
             item.add_argument("args", nargs=argparse.REMAINDER, help="Arguments after -- go to code.com.")
     return result
@@ -250,7 +400,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "build-auto":
             build_auto(output, commit)
         elif args.command == "build-action":
-            build_action(output, commit)
+            build_action(
+                output,
+                commit,
+                mod_version=args.mod_version,
+                build_attempt_count=args.build_attempt_count,
+            )
         elif args.command == "build-local":
             build_local(output)
         elif args.command == "test":

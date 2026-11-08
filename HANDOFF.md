@@ -125,6 +125,7 @@ Important paths:
 | `.github/workflows/test-only.yml` | Manual `Main`-only source and contract test helper without APE packaging. |
 | `.github/workflows/check-only.yml` | Manual `Main`-only product/test-target `cargo check` helper. |
 | `.github/workflows/compile-only.yml` | Manual `Main`-only APE compile/package helper that uploads the `code.com` artifact without running test gates. |
+| `.github/workflows/complete-artifact-creation.yml` | Reusable check/test/cross-platform artifact pipeline that stops before publishing; defaults to prerelease metadata and accepts `release` for stable metadata. |
 | `.github/workflows/pre-release-only.yml` | Manual or reusable prerelease publisher for the exact validated `code.com` artifact. |
 | `.github/workflows/release-only.yml` | Manual or reusable stable promotion of an existing matching prerelease. |
 | `.github/workflows/code-comeplete-pipeline.yml` | Complete check/test/cross-platform build pipeline; prerelease is the default release type and `release` is the secondary switch. |
@@ -134,6 +135,14 @@ Important paths:
 
 Do not replace the canonical APE build with direct Cargo. Compilation and tests are
 GitHub-Actions-only for this repository.
+
+Version reporting deliberately separates upstream compatibility from this fork.
+Stable builds print `codex version: X Mod version: Y`; prerelease builds append
+`build attempts: N`. The mod line begins at `0.6.197b`, which is newer than the
+original Code-mod `0.6.196` baseline and retains the required trailing `b` fork
+marker. Release tags must use the same `X.Y.Zb` value. Stable promotion rebuilds
+without the attempt count, verifies those exact bytes on Linux and Windows, then
+replaces the prerelease assets before removing the prerelease marker.
 
 Linux compilation jobs run in the digest-pinned GHCR builder image published by
 `.github/workflows/create-build-images.yml`. The image carries the stable OS packages

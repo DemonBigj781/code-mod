@@ -13,37 +13,45 @@ targets fail closed instead of falling back to this machine or another host.
 - `build-auto`: Dispatch the active `Main` GitHub workflow for the exact
   committed revision.
 - `build-action`: Dispatch the `Main` workflow, wait for Linux and Windows
-  startup checks, and download the single executable and manifest. Push the
-  commit first.
+  startup checks, and download the single executable and manifest. Optional
+  `--mod-version X.Y.Zb` and `--build-attempt-count N` arguments produce the
+  release-specific version string. Push the commit first.
 - `build-local`: Refuse with an explanation that local compilation is disabled.
 - `test`: Verify the source commit, SDK pins, size, hash, and executable startup
   on the current host.
 - `run`: Verify the manifest and forward CLI arguments to the executable.
-- `publish-prerelease`: Publish an executable identical to the artifact tested
-  on Linux and Windows.
-- `publish-release`: Promote an existing prerelease with that same executable
-  to the latest stable release.
+- `publish-prerelease`: Publish a fork-marked artifact with a visible build
+  attempt count after those exact bytes pass Linux and Windows.
+- `publish-release`: Require a matching prerelease, verify a stable artifact
+  without the attempt count on Linux and Windows, replace the prerelease assets,
+  and promote the tag to latest.
 
 make build
 
 python3 scripts/cosmopolitan-code/commands.py build-auto
 
-python3 scripts/cosmopolitan-code/commands.py build-action
+python3 scripts/cosmopolitan-code/commands.py build-action --mod-version 0.6.197b
 
 python3 scripts/cosmopolitan-code/commands.py test
 
 python3 scripts/cosmopolitan-code/commands.py run -- --version
 
-python3 scripts/cosmopolitan-code/commands.py publish-prerelease --tag YOUR-TAG
+python3 scripts/cosmopolitan-code/commands.py publish-prerelease --tag v0.6.197b
 
-python3 scripts/cosmopolitan-code/commands.py publish-release --tag YOUR-TAG
+python3 scripts/cosmopolitan-code/commands.py publish-release --tag v0.6.197b
 
 Each command accepts `--output DIRECTORY`; the default is
 `o/cosmopolitan-code/<source-commit>`. `COSMOPOLITAN_CODE_OUTPUT` also selects
 the artifact directory. Publishing requires a clean checkout and a successful
 Actions run for the current commit, and compares the executable with the
 downloaded Actions artifact before changing any release. Stable publication
-also verifies the executable already uploaded to the prerelease.
+also verifies the existing prerelease's source and Codex/mod versions before
+replacing its assets with the separately tested stable executable.
+
+`code --version` reports `codex version: X Mod version: Y` for stable builds.
+Prereleases append `build attempts: N`. The mod version must be newer than the
+original Code-mod `0.6.196` baseline and use a trailing `b` fork marker; this
+fork starts at `0.6.197b`.
 
 On Linux, the shell entry point accepts the same commands, for example:
 

@@ -14,13 +14,26 @@ Rust-specific `rust-ci*.yml` workflows are intentionally removed in this fork.
   feature combinations, test targets, and the agent schema harness.
 - `compile-only.yml` is a manual `Main`-only APE build path that skips the test
   gates and uploads `code.com` plus its manifest in an artifact named `code.com`.
-- `pre-release-only.yml` publishes the exact canonical artifact for a supplied tag
-  as a prerelease after the existing cross-platform and hash gates pass.
-- `release-only.yml` promotes an existing matching prerelease tag to the latest
-  stable release; it never creates a stable release from unvalidated bytes.
-- `code-comeplete-pipeline.yml` runs checks and tests, dispatches the canonical
-  cross-platform APE build, uploads `code.com`, and publishes a prerelease by
-  default. Its secondary `release` choice promotes the matching prerelease.
+- `complete-artifact-creation.yml` is the reusable check/test/cross-platform
+  artifact pipeline. It stops before publishing, defaults to prerelease version
+  arguments, and accepts `release` to produce stable version metadata instead.
+- `pre-release-only.yml` builds the supplied `X.Y.Zb` tag as a prerelease,
+  includes the workflow attempt count in `code --version`, and publishes only
+  the exact artifact validated on Linux and Windows.
+- `release-only.yml` builds the same tag as a stable artifact without the
+  attempt count, requires that exact artifact to pass Linux and Windows, then
+  replaces the matching prerelease assets before promoting the tag to latest.
+- `code-comeplete-pipeline.yml` calls the complete artifact workflow and then
+  publishes a prerelease by default. Its secondary `release` choice promotes the
+  matching prerelease with the separately validated stable assets.
+
+## Version Contract
+
+Code keeps the upstream Codex compatibility version separate from this fork's
+mod version. Stable builds report `codex version: X Mod version: Y`; prerelease
+builds append `build attempts: N`. The mod version must be newer than the
+original `0.6.196` Code-mod baseline and retain the trailing `b` fork marker,
+starting with `0.6.197b`.
 - Platform-specific Linux/Windows release and preview binary workflows are
   intentionally removed so binary distribution goes through the APE artifact.
 

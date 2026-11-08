@@ -86,7 +86,7 @@ fn pre_main_hardening() {
 #[clap(
     author,
     name = "code",
-    version = code_version::version(),
+    disable_version_flag = true,
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
@@ -100,6 +100,10 @@ struct MultitoolCli {
 
     #[clap(flatten)]
     interactive: TuiCli,
+
+    /// Print Codex compatibility and Code-mod version information.
+    #[arg(short = 'V', long = "version", global = true, action = clap::ArgAction::SetTrue)]
+    version: bool,
 
     /// Run Auto Drive when executing non-interactive sessions.
     #[clap(long = "auto", global = true, default_value_t = false)]
@@ -729,11 +733,17 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
     let MultitoolCli {
         config_overrides: root_config_overrides,
         mut interactive,
+        version,
         auto_drive,
         demo_developer_message,
         project: startup_project,
         subcommand,
     } = MultitoolCli::parse();
+
+    if version {
+        println!("{}", code_version::display_version());
+        return Ok(());
+    }
 
     interactive.finalize_defaults();
     interactive.demo_developer_message = demo_developer_message.clone();
@@ -2135,7 +2145,7 @@ async fn doctor_main() -> anyhow::Result<()> {
 
     // Print current executable and version
     let exe = std::env::current_exe().map_or_else(|_| "<unknown>".to_string(), |p| p.display().to_string());
-    println!("code version: {}", code_version::version());
+    println!("{}", code_version::display_version());
     println!("current_exe: {exe}");
 
     // PATH
@@ -2278,6 +2288,22 @@ mod tests {
         let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
         assert!(script.contains("_code()"), "expected bash completion function to be named _code");
         assert!(!script.contains("_codex()"), "bash completion output should not use legacy codex prefix");
+    }
+
+    #[test]
+    fn version_flag_uses_the_custom_fork_version_path() {
+        let cli = MultitoolCli::try_parse_from(["code", "--version"]).expect("parse version");
+        assert!(cli.version);
+        assert!(cli.subcommand.is_none());
+        let mut expected = format!(
+            "codex version: {} Mod version: {}",
+            code_version::version(),
+            code_version::MOD_VERSION
+        );
+        if let Some(attempt) = code_version::BUILD_ATTEMPT_COUNT {
+            expected.push_str(&format!(" build attempts: {attempt}"));
+        }
+        assert_eq!(code_version::display_version(), expected);
     }
 
     #[test]

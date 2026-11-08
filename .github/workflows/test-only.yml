@@ -66,6 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           jobs=$(getconf _NPROCESSORS_ONLN)
+          cargo +1.93.0 test --locked -p code-version -j"$jobs"
           cargo +1.93.0 test --locked -p code-core project_registry -j"$jobs"
           cargo +1.93.0 test --locked -p code-core memory_summary -j"$jobs"
           cargo +1.93.0 test --locked -p code-core memories::tool -j"$jobs"
@@ -81,6 +82,7 @@ jobs:
           cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork workspace_snapshot_tests -j"$jobs"
           cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork repository_mode_tests -j"$jobs"
           cargo +1.93.0 test --locked -p code-cli --test feature_contract --no-default-features -j"$jobs"
+          cargo +1.93.0 test --locked -p code-cli --bin code --no-default-features version_flag_uses_the_custom_fork_version_path -j"$jobs"
           cargo +1.93.0 test --locked -p code-cli --bin code --no-default-features project_selection -j"$jobs"
       - name: Test native Rustwright integration
         working-directory: code-rs

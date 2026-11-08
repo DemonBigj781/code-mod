@@ -120,6 +120,177 @@ class CommandTests(unittest.TestCase):
                 commands.build_action(self.output / "actions", self.commit)
         run.assert_called_once_with(["git", "status", "--porcelain"], capture=True)
 
+    def test_actions_build_forwards_fork_version_and_prerelease_attempt(self):
+        output = self.output / "built"
+        workflow_run = {
+            "databaseId": 42,
+            "event": "workflow_dispatch",
+            "url": "https://example.invalid/run/42",
+        }
+        calls = []
+
+        def run(args, **kwargs):
+            calls.append(args)
+            if args[:3] == ["git", "status", "--porcelain"]:
+                return ""
+            if args[:3] == ["git", "branch", "--show-current"]:
+                return commands.DEFAULT_BRANCH
+            if args[:3] == ["git", "ls-remote", "origin"]:
+                return f"{self.commit}\trefs/heads/{commands.DEFAULT_BRANCH}"
+            if args[:3] == ["gh", "run", "download"]:
+                destination = Path(args[args.index("--dir") + 1])
+                destination.mkdir()
+                for name in ("code.com", "code.com.json"):
+                    (destination / name).write_text("fixture", encoding="utf-8")
+            return ""
+
+        with patch.object(commands, "source_commit", return_value=self.commit), \
+             patch.object(commands, "workflow_runs", side_effect=[[], [workflow_run]]), \
+             patch.object(commands, "test_artifact"), \
+             patch.object(commands, "artifact_version", return_value={
+                 "codex": "0.153.4",
+                 "mod": "0.6.197b",
+                 "attempt": "2",
+             }), \
+             patch.object(commands, "command", side_effect=run):
+            commands.build_action(
+                output,
+                self.commit,
+                mod_version="v0.6.197b",
+                build_attempt_count="2",
+            )
+
+        dispatch = next(args for args in calls if args[:3] == ["gh", "workflow", "run"])
+        self.assertIn("mod_version=0.6.197b", dispatch)
+        self.assertIn("build_attempt_count=2", dispatch)
+        self.assertTrue((output / "code.com").is_file())
+
+    def test_dispatch_run_url_is_used_without_guessing_between_concurrent_runs(self):
+        self.assertEqual(
+            commands.dispatch_run_id(
+                "https://github.com/DemonBigj781/code-mod/actions/runs/42519229284"
+            ),
+            42519229284,
+        )
+        self.assertIsNone(commands.dispatch_run_id(""))
+
+    def test_requested_artifact_version_must_match_build_variant(self):
+        stable = {"codex": "0.153.4", "mod": "0.6.197b", "attempt": None}
+        prerelease = {"codex": "0.153.4", "mod": "0.6.197b", "attempt": "2"}
+        commands.validate_requested_artifact_version(
+            stable,
+            mod_version="v0.6.197b",
+            build_attempt_count=None,
+        )
+        commands.validate_requested_artifact_version(
+            prerelease,
+            mod_version="0.6.197b",
+            build_attempt_count="2",
+        )
+        with self.assertRaisesRegex(ValueError, "build attempt"):
+            commands.validate_requested_artifact_version(
+                prerelease,
+                mod_version="0.6.197b",
+                build_attempt_count=None,
+            )
+        with self.assertRaisesRegex(ValueError, "mod version"):
+            commands.validate_requested_artifact_version(
+                stable,
+                mod_version="0.6.198b",
+                build_attempt_count=None,
+            )
+
+    def test_mod_version_requires_newer_fork_marked_version(self):
+        self.assertEqual(commands.normalize_mod_version("v0.6.197b"), "0.6.197b")
+        for invalid in (
+            "0.6.196b",
+            "0.6.197",
+            "0.6.197b-beta.1",
+            "00.6.197b",
+            "v0.6.98",
+            "release-0.6.197b",
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    commands.normalize_mod_version(invalid)
+
+    def test_build_attempt_count_requires_canonical_positive_integer(self):
+        self.assertEqual(commands.normalize_build_attempt_count("1"), "1")
+        self.assertEqual(commands.normalize_build_attempt_count("42"), "42")
+        for invalid in ("0", "01", "-1", "one"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    commands.normalize_build_attempt_count(invalid)
+
+    def test_display_version_parser_distinguishes_release_channels(self):
+        self.assertEqual(
+            commands.parse_display_version(
+                "codex version: 0.153.4 Mod version: 0.6.197b"
+            ),
+            {"codex": "0.153.4", "mod": "0.6.197b", "attempt": None},
+        )
+        self.assertEqual(
+            commands.parse_display_version(
+                "codex version: 0.153.4 Mod version: 0.6.197b build attempts: 2"
+            ),
+            {"codex": "0.153.4", "mod": "0.6.197b", "attempt": "2"},
+        )
+
+    def test_workflow_contract_keeps_artifact_creation_nonpublishing(self):
+        workflows = Path(__file__).resolve().parents[3] / ".github/workflows"
+        artifact = (workflows / "complete-artifact-creation.yml").read_text()
+        pipeline = (workflows / "code-comeplete-pipeline.yml").read_text()
+        prerelease = (workflows / "pre-release-only.yml").read_text()
+        release = (workflows / "release-only.yml").read_text()
+        ape = (workflows / "cosmopolitan-code-ape.yml").read_text()
+
+        self.assertIn("default: prerelease", artifact)
+        self.assertIn("uses: ./.github/workflows/check-only.yml", artifact)
+        self.assertIn("uses: ./.github/workflows/test-only.yml", artifact)
+        self.assertIn("--mod-version \"${{ inputs.tag }}\"", artifact)
+        self.assertIn("--build-attempt-count \"$GITHUB_RUN_ATTEMPT\"", artifact)
+        self.assertNotIn("gh release", artifact)
+        self.assertNotIn("publish-prerelease", artifact)
+        self.assertNotIn("publish-release", artifact)
+
+        self.assertIn("uses: ./.github/workflows/complete-artifact-creation.yml", pipeline)
+        self.assertIn("if: inputs.release_type == 'prerelease'", pipeline)
+        self.assertIn("if: inputs.release_type == 'release'", pipeline)
+        self.assertIn("--build-attempt-count \"$GITHUB_RUN_ATTEMPT\"", prerelease)
+        self.assertNotIn("--build-attempt-count", release)
+        self.assertIn("CODE_MOD_VERSION: ${{ inputs.mod_version || '' }}", ape)
+        self.assertIn(
+            "CODE_BUILD_ATTEMPT_COUNT: ${{ inputs.build_attempt_count || '' }}",
+            ape,
+        )
+
+    def test_installers_extract_codex_version_from_dual_version_output(self):
+        root = Path(__file__).resolve().parents[3]
+        shell_installer = (root / "scripts/install/install.sh").read_text()
+        function_start = shell_installer.index("version_from_binary() {")
+        function_end = shell_installer.index("\ncurrent_installed_version()", function_start)
+        function = shell_installer[function_start:function_end]
+
+        fake = self.output / "fake-code"
+        fake.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' 'codex version: 0.153.4 Mod version: 0.6.197b build attempts: 2'\n"
+        )
+        fake.chmod(0o755)
+        result = subprocess.run(
+            ["sh", "-c", f"{function}\nversion_from_binary \"$1\"", "sh", str(fake)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(result.stdout.strip(), "0.153.4")
+
+        powershell_installer = (root / "scripts/install/install.ps1").read_text()
+        self.assertIn(
+            "^codex version:\\s+([0-9][0-9A-Za-z.+-]*)\\s+Mod version:",
+            powershell_installer,
+        )
+
     def test_local_build_is_disabled(self):
         with patch.object(commands, "command") as run:
             with self.assertRaisesRegex(ValueError, "Local builds are disabled"):
@@ -181,14 +352,17 @@ class CommandTests(unittest.TestCase):
             ["sh", str(self.output / "code.com"), "rustwright-mcp"],
         )
 
-    def test_publish_rejects_an_executable_different_from_actions(self):
+    def test_cross_platform_build_must_match_exact_artifact_bytes(self):
         manifest = commands.validate_artifact(*commands.artifact_files(self.output), expected_source_commit=self.commit)
-        calls = []
+        run = {"headSha": self.commit, "conclusion": "success", "databaseId": 42}
+        jobs = {"jobs": [
+            {"name": "Build APE on Linux", "conclusion": "success"},
+            {"name": "Run same APE on Windows", "conclusion": "success"},
+        ]}
 
         def download(args, **kwargs):
-            calls.append(args)
-            if args[0] == "git":
-                return ""
+            if args[:3] == ["gh", "run", "view"]:
+                return json.dumps(jobs)
             destination = Path(args[args.index("--dir") + 1])
             destination.mkdir()
             archive_size = manifest["browser_runtime"]["archive_size_bytes"]
@@ -203,18 +377,19 @@ class CommandTests(unittest.TestCase):
             (destination / "code.com.json").write_text(json.dumps(changed), encoding="utf-8")
             return ""
 
-        with patch.object(commands, "test_artifact", return_value=manifest), \
-             patch.object(commands, "require_cross_platform_build", return_value={"databaseId": 42}), \
+        with patch.object(commands, "workflow_runs", return_value=[run]), \
              patch.object(commands, "command", side_effect=download):
-            with self.assertRaisesRegex(ValueError, "differs from the artifact tested"):
-                commands.publish(self.output, self.commit, "test-tag", prerelease=True)
-        self.assertFalse(any(args[:3] == ["gh", "release", "create"] for args in calls))
+            with self.assertRaisesRegex(ValueError, "exact artifact bytes"):
+                commands.require_cross_platform_build(
+                    self.commit,
+                    manifest["artifact_sha256"],
+                )
 
     def test_publish_rejects_a_tag_for_different_source(self):
-        with patch.object(commands, "command", side_effect=["", "b" * 40 + "\trefs/tags/test-tag"]), \
+        with patch.object(commands, "command", side_effect=["", "b" * 40 + "\trefs/tags/v0.6.197b"]), \
              patch.object(commands, "test_artifact") as test:
             with self.assertRaisesRegex(ValueError, "different source commit"):
-                commands.publish(self.output, self.commit, "test-tag", prerelease=True)
+                commands.publish(self.output, self.commit, "v0.6.197b", prerelease=True)
             test.assert_not_called()
 
     def test_prerelease_creation_and_stable_promotion_use_validated_assets(self):
@@ -234,10 +409,19 @@ class CommandTests(unittest.TestCase):
                             shutil.copy2(source, destination / source.name)
                     return ""
 
+                versions = (
+                    [{"codex": "0.153.4", "mod": "0.6.197b", "attempt": "1"}]
+                    if prerelease
+                    else [
+                        {"codex": "0.153.4", "mod": "0.6.197b", "attempt": None},
+                        {"codex": "0.153.4", "mod": "0.6.197b", "attempt": "1"},
+                    ]
+                )
                 with patch.object(commands, "test_artifact", return_value=manifest), \
+                     patch.object(commands, "artifact_version", side_effect=versions), \
                      patch.object(commands, "require_cross_platform_build", return_value={"databaseId": 42, "url": "https://example.invalid/run/42"}), \
                      patch.object(commands, "command", side_effect=github):
-                    commands.publish(self.output, self.commit, "test-tag", prerelease=prerelease)
+                    commands.publish(self.output, self.commit, "v0.6.197b", prerelease=prerelease)
                 if prerelease:
                     create = next(args for args in calls if args[:3] == ["gh", "release", "create"])
                     self.assertIn("--prerelease", create)
@@ -245,7 +429,10 @@ class CommandTests(unittest.TestCase):
                     self.assertEqual(create[create.index("--target") + 1], self.commit)
                     self.assertIn(str(self.output / "code.com"), create)
                 else:
-                    self.assertIn(["gh", "release", "edit", "test-tag", "--prerelease=false", "--latest"], calls)
+                    upload = next(args for args in calls if args[:3] == ["gh", "release", "upload"])
+                    self.assertIn("--clobber", upload)
+                    self.assertIn(str(self.output / "code.com"), upload)
+                    self.assertIn(["gh", "release", "edit", "v0.6.197b", "--prerelease=false", "--latest"], calls)
                     self.assertFalse(any(args[:3] == ["gh", "release", "create"] for args in calls))
 
     def test_unknown_command_does_not_start_a_build(self):

@@ -24,57 +24,21 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: Check source
-    uses: ./.github/workflows/check-only.yml
+  artifact:
+    name: Create validated artifact
+    uses: ./.github/workflows/complete-artifact-creation.yml
+    with:
+      tag: ${{ inputs.tag }}
+      release_type: ${{ inputs.release_type }}
     secrets: inherit
-    permissions:
-      contents: read
-
-  test:
-    name: Test source
-    uses: ./.github/workflows/test-only.yml
-    secrets: inherit
-    permissions:
-      contents: read
-
-  build:
-    name: Build and validate code.com
-    needs:
-      - check
-      - test
-    runs-on: ubuntu-latest
-    timeout-minutes: 240
     permissions:
       actions: write
       contents: read
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      OUTPUT_DIR: ${{ github.workspace }}/o/cosmopolitan-code/${{ github.sha }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: ${{ github.sha }}
-      - name: Attach exact source revision to Main
-        shell: bash
-        run: git switch -C Main "$GITHUB_SHA"
-      - name: Dispatch and download canonical cross-platform build
-        shell: bash
-        run: python3 scripts/cosmopolitan-code/commands.py build-action --output "$OUTPUT_DIR"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: code.com
-          path: |
-            ${{ env.OUTPUT_DIR }}/code.com
-            ${{ env.OUTPUT_DIR }}/code.com.json
-          if-no-files-found: error
-          retention-days: 14
 
   prerelease:
     name: Publish prerelease
     if: inputs.release_type == 'prerelease'
-    needs: build
+    needs: artifact
     uses: ./.github/workflows/pre-release-only.yml
     with:
       artifact_run_id: ${{ github.run_id }}
@@ -87,7 +51,7 @@ jobs:
   release:
     name: Promote stable release
     if: inputs.release_type == 'release'
-    needs: build
+    needs: artifact
     uses: ./.github/workflows/release-only.yml
     with:
       artifact_run_id: ${{ github.run_id }}

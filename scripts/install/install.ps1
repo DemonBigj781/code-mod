@@ -178,7 +178,7 @@ function Get-VersionFromBinary {
         return $null
     }
 
-    if ($versionOutput -match '([0-9][0-9A-Za-z.+-]*)$') {
+    if ($versionOutput -match '^codex version:\s+([0-9][0-9A-Za-z.+-]*)\s+Mod version:') {
         return $matches[1]
     }
 
