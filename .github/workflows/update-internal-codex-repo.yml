@@ -1,0 +1,41 @@
+name: Update internal Codex mirror
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: Upstream repository
+        required: false
+        default: openai/codex
+      upstream_branch:
+        description: Upstream branch
+        required: false
+        default: main
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Start conflict-aware upstream update
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          UPSTREAM_REPO: ${{ inputs.upstream_repo }}
+          UPSTREAM_BRANCH: ${{ inputs.upstream_branch }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const ref = context.ref.replace('refs/heads/', '');
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: 'upstream-merge.yml',
+              ref,
+              inputs: {
+                upstream_repo: process.env.UPSTREAM_REPO,
+                upstream_branch: process.env.UPSTREAM_BRANCH,
+              },
+            });
+            core.notice(`Dispatched upstream-merge.yml for ${process.env.UPSTREAM_REPO}:${process.env.UPSTREAM_BRANCH}`);

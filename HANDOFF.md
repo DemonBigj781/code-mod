@@ -99,10 +99,16 @@ Important paths:
 | `code-rs/keyring-store/` | Embedded credentials and keyring migration. |
 | `scripts/cosmopolitan-code/` | Build, packaging, manifest, and runtime validators. |
 | `.github/workflows/cosmopolitan-code-ape.yml` | Clean-revision scope tests, APE build, and smoke workflow. |
+| `.github/workflows/create-build-images.yml` | Publishes the reusable Linux x86-64 APE builder image to GHCR. |
+| `.github/workflows/update-internal-codex-repo.yml` | Manual entry point that dispatches the existing conflict-aware upstream merge workflow. |
 | `o/` | Local artifacts, caches, reports, screenshots, and logs. |
 
 Do not replace the canonical APE build with direct Cargo. Compilation and tests are
 GitHub-Actions-only for this repository.
+
+The APE workflow uploads the packaged artifact before running downloaded-artifact
+smoke jobs. Linux and Windows therefore validate the same uploaded bytes, and a late
+embedded-browser failure cannot prevent retrieval of the build artifact and manifest.
 
 Rust-APE bootstraps with the official Cosmocc 4.0.2 release from the exact HTTPS
 URL and SHA-256 pinned in `scripts/cosmopolitan-code/pins.json`; the matching
