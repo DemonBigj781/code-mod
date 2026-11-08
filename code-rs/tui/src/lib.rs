@@ -164,7 +164,29 @@ pub fn project_reserved_aliases() -> Vec<String> {
         .into_iter()
         .map(|(name, _)| name.to_owned())
         .collect::<Vec<_>>();
+    aliases.extend(
+        [
+            "update",
+            "upgrade",
+            "context-window",
+            "context",
+            "auto-compact",
+            "compact-at",
+            "app",
+            "apps",
+            "plugin",
+            "plugins",
+            "account",
+            "accounts",
+            "help",
+            "guide",
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    );
     aliases.push("exit".to_owned());
+    aliases.sort_unstable();
+    aliases.dedup();
     aliases
 }
 pub use self::markdown_render::render_markdown_text;

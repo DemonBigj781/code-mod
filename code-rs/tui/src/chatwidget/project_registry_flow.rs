@@ -326,13 +326,20 @@ mod tests {
     fn alternate_builtin_slash_names_are_reserved_for_project_aliases() {
         let reserved_aliases = crate::project_reserved_aliases();
         for name in [
+            "update",
             "upgrade",
             "Upgrade",
+            "context-window",
             "context",
+            "auto-compact",
             "compact-at",
             "app",
+            "apps",
             "plugin",
+            "plugins",
             "account",
+            "accounts",
+            "help",
             "guide",
             "exit",
         ] {
