@@ -236,9 +236,15 @@ impl ProjectsSettingsView {
                     }
                 }
                 _ => match form.focus {
-                    1 => form.path.handle_key(key),
-                    2 => form.name.handle_key(key),
-                    3 => form.depth.handle_key(key),
+                    1 => {
+                        form.path.handle_key(key);
+                    }
+                    2 => {
+                        form.name.handle_key(key);
+                    }
+                    3 => {
+                        form.depth.handle_key(key);
+                    }
                     _ => {}
                 },
             }

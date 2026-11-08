@@ -157,10 +157,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_project_aliases(names);
     }
 
-    pub(in crate::chatwidget) fn apply_project_command_result(
-        &mut self,
-        result: ProjectCommandResult,
-    ) {
+    pub(crate) fn apply_project_command_result(&mut self, result: ProjectCommandResult) {
         if result.scope_changed {
             self.invalidate_ghost_snapshots_for_scope_change();
         }
