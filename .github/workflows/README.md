@@ -14,6 +14,13 @@ Rust-specific `rust-ci*.yml` workflows are intentionally removed in this fork.
   feature combinations, test targets, and the agent schema harness.
 - `compile-only.yml` is a manual `Main`-only APE build path that skips the test
   gates and uploads `code.com` plus its manifest in an artifact named `code.com`.
+- `pre-release-only.yml` publishes the exact canonical artifact for a supplied tag
+  as a prerelease after the existing cross-platform and hash gates pass.
+- `release-only.yml` promotes an existing matching prerelease tag to the latest
+  stable release; it never creates a stable release from unvalidated bytes.
+- `code-comeplete-pipeline.yml` runs checks and tests, dispatches the canonical
+  cross-platform APE build, uploads `code.com`, and publishes a prerelease by
+  default. Its secondary `release` choice promotes the matching prerelease.
 - Platform-specific Linux/Windows release and preview binary workflows are
   intentionally removed so binary distribution goes through the APE artifact.
 

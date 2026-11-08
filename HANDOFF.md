@@ -125,6 +125,9 @@ Important paths:
 | `.github/workflows/test-only.yml` | Manual `Main`-only source and contract test helper without APE packaging. |
 | `.github/workflows/check-only.yml` | Manual `Main`-only product/test-target `cargo check` helper. |
 | `.github/workflows/compile-only.yml` | Manual `Main`-only APE compile/package helper that uploads the `code.com` artifact without running test gates. |
+| `.github/workflows/pre-release-only.yml` | Manual or reusable prerelease publisher for the exact validated `code.com` artifact. |
+| `.github/workflows/release-only.yml` | Manual or reusable stable promotion of an existing matching prerelease. |
+| `.github/workflows/code-comeplete-pipeline.yml` | Complete check/test/cross-platform build pipeline; prerelease is the default release type and `release` is the secondary switch. |
 | `.github/workflows/create-build-images.yml` | Publishes the reusable Linux x86-64 APE builder image to GHCR. |
 | `.github/workflows/update-internal-codex-repo.yml` | Manual entry point that dispatches the existing conflict-aware upstream merge workflow. |
 | `o/` | Local artifacts, caches, reports, screenshots, and logs. |

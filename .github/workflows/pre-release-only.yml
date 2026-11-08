@@ -1,0 +1,64 @@
+name: Pre-release Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag for the prerelease
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: Git tag for the prerelease
+        required: true
+        type: string
+      artifact_run_id:
+        description: Pipeline run containing the code.com artifact
+        required: true
+        type: string
+
+concurrency:
+  group: prerelease-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish code.com prerelease
+    if: github.ref == 'refs/heads/Main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || '' }}
+      OUTPUT_DIR: ${{ github.workspace }}/o/cosmopolitan-code/${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Attach exact source revision to Main
+        shell: bash
+        run: git switch -C Main "$GITHUB_SHA"
+      - name: Download validated artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUTPUT_DIR"
+          if [[ -n "$ARTIFACT_RUN_ID" ]]; then
+            gh run download "$ARTIFACT_RUN_ID" --name code.com --dir "$OUTPUT_DIR"
+            exit 0
+          fi
+          run_id=$(gh run list --workflow cosmopolitan-code-ape.yml --branch Main --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          if [[ -z "$run_id" ]]; then
+            echo "No successful Cosmopolitan Code APE run exists for $GITHUB_SHA." >&2
+            exit 1
+          fi
+          gh run download "$run_id" --name cosmopolitan-code-ape --dir "$OUTPUT_DIR"
+      - name: Publish prerelease
+        shell: bash
+        run: python3 scripts/cosmopolitan-code/commands.py publish-prerelease --output "$OUTPUT_DIR" --tag "${{ inputs.tag }}"
