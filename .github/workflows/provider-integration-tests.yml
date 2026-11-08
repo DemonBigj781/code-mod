@@ -11,6 +11,7 @@ on:
       - "docs/settings.md"
       - "docs/slash-commands.md"
       - ".github/workflows/provider-integration-tests.yml"
+  workflow_dispatch:
 
 concurrency:
   group: provider-integration-tests-${{ github.ref }}
