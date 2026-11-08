@@ -23,11 +23,13 @@ jobs:
     name: Test explicit project scope and memory Markdown
     if: github.ref == 'refs/heads/Main'
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -46,7 +48,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rustup toolchain install 1.93.0 --profile minimal
           jobs=$(getconf _NPROCESSORS_ONLN)
           cargo +1.93.0 test --locked -p code-core project_registry -j"$jobs"
           cargo +1.93.0 test --locked -p code-core memory_summary -j"$jobs"
@@ -62,11 +63,14 @@ jobs:
     name: Build source runtime probe on Linux
     if: github.ref == 'refs/heads/Main'
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b
+      options: --privileged
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -83,7 +87,6 @@ jobs:
       - name: Check agent tool schema contracts
         timeout-minutes: 5
         run: |
-          rustup toolchain install 1.93.0 --profile minimal
           jobs=1
           if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then jobs=$(getconf _NPROCESSORS_ONLN); fi
           CARGO_TARGET_DIR="$RUNNER_TEMP/code-agent-contract-target" CARGO_BUILD_JOBS="$jobs" cargo +1.93.0 test --locked --manifest-path scripts/agent-contract-check/Cargo.toml -j"$jobs" -- --test-threads=1
@@ -137,11 +140,14 @@ jobs:
       - project-scope
       - runtime-windows
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b
+      options: --privileged
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -155,8 +161,6 @@ jobs:
             echo 'SCCACHE_IDLE_TIMEOUT=1800'
             echo 'SCCACHE_CACHE_SIZE=10G'
           } >> "$GITHUB_ENV"
-      - name: Install host keyring helper
-        run: sudo apt-get update && sudo apt-get install -y keyutils
       - name: Test native Rustwright MCP integration
         working-directory: code-rs
         run: |

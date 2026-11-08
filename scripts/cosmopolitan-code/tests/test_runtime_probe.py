@@ -63,6 +63,15 @@ class RuntimeProbeTests(unittest.TestCase):
         )[0]
         self.assertIn("needs:\n      - project-scope\n      - runtime-windows", build_job)
         self.assertEqual(workflow.count("if: github.ref == 'refs/heads/Main'"), 7)
+        builder_image = (
+            "ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:"
+            "a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b"
+        )
+        self.assertEqual(workflow.count(f"image: {builder_image}"), 3)
+        self.assertEqual(workflow.count("options: --privileged"), 2)
+        self.assertEqual(workflow.count("mozilla-actions/sccache-action@"), 3)
+        self.assertNotIn("rustup toolchain install 1.93.0", workflow)
+        self.assertNotIn("sudo apt-get update", workflow)
         self.assertEqual(
             workflow.count(
                 "-p code-tui --lib --no-default-features --features code-fork"

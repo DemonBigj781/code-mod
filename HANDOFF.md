@@ -106,6 +106,11 @@ Important paths:
 Do not replace the canonical APE build with direct Cargo. Compilation and tests are
 GitHub-Actions-only for this repository.
 
+Linux compilation jobs run in the digest-pinned GHCR builder image published by
+`.github/workflows/create-build-images.yml`. The image carries the stable OS packages
+and Rust toolchain, while the GitHub Actions-backed `sccache` layer reuses both Rust
+and C/C++ compilation outputs across clean hosted runners.
+
 The APE workflow uploads the packaged artifact before running downloaded-artifact
 smoke jobs. Linux and Windows therefore validate the same uploaded bytes, and a late
 embedded-browser failure cannot prevent retrieval of the build artifact and manifest.
