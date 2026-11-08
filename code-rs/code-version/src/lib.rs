@@ -41,8 +41,11 @@ static MIN_WIRE_COMPAT_VERSION: LazyLock<String> = LazyLock::new(|| {
 
 static MODEL_MINIMUM_CLIENT_VERSIONS: LazyLock<HashMap<String, String>> =
     LazyLock::new(|| parse_model_minimum_client_versions(MODELS_MANIFEST));
-static DISPLAY_VERSION: LazyLock<String> =
-    LazyLock::new(|| format_display_version(CODE_VERSION, MOD_VERSION, BUILD_ATTEMPT_COUNT));
+static DISPLAY_VERSION: LazyLock<String> = LazyLock::new(|| {
+    debug_assert!(valid_mod_version(MOD_VERSION));
+    debug_assert!(BUILD_ATTEMPT_COUNT.is_none_or(valid_build_attempt_count));
+    format_display_version(CODE_VERSION, MOD_VERSION, BUILD_ATTEMPT_COUNT)
+});
 
 fn format_display_version(
     codex_version: &str,
