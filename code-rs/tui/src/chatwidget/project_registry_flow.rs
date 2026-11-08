@@ -223,7 +223,7 @@ impl ChatWidget<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_core::project_registry::{ProjectKind, Registry};
+    use code_core::project_registry::{validate_project_alias, ProjectKind, Registry};
     use std::process::Command;
 
     fn init_repo(path: &Path) {
@@ -324,6 +324,7 @@ mod tests {
 
     #[test]
     fn alternate_builtin_slash_names_are_reserved_for_project_aliases() {
+        let reserved_aliases = crate::project_reserved_aliases();
         for name in [
             "upgrade",
             "Upgrade",
@@ -335,8 +336,14 @@ mod tests {
             "guide",
             "exit",
         ] {
-            assert!(project_alias_conflicts_with_builtin(name), "{name}");
+            assert!(
+                validate_project_alias(name, &reserved_aliases).is_err(),
+                "{name}"
+            );
         }
-        assert!(!project_alias_conflicts_with_builtin("code-project"));
+        assert_eq!(
+            validate_project_alias("code-project", &reserved_aliases).unwrap(),
+            "code-project"
+        );
     }
 }
