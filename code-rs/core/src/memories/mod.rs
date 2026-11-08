@@ -871,9 +871,7 @@ pub fn preview_model_prompt_sync(code_home: &Path) -> io::Result<Option<String>>
         ) else {
             return Ok(None);
         };
-        let base_path = paths.base_dir.display().to_string();
         let template = prompts::MemoryToolDeveloperInstructionsTemplateSyncView {
-            base_path: &base_path,
             memory_summary: &selection.summary_text,
         };
         return Ok(template.render().ok());
@@ -890,9 +888,7 @@ pub fn preview_model_prompt_sync(code_home: &Path) -> io::Result<Option<String>>
         return Ok(None);
     }
     let (summary, _) = crate::truncate::truncate_middle(summary, 12_000);
-    let base_path = paths.base_dir.display().to_string();
     let template = prompts::MemoryToolDeveloperInstructionsTemplateSyncView {
-        base_path: &base_path,
         memory_summary: &summary,
     };
     Ok(template.render().ok())

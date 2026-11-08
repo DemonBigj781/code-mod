@@ -4,9 +4,10 @@
 
 > **Status:** The requested browser/display work was validated in the portable
 > `code.com` artifact on 2026-11-04. Explicit project scopes, bounded Git
-> snapshots/reviews, Actions-only validation, and memory-summary Markdown were
-> committed to `Main` on 2026-11-06. Compilation and test evidence for the current
-> revision is provided by the `Cosmopolitan Code APE` GitHub Actions workflow.
+> snapshots/reviews, native memories, and guarded image attachments are committed
+> to `Main`. Compilation and test evidence for the current revision is provided by
+> the `Cosmopolitan Code APE` and `Provider Integration Tests` GitHub Actions
+> workflows.
 
 ## Requested Outcome
 
@@ -64,7 +65,7 @@ Changing the active scope clears queued snapshot work and detaches any stale
 in-flight job, so the previous project cannot leave snapshotting permanently
 busy. Results that return for a stale scope are discarded.
 
-Current uncommitted integration work on 2026-11-08 extends that contract with:
+The integration committed to `Main` on 2026-11-08 extends that contract with:
 
 - `code project ...` registry management and `code --project NAME` startup
   selection for interactive, `exec`, `auto`, and `review` sessions;
@@ -76,11 +77,15 @@ Current uncommitted integration work on 2026-11-08 extends that contract with:
   full tracked-file rehash in massive repositories;
 - a native read-only `memories` tool that resolves the current published
   generation on every call, plus cross-working-directory session-history
-  regression coverage.
+  regression coverage;
+- shared image normalization for user/function-output images and `image_view`, so
+  oversized attachments are downscaled below the provider's 30,000-patch limit
+  before they enter pending model input.
 
-These 2026-11-08 changes have static verification only. The repository policy
-still requires the exact committed revision to pass the `Cosmopolitan Code APE`
-GitHub Actions workflow before they are described as build/test validated.
+The repository policy requires the exact committed revision to pass the relevant
+GitHub Actions workflows before it is described as build/test validated. Always
+inspect the current revision's workflow runs rather than relying on this document
+for a copied validation result.
 
 ## Architecture and Build Path
 

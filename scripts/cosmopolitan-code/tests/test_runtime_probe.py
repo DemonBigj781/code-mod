@@ -52,6 +52,9 @@ class RuntimeProbeTests(unittest.TestCase):
     def test_windows_runtime_gate_precedes_full_build(self):
         root = Path(__file__).resolve().parents[3]
         workflow = (root / ".github/workflows/cosmopolitan-code-ape.yml").read_text()
+        project_scope_job = workflow.split("\n  project-scope:\n", 1)[1].split(
+            "\n  runtime:\n", 1
+        )[0]
         build_job = workflow.split("\n  build:\n", 1)[1].split(
             "\n  linux-smoke:\n", 1
         )[0]
@@ -74,12 +77,18 @@ class RuntimeProbeTests(unittest.TestCase):
         self.assertEqual(workflow.count("mozilla-actions/sccache-action@"), 3)
         self.assertNotIn("rustup toolchain install 1.93.0", workflow)
         self.assertNotIn("sudo apt-get update", workflow)
-        self.assertEqual(
-            workflow.count(
-                "-p code-tui --lib --no-default-features --features code-fork"
-            ),
-            3,
-        )
+        for test_filter in (
+            "project_registry",
+            "projects_settings",
+            "workspace_snapshot_tests",
+            "repository_mode_tests",
+        ):
+            command = (
+                "cargo +1.93.0 test --locked -p code-tui --lib "
+                "--no-default-features --features code-fork "
+                f'{test_filter} -j"$jobs"'
+            )
+            self.assertEqual(project_scope_job.count(command), 1)
         self.assertIn("ref: ${{ steps.fork-pin.outputs.sha }}", workflow)
         self.assertIn('      - "scripts/smoke-test cosmopolitan-code.sh"', workflow)
         self.assertIn("actions/upload-artifact@", build_job)
