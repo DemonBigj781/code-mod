@@ -12,19 +12,21 @@ permissions:
 
 jobs:
   compile:
-    name: Compile product and test targets
+    name: Build portable code.com artifact
     if: github.ref == 'refs/heads/Main'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b
-    timeout-minutes: 90
+      options: --privileged
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Trust container worktree
+      - name: Trust container worktrees
         shell: bash
         run: |
           set -euo pipefail
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/o/cosmopolitan-source"
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -40,21 +42,24 @@ jobs:
             echo 'SCCACHE_IDLE_TIMEOUT=1800'
             echo 'SCCACHE_CACHE_SIZE=10G'
           } >> "$GITHUB_ENV"
-      - name: Compile product targets
-        working-directory: code-rs
+      - name: Read pinned fork revision
+        id: fork-pin
         shell: bash
-        run: |
-          set -euo pipefail
-          jobs=$(getconf _NPROCESSORS_ONLN)
-          cargo +1.93.0 check --locked -p code-core --all-targets -j"$jobs"
-          cargo +1.93.0 check --locked -p code-core --all-targets --features browser-automation -j"$jobs"
-          cargo +1.93.0 check --locked -p code-rustwright-mcp --all-targets -j"$jobs"
-          cargo +1.93.0 check --locked -p code-tui --all-targets --no-default-features --features code-fork -j"$jobs"
-          cargo +1.93.0 check --locked -p code-cli --all-targets --no-default-features --features debug-logs -j"$jobs"
-          cargo +1.93.0 check --locked -p codex-utils-image -p code-session-history -p code-git-tooling --all-targets -j"$jobs"
-      - name: Compile agent tool schema tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          jobs=$(getconf _NPROCESSORS_ONLN)
-          CARGO_TARGET_DIR="$RUNNER_TEMP/code-agent-contract-target" CARGO_BUILD_JOBS="$jobs" cargo +1.93.0 test --locked --no-run --manifest-path scripts/agent-contract-check/Cargo.toml -j"$jobs"
+        run: echo "sha=$(python3 -c 'import json; print(json.load(open("scripts/cosmopolitan-code/pins.json"))["cosmopolitan_commit"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: DemonBigj781/cosmopolitan
+          ref: ${{ steps.fork-pin.outputs.sha }}
+          path: o/cosmopolitan-source
+      - name: Enable APE for source-built fork helpers
+        run: sh scripts/cosmopolitan-code/enable-ape-ci.sh
+      - name: Build and package code.com
+        run: sh scripts/build-cosmopolitan-code.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: code.com
+          path: |
+            o/cosmopolitan-code/code.com
+            o/cosmopolitan-code/code.com.json
+          if-no-files-found: error
+          retention-days: 14

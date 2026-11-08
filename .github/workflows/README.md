@@ -10,9 +10,10 @@ Rust-specific `rust-ci*.yml` workflows are intentionally removed in this fork.
 - `test-only.yml` is a manual `Main`-only fast path for source, project-scope,
   image, memory, snapshot, Rustwright, and workflow contract tests. It does not
   build or package the portable APE.
-- `compile-only.yml` is a manual `Main`-only compile gate for the product crates,
-  feature combinations, test targets, and agent schema harness. It does not run
-  tests or package the portable APE.
+- `check-only.yml` is a manual `Main`-only `cargo check` gate for product crates,
+  feature combinations, test targets, and the agent schema harness.
+- `compile-only.yml` is a manual `Main`-only APE build path that skips the test
+  gates and uploads `code.com` plus its manifest in an artifact named `code.com`.
 - Platform-specific Linux/Windows release and preview binary workflows are
   intentionally removed so binary distribution goes through the APE artifact.
 
