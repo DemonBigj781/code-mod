@@ -54,6 +54,7 @@ jobs:
       - name: Enable APE for source-built fork helpers
         run: sh scripts/cosmopolitan-code/enable-ape-ci.sh
       - name: Test artifact and command contracts
+        shell: bash
         run: |
           set -euo pipefail
           python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'
