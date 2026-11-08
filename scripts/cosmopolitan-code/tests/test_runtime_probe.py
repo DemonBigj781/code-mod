@@ -69,6 +69,8 @@ class RuntimeProbeTests(unittest.TestCase):
         )
         self.assertEqual(workflow.count(f"image: {builder_image}"), 3)
         self.assertEqual(workflow.count("options: --privileged"), 2)
+        self.assertEqual(workflow.count("name: Trust container worktrees"), 3)
+        self.assertNotIn("safe.directory '*'", workflow)
         self.assertEqual(workflow.count("mozilla-actions/sccache-action@"), 3)
         self.assertNotIn("rustup toolchain install 1.93.0", workflow)
         self.assertNotIn("sudo apt-get update", workflow)
