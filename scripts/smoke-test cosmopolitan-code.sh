@@ -30,6 +30,13 @@ for required in "$artifact" "$manifest" "$runtime_smoke"; do
     fi
 done
 
+if [ ! -x "$artifact" ]; then
+    chmod u+x "$artifact"
+fi
+if [ ! -x "$runtime_smoke" ]; then
+    chmod u+x "$runtime_smoke"
+fi
+
 set -- "$support_dir/artifact_contract.py" "$artifact" "$manifest"
 if [ -n "${GITHUB_SHA:-}" ]; then
     set -- "$@" --source-commit "$GITHUB_SHA"

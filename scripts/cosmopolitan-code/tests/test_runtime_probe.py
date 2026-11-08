@@ -56,10 +56,13 @@ class RuntimeProbeTests(unittest.TestCase):
             "\n  linux-smoke:\n", 1
         )[0]
         linux_smoke_job = workflow.split("\n  linux-smoke:\n", 1)[1].split(
+            "\n  termux-bionic-smoke:\n", 1
+        )[0]
+        termux_smoke_job = workflow.split("\n  termux-bionic-smoke:\n", 1)[1].split(
             "\n  windows-smoke:\n", 1
         )[0]
         self.assertIn("needs:\n      - project-scope\n      - runtime-windows", build_job)
-        self.assertEqual(workflow.count("if: github.ref == 'refs/heads/Main'"), 6)
+        self.assertEqual(workflow.count("if: github.ref == 'refs/heads/Main'"), 7)
         self.assertEqual(
             workflow.count(
                 "-p code-tui --lib --no-default-features --features code-fork"
@@ -74,6 +77,11 @@ class RuntimeProbeTests(unittest.TestCase):
         self.assertIn("actions/download-artifact@", linux_smoke_job)
         self.assertIn("sh 'scripts/smoke-test cosmopolitan-code.sh'", linux_smoke_job)
         self.assertIn("check-rustwright-mcp.py", linux_smoke_job)
+        self.assertIn("needs: build", termux_smoke_job)
+        self.assertIn("actions/download-artifact@", termux_smoke_job)
+        self.assertIn("termux/termux-docker-pacman@sha256:", termux_smoke_job)
+        self.assertIn("chmod 700 o/cosmopolitan-code/*.com", termux_smoke_job)
+        self.assertIn("sh \"scripts/smoke-test cosmopolitan-code.sh\"", termux_smoke_job)
 
 
 if __name__ == "__main__":

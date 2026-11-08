@@ -109,6 +109,10 @@ GitHub-Actions-only for this repository.
 The APE workflow uploads the packaged artifact before running downloaded-artifact
 smoke jobs. Linux and Windows therefore validate the same uploaded bytes, and a late
 embedded-browser failure cannot prevent retrieval of the build artifact and manifest.
+An x86-64 Termux Docker image also runs those uploaded bytes in the Termux Bionic
+userland. The container does not include Android runtime components, so this
+portability smoke does not replace the separate native `target_os = "android"` build
+described under `code-rs/docs/`.
 
 Rust-APE bootstraps with the official Cosmocc 4.0.2 release from the exact HTTPS
 URL and SHA-256 pinned in `scripts/cosmopolitan-code/pins.json`; the matching

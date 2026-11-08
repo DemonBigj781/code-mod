@@ -198,6 +198,45 @@ jobs:
       - name: Smoke-test embedded Camoufox through Rustwright MCP
         run: python3 scripts/cosmopolitan-code/check-rustwright-mcp.py o/cosmopolitan-code/code.com --exercise-browser
 
+  termux-bionic-smoke:
+    name: Run same APE in Termux Bionic userland
+    if: github.ref == 'refs/heads/Main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cosmopolitan-code-ape
+          path: o/cosmopolitan-code
+      - name: Restore executable bits lost by artifact upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod 700 o/cosmopolitan-code/*.com
+      - name: Smoke-test the x86-64 APE in Termux
+        shell: bash
+        env:
+          TERMUX_IMAGE: termux/termux-docker-pacman@sha256:e122eb8cf4309859f797d9618c378016af7dbd695817bd5915194e7c6d2dd406
+        run: |
+          set -euo pipefail
+          docker run --rm -i \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            "$TERMUX_IMAGE" \
+            bash -lc '
+              set -Eeuo pipefail
+              timeout --foreground 10m pacman -Sy --noconfirm
+              timeout --foreground 10m pacman -S --noconfirm --needed file python termux-exec
+              termux_exec_preload="${PREFIX}/lib/libtermux-exec-ld-preload.so"
+              if [ -r "$termux_exec_preload" ]; then
+                export LD_PRELOAD="$termux_exec_preload"
+              fi
+              export TERMUX_VERSION="${TERMUX_VERSION:-ci-docker}"
+              sh "scripts/smoke-test cosmopolitan-code.sh" o/cosmopolitan-code
+            '
+
   windows-smoke:
     name: Run same APE on Windows
     if: github.ref == 'refs/heads/Main'
