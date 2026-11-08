@@ -122,6 +122,8 @@ Important paths:
 | `code-rs/keyring-store/` | Embedded credentials and keyring migration. |
 | `scripts/cosmopolitan-code/` | Build, packaging, manifest, and runtime validators. |
 | `.github/workflows/cosmopolitan-code-ape.yml` | Clean-revision scope tests, APE build, and smoke workflow. |
+| `.github/workflows/test-only.yml` | Manual `Main`-only source and contract test helper without APE packaging. |
+| `.github/workflows/compile-only.yml` | Manual `Main`-only product/test-target compile helper without test execution or APE packaging. |
 | `.github/workflows/create-build-images.yml` | Publishes the reusable Linux x86-64 APE builder image to GHCR. |
 | `.github/workflows/update-internal-codex-repo.yml` | Manual entry point that dispatches the existing conflict-aware upstream merge workflow. |
 | `o/` | Local artifacts, caches, reports, screenshots, and logs. |

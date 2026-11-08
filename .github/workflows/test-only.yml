@@ -1,0 +1,95 @@
+name: Test Only
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: test-only-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run source tests without packaging
+    if: github.ref == 'refs/heads/Main'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trust container worktrees
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/o/cosmopolitan-source"
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure compiler cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'RUSTC_WRAPPER=sccache'
+            echo 'SCCACHE_IDLE_TIMEOUT=1800'
+            echo 'SCCACHE_CACHE_SIZE=10G'
+          } >> "$GITHUB_ENV"
+      - name: Read pinned fork revision
+        id: fork-pin
+        shell: bash
+        run: echo "sha=$(python3 -c 'import json; print(json.load(open("scripts/cosmopolitan-code/pins.json"))["cosmopolitan_commit"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: DemonBigj781/cosmopolitan
+          ref: ${{ steps.fork-pin.outputs.sha }}
+          path: o/cosmopolitan-source
+      - name: Enable APE for source-built fork helpers
+        run: sh scripts/cosmopolitan-code/enable-ape-ci.sh
+      - name: Test artifact and command contracts
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts/cosmopolitan-code/tests -p 'test_*.py'
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s o/cosmopolitan-source/third_party/rust_ape/tests -p 'test_*.py'
+      - name: Test project, memory, image, and snapshot contracts
+        working-directory: code-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          jobs=$(getconf _NPROCESSORS_ONLN)
+          cargo +1.93.0 test --locked -p code-core project_registry -j"$jobs"
+          cargo +1.93.0 test --locked -p code-core memory_summary -j"$jobs"
+          cargo +1.93.0 test --locked -p code-core memories::tool -j"$jobs"
+          cargo +1.93.0 test --locked -p code-core openai_tools::memories_tool -j"$jobs"
+          cargo +1.93.0 test --locked -p code-core published_paths_reject_generation_pointer_traversal -j"$jobs"
+          cargo +1.93.0 test --locked -p codex-utils-image downscales_oversized_data_url_before_upload -j"$jobs"
+          cargo +1.93.0 test --locked -p code-core image_view_downscales_before_attaching_to_model_input -j"$jobs"
+          cargo +1.93.0 test --locked -p code-session-history -j"$jobs"
+          cargo +1.93.0 test --locked -p code-git-tooling repository_discovery -j"$jobs"
+          cargo +1.93.0 test --locked -p code-git-tooling large_repository_snapshot_only_stages_changed_paths -j"$jobs"
+          cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork project_registry -j"$jobs"
+          cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork projects_settings -j"$jobs"
+          cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork workspace_snapshot_tests -j"$jobs"
+          cargo +1.93.0 test --locked -p code-tui --lib --no-default-features --features code-fork repository_mode_tests -j"$jobs"
+          cargo +1.93.0 test --locked -p code-cli --test feature_contract --no-default-features -j"$jobs"
+          cargo +1.93.0 test --locked -p code-cli --bin code --no-default-features project_selection -j"$jobs"
+      - name: Test native Rustwright integration
+        working-directory: code-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          jobs=$(getconf _NPROCESSORS_ONLN)
+          cargo +1.93.0 test --locked -p code-rustwright-mcp -j"$jobs"
+          cargo +1.93.0 test --locked -p code-core --features browser-automation rustwright_mcp::tests:: -j"$jobs"
+      - name: Check agent tool schema contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          jobs=$(getconf _NPROCESSORS_ONLN)
+          CARGO_TARGET_DIR="$RUNNER_TEMP/code-agent-contract-target" CARGO_BUILD_JOBS="$jobs" cargo +1.93.0 test --locked --manifest-path scripts/agent-contract-check/Cargo.toml -j"$jobs" -- --test-threads=1
