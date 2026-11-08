@@ -109,6 +109,10 @@ struct MultitoolCli {
     #[clap(long = "demo", global = true, value_name = "TEXT")]
     demo_developer_message: Option<String>,
 
+    /// Start the interactive or headless session in a registered project scope.
+    #[clap(long = "project", global = true, value_name = "NAME")]
+    project: Option<String>,
+
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -185,6 +189,9 @@ enum Subcommand {
     /// Inspect and validate configuration files.
     Config(ConfigCli),
 
+    /// Manage registered project scopes.
+    Project(ProjectCli),
+
     /// Manage locally-stored secrets (keyring-backed, encrypted at rest).
     Secrets(SecretsCli),
 
@@ -201,6 +208,13 @@ enum Subcommand {
     #[cfg(feature = "browser-automation")]
     #[clap(hide = true)]
     RustwrightMcp(rustwright_mcp::RustwrightMcpArgs),
+}
+
+#[derive(Debug, Parser)]
+struct ProjectCli {
+    /// Project operation and arguments. Omit to list registered projects.
+    #[arg(value_name = "COMMAND", num_args = 0.., trailing_var_arg = true)]
+    args: Vec<String>,
 }
 
 fn reject_local_provider_for_remote_control(
@@ -717,12 +731,19 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         mut interactive,
         auto_drive,
         demo_developer_message,
+        project: startup_project,
         subcommand,
     } = MultitoolCli::parse();
 
     interactive.finalize_defaults();
     interactive.demo_developer_message = demo_developer_message.clone();
     reject_local_provider_for_remote_control(interactive.oss, &subcommand)?;
+
+    validate_startup_project_usage(startup_project.as_deref(), &interactive, &subcommand)?;
+    let startup_project_path = startup_project
+        .as_deref()
+        .map(activate_project_from_cli)
+        .transpose()?;
 
     // The TUI already runs housekeeping. For headless `exec` sessions, kick off
     // housekeeping early so stale worktrees/branches don't accumulate.
@@ -745,6 +766,9 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
 
     match subcommand {
         None => {
+            if let Some(path) = startup_project_path.clone() {
+                interactive.cwd = Some(path);
+            }
             prepend_config_flags(
                 &mut interactive.config_overrides,
                 root_config_overrides.clone(),
@@ -768,6 +792,9 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             }
         }
         Some(Subcommand::Exec(mut exec_cli)) => {
+            if let Some(path) = startup_project_path.clone() {
+                exec_cli.cwd = Some(path);
+            }
             if auto_drive {
                 exec_cli.auto_drive = true;
             }
@@ -779,15 +806,21 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             code_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
         }
         Some(Subcommand::Review(review_command)) => {
-            let exec_cli = build_exec_cli_for_review_command(
+            let mut exec_cli = build_exec_cli_for_review_command(
                 review_command,
                 auto_drive,
                 demo_developer_message.clone(),
                 root_config_overrides.clone(),
             )?;
+            if let Some(path) = startup_project_path.clone() {
+                exec_cli.cwd = Some(path);
+            }
             code_exec::run_main(exec_cli, code_linux_sandbox_exe).await?;
         }
         Some(Subcommand::Auto(mut exec_cli)) => {
+            if let Some(path) = startup_project_path.clone() {
+                exec_cli.cwd = Some(path);
+            }
             exec_cli.auto_drive = true;
             if !exec_cli.full_auto && !exec_cli.dangerously_bypass_approvals_and_sandbox {
                 exec_cli.full_auto = true;
@@ -1010,6 +1043,9 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         Some(Subcommand::Config(config_cli)) => {
             config_cli.run().await?;
         }
+        Some(Subcommand::Project(project_cli)) => {
+            run_project_cli(project_cli)?;
+        }
         Some(Subcommand::Secrets(secrets_cli)) => {
             let code_home = code_core::config::find_code_home()
                 .context("failed to resolve CODE_HOME for secrets store")?;
@@ -1103,6 +1139,67 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
         let _ = handle.join();
     }
 
+    Ok(())
+}
+
+fn validate_startup_project_usage(
+    project: Option<&str>,
+    interactive: &TuiCli,
+    subcommand: &Option<Subcommand>,
+) -> anyhow::Result<()> {
+    if project.is_none() {
+        return Ok(());
+    }
+    let explicit_cwd = match subcommand {
+        None => interactive.cwd.as_ref(),
+        Some(Subcommand::Exec(exec_cli) | Subcommand::Auto(exec_cli)) => exec_cli.cwd.as_ref(),
+        Some(Subcommand::Review(review)) => review.exec_options.cwd.as_ref(),
+        Some(_) => {
+            anyhow::bail!("--project is supported for interactive sessions, exec, auto, and review")
+        }
+    };
+    anyhow::ensure!(
+        explicit_cwd.is_none(),
+        "--project cannot be combined with --cd/-C"
+    );
+    Ok(())
+}
+
+fn activate_project_from_cli(name: &str) -> anyhow::Result<PathBuf> {
+    let code_home = code_core::config::find_code_home()
+        .context("failed to resolve CODE_HOME for project registry")?;
+    let registry = code_core::project_registry::Registry::new(&code_home);
+    let cwd = std::env::current_dir().context("cannot read current directory")?;
+    let result = code_core::project_registry::execute_project_command(
+        &registry,
+        &cwd,
+        code_core::project_registry::ProjectCommand::Use(name.to_owned()),
+        std::iter::empty::<&str>(),
+    )?;
+    result
+        .switch_cwd
+        .context("selected project did not provide a working directory")
+}
+
+fn run_project_cli(project_cli: ProjectCli) -> anyhow::Result<()> {
+    if matches!(project_cli.args.as_slice(), [arg] if matches!(arg.as_str(), "help" | "?")) {
+        println!("{}", code_core::project_registry::HELP);
+        return Ok(());
+    }
+    let command = code_core::project_registry::ProjectCommand::parse_args(&project_cli.args)?;
+    let code_home = code_core::config::find_code_home()
+        .context("failed to resolve CODE_HOME for project registry")?;
+    let cwd = std::env::current_dir().context("cannot read current directory")?;
+    let registry = code_core::project_registry::Registry::new(&code_home);
+    let result = code_core::project_registry::execute_project_command(
+        &registry,
+        &cwd,
+        command,
+        code_tui::project_reserved_aliases(),
+    )?;
+    for line in result.lines {
+        println!("{line}");
+    }
     Ok(())
 }
 
@@ -2214,6 +2311,60 @@ mod tests {
         };
         assert_eq!(command.subcommand_name(), "remote-control start");
         assert!(command.json());
+    }
+
+    #[test]
+    fn project_selection_and_management_are_wired_into_the_root_parser() {
+        let interactive = MultitoolCli::try_parse_from(["code", "--project", "demo"])
+            .expect("parse project selection");
+        assert_eq!(interactive.project.as_deref(), Some("demo"));
+        assert!(interactive.subcommand.is_none());
+
+        let management = MultitoolCli::try_parse_from([
+            "code",
+            "project",
+            "add",
+            "single",
+            "/tmp/demo",
+            "demo",
+            "0",
+        ])
+        .expect("parse project management command");
+        let Some(Subcommand::Project(project)) = management.subcommand else {
+            panic!("expected project command");
+        };
+        assert_eq!(project.args, ["add", "single", "/tmp/demo", "demo", "0"]);
+
+        let headless = MultitoolCli::try_parse_from(["code", "exec", "--project", "demo", "hello"])
+            .expect("parse project selection after exec");
+        assert_eq!(headless.project.as_deref(), Some("demo"));
+        assert!(matches!(headless.subcommand, Some(Subcommand::Exec(_))));
+    }
+
+    #[test]
+    fn project_selection_rejects_an_explicit_working_directory() {
+        let cli = MultitoolCli::try_parse_from(["code", "--project", "demo", "--cd", "/tmp/other"])
+            .expect("parse project and cwd");
+        let error = validate_startup_project_usage(
+            cli.project.as_deref(),
+            &cli.interactive,
+            &cli.subcommand,
+        )
+        .expect_err("conflicting cwd must fail");
+        assert!(error.to_string().contains("cannot be combined"));
+    }
+
+    #[test]
+    fn project_selection_rejects_non_session_subcommands() {
+        let cli = MultitoolCli::try_parse_from(["code", "--project", "demo", "project", "list"])
+            .expect("parse project selection with management command");
+        let error = validate_startup_project_usage(
+            cli.project.as_deref(),
+            &cli.interactive,
+            &cli.subcommand,
+        )
+        .expect_err("project selection is only valid for sessions");
+        assert!(error.to_string().contains("interactive sessions"));
     }
 
     #[test]

@@ -19,6 +19,7 @@ mod control;
 mod manifest;
 mod prompts;
 mod storage;
+mod tool;
 pub(crate) mod tagger;
 
 const MEMORIES_DIR: &str = "memories";
@@ -28,6 +29,7 @@ pub(super) const RAW_MEMORIES_FILENAME: &str = "raw_memories.md";
 const MANIFEST_FILENAME: &str = "manifest.json";
 pub(super) const ROLLOUT_SUMMARIES_SUBDIR: &str = "rollout_summaries";
 pub(super) const SNAPSHOTS_SUBDIR: &str = "snapshots";
+const MAX_GENERATION_NAME_BYTES: usize = 128;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -64,6 +66,13 @@ static STATUS_CACHE: OnceLock<Mutex<HashMap<PathBuf, MemoriesDbStatus>>> = OnceL
 pub(crate) use prompts::build_memory_tool_developer_instructions;
 pub(crate) use storage::refresh_memory_artifacts_from_catalog;
 pub(crate) use manifest::current_context_from_runtime;
+
+pub(crate) fn execute_tool(
+    code_home: &Path,
+    arguments: &str,
+) -> Result<serde_json::Value, serde_json::Value> {
+    tool::execute(code_home, arguments)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryArtifactStatus {
@@ -188,17 +197,28 @@ fn legacy_rollout_summaries_dir(code_home: &Path) -> PathBuf {
     memory_root(code_home).join(ROLLOUT_SUMMARIES_SUBDIR)
 }
 
+fn parse_current_generation(contents: &str) -> io::Result<Option<String>> {
+    let generation = contents.trim();
+    if generation.is_empty() {
+        return Ok(None);
+    }
+    if generation.len() > MAX_GENERATION_NAME_BYTES
+        || !generation
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid Memories generation pointer",
+        ));
+    }
+    Ok(Some(generation.to_owned()))
+}
+
 fn resolve_current_generation(code_home: &Path) -> io::Result<Option<String>> {
     let current_path = current_generation_path(code_home);
     match std::fs::read_to_string(&current_path) {
-        Ok(contents) => {
-            let generation = contents.trim().to_owned();
-            if generation.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(generation))
-            }
-        }
+        Ok(contents) => parse_current_generation(&contents),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err),
     }
@@ -207,14 +227,7 @@ fn resolve_current_generation(code_home: &Path) -> io::Result<Option<String>> {
 async fn resolve_current_generation_async(code_home: &Path) -> io::Result<Option<String>> {
     let current_path = current_generation_path(code_home);
     match tokio::fs::read_to_string(&current_path).await {
-        Ok(contents) => {
-            let generation = contents.trim().to_owned();
-            if generation.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(generation))
-            }
-        }
+        Ok(contents) => parse_current_generation(&contents),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err),
     }
@@ -1128,6 +1141,19 @@ mod tests {
         assert!(status.effective.generate_memories);
         assert!(status.effective.use_memories);
         assert_eq!(status.effective.max_rollouts_per_startup, 9);
+    }
+
+    #[test]
+    fn published_paths_reject_generation_pointer_traversal() {
+        let temp = tempdir().expect("tempdir");
+        std::fs::create_dir_all(memory_root(temp.path())).expect("memory root");
+        std::fs::write(current_generation_path(temp.path()), "../../outside\n")
+            .expect("current pointer");
+
+        let error = published_artifact_paths(temp.path()).expect_err("traversal must fail");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("generation pointer"));
     }
 
     #[tokio::test]

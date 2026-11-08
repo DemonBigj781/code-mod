@@ -79,6 +79,7 @@ pub fn get_openai_tools(
     tools.push(builtin_tools::create_read_file_tool());
     tools.push(builtin_tools::create_list_dir_tool());
     tools.push(builtin_tools::create_grep_files_tool());
+    tools.push(super::memories_tool::create_memories_tool());
     tools.push(super::session_history_tool::create_session_history_tool());
     tools.push(super::session_title_tool::create_session_title_tool());
     if config.search_tool {

@@ -209,13 +209,24 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let run = run_git(dir, args, env, timeout)?;
-    String::from_utf8(run.output.stdout)
+    let (command, stdout) = run_git_for_stdout_bytes_with_timeout(dir, args, env, timeout)?;
+    String::from_utf8(stdout)
         .map(|value| value.trim().to_owned())
-        .map_err(|source| GitToolingError::GitOutputUtf8 {
-            command: run.command,
-            source,
-        })
+        .map_err(|source| GitToolingError::GitOutputUtf8 { command, source })
+}
+
+pub(crate) fn run_git_for_stdout_bytes_with_timeout<I, S>(
+    dir: &Path,
+    args: I,
+    env: Option<&[(OsString, OsString)]>,
+    timeout: Option<Duration>,
+) -> Result<(String, Vec<u8>), GitToolingError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let run = run_git(dir, args, env, timeout)?;
+    Ok((run.command, run.output.stdout))
 }
 
 fn run_git<I, S>(

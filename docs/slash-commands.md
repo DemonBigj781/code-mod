@@ -137,6 +137,12 @@ message. The title remains unchanged unless the AI or user explicitly updates it
   form `/project remove <master|group|single> <dir> <name> <git_search_depth>`
   removes the entry only when every supplied field matches.
 
+The same registry is available in **Settings → Projects** and from the system
+CLI with `code project ...`. Use `code --project <name>` to activate a scope and
+start an interactive, `exec`, `auto`, or `review` session in its directory.
+Master entries remain fallbacks and do not replace an active group or single
+scope unless selected explicitly.
+
 Registered scopes are stored in `CODE_HOME/projects.json`. They are the
 authoritative repository scope for Git snapshots, `/undo` file previews, and
 automatic reviews. When Code starts from a broad non-Git directory, it uses the

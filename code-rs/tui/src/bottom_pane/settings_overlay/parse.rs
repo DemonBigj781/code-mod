@@ -7,6 +7,10 @@ mod tests {
     #[test]
     fn ssh_settings_hint_is_discoverable() {
         assert!(SettingsSection::from_hint("ssh").is_some());
+        assert_eq!(
+            SettingsSection::from_hint("projects"),
+            Some(SettingsSection::Projects)
+        );
     }
 }
 
@@ -19,6 +23,9 @@ impl SettingsSection {
             "ui" | "interface" | "layout" | "settings-ui" => Some(SettingsSection::Interface),
             "shell" | "shells" => Some(SettingsSection::Shell),
             "ssh" => Some(SettingsSection::Ssh),
+            "project" | "projects" | "workspace" | "workspaces" => {
+                Some(SettingsSection::Projects)
+            }
             "shell-escalation" | "shell_escalation" | "escalation" | "zsh-fork" | "zsh_fork"
             | "shell-zsh-fork" | "shell_zsh_fork" => Some(SettingsSection::ShellEscalation),
             "shell-profiles" | "shell-profile" | "profiles" | "profile" => {

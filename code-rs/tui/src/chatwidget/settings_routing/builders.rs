@@ -8,6 +8,25 @@ impl ChatWidget<'_> {
         crate::chatwidget::settings_overlay::SshSettingsContent::new(self.build_ssh_settings_view())
     }
 
+    pub(super) fn build_projects_settings_view(
+        &self,
+    ) -> crate::bottom_pane::settings_pages::projects::ProjectsSettingsView {
+        crate::bottom_pane::settings_pages::projects::ProjectsSettingsView::new(
+            self.config.code_home.clone(),
+            self.config.cwd.clone(),
+            self.app_event_tx.clone(),
+            self.project_reserved_aliases(),
+        )
+    }
+
+    pub(super) fn build_projects_settings_content(
+        &self,
+    ) -> crate::chatwidget::settings_overlay::ProjectsSettingsContent {
+        crate::chatwidget::settings_overlay::ProjectsSettingsContent::new(
+            self.build_projects_settings_view(),
+        )
+    }
+
     pub(super) fn build_model_settings_view(&self) -> ModelSelectionView {
         let presets = self.available_model_presets_for_role(ModelRole::Session);
         let current_model = self.config.model.clone();

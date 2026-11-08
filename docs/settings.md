@@ -19,6 +19,11 @@ Full-screen settings panel for Every Code’s TUI. Use it to change models, them
 - **SSH**: manage saved PCs, endpoint order, and authentication through
   `/settings ssh`. See [SSH connections](ssh-connections.md). Registry metadata
   lives in `CODE_HOME/ssh-connections.json`; secrets stay in the credential store.
+- **Projects**: list the project scopes stored in `CODE_HOME/projects.json`,
+  select the active scope, register a `single`, `group`, or `master` path with a
+  bounded Git search depth, and remove entries with confirmation. Selecting a
+  project switches the current session directory and invalidates stale snapshot
+  work from the previous scope.
 - **Updates**: view upgrade channel/status. `/update` opens here before running installers.
 - **Agents**: see built-in/custom agents, enable/disable, force read-only, add per-agent instructions. Open the Subagent editor to configure `/plan`/`/solve`/`/code` or custom slash commands.
 - **Prompts**: edit saved prompt snippets.

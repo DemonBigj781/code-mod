@@ -64,6 +64,11 @@ representations. Databases are opened read-only with `query_only` enabled.
 milliseconds. `search_messages` additionally accepts `session_ref`, `role`
 (`user` or `assistant`), and `include_tools`.
 
+Neither listing nor search is implicitly restricted to the current working
+directory. Omitting `cwd_contains` searches sessions from every discovered Code
+or Codex home, including sessions created from other project directories. Use a
+cwd filter only when that narrower scope is intentional.
+
 Pagination is zero-based. Page sizes default to 50, with a maximum of 200;
 search defaults to 20 matches, with a maximum of 100. Retrieval defaults to a
 50,000-character content budget, capped at 200,000. Check `truncated` and

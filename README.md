@@ -80,7 +80,7 @@ reshaped, and some are new.
 
 | Area                | Source    | What it does                                                                 | Where to look                            |
 | ------------------- | --------- | ---------------------------------------------------------------------------- | ---------------------------------------- |
-| 30 settings pages   | Fork-only | Everything from model selection to shell profiles — [listed below](#the-tui) | `tui/src/bottom_pane/settings_pages/`    |
+| 31 settings pages   | Fork-only | Everything from model selection to project scopes — [listed below](#the-tui) | `tui/src/bottom_pane/settings_pages/`    |
 | Intro animation     | Fork-only | Glitch reveal, gradient effects, 10+ variants                                | `tui/src/glitch_animation.rs`            |
 | Status line         | Fork-only | 24 items across top/bottom lanes, clickable, configurable via `/statusline`  | `tui/src/chatwidget/status_line_flow.rs` |
 | Icon tiers          | Fork-only | Nerd Fonts → Unicode → ASCII fallback, per-icon overrides in config          | `tui/src/icons.rs`                       |
@@ -137,13 +137,13 @@ boldness = 5
 
 ### Settings pages
 
-30 pages, accessible via shortcuts or `/settings`:
+31 pages, accessible via shortcuts or `/settings`:
 
 | Category    | Pages                                                                              |
 | ----------- | ---------------------------------------------------------------------------------- |
 | AI          | Personality, Model, Planning, Auto-drive, Agents, Prompts                          |
 | Tools       | REPL, MCP, Browser, Exec limits, Skills                                            |
-| Environment | Shell, Shell profiles, Shell escalation, Network, Secrets                          |
+| Environment | Projects, Shell, Shell profiles, Shell escalation, Network, Secrets                |
 | Session     | Memories, Review, Validation, Notifications, Experimental                          |
 | Interface   | Hotkeys, Status line, Theme, Verbosity, Updates, Accounts, Plugins, Apps, Overview |
 

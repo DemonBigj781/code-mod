@@ -8,6 +8,7 @@ impl SettingsSection {
             SettingsSection::Interface => "Interface",
             SettingsSection::Shell => "Shell",
             SettingsSection::Ssh => "SSH",
+            SettingsSection::Projects => "Projects",
             SettingsSection::ShellEscalation => "Shell escalation",
             SettingsSection::ShellProfiles => "Shell profiles",
             SettingsSection::ExecLimits => "Exec limits",
@@ -43,6 +44,7 @@ impl SettingsSection {
             SettingsSection::Interface => "Control Settings UI routing and other layout preferences.",
             SettingsSection::Shell => "Select the shell used for tool execution.",
             SettingsSection::Ssh => "Manage saved PCs, endpoints, and SSH authentication.",
+            SettingsSection::Projects => "Manage bounded repository scopes and the active project.",
             SettingsSection::ShellEscalation => {
                 "Configure zsh-fork shell escalation (interactive approvals for blocked subcommands)."
             }
@@ -98,6 +100,7 @@ impl SettingsSection {
             SettingsSection::Interface => "Interface",
             SettingsSection::Shell => "Shell Selection",
             SettingsSection::Ssh => "SSH Connections",
+            SettingsSection::Projects => "Project Scopes",
             SettingsSection::ShellEscalation => "Shell Escalation",
             SettingsSection::ShellProfiles => "Shell Profiles",
             SettingsSection::ExecLimits => "Exec Limits",
@@ -133,6 +136,7 @@ impl SettingsSection {
             SettingsSection::Interface => "Control Settings UI routing (overlay vs bottom pane).",
             SettingsSection::Shell => "Select the shell used for tool execution.",
             SettingsSection::Ssh => "Manage saved PCs, endpoints, and SSH authentication.",
+            SettingsSection::Projects => "Register, select, and remove project scopes.",
             SettingsSection::ShellEscalation => {
                 "Configure zsh-fork shell escalation for sandboxed shell tool calls."
             }

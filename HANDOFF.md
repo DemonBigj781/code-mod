@@ -64,6 +64,24 @@ Changing the active scope clears queued snapshot work and detaches any stale
 in-flight job, so the previous project cannot leave snapshotting permanently
 busy. Results that return for a stale scope are discarded.
 
+Current uncommitted integration work on 2026-11-08 extends that contract with:
+
+- `code project ...` registry management and `code --project NAME` startup
+  selection for interactive, `exec`, `auto`, and `review` sessions;
+- a native **Settings → Projects** page for listing, adding, selecting, and
+  removing bounded scopes;
+- master-as-fallback activation precedence, so adding a broad master does not
+  displace an active group or single scope;
+- changed-path-only temporary-index updates for ghost snapshots, avoiding a
+  full tracked-file rehash in massive repositories;
+- a native read-only `memories` tool that resolves the current published
+  generation on every call, plus cross-working-directory session-history
+  regression coverage.
+
+These 2026-11-08 changes have static verification only. The repository policy
+still requires the exact committed revision to pass the `Cosmopolitan Code APE`
+GitHub Actions workflow before they are described as build/test validated.
+
 ## Architecture and Build Path
 
 The canonical product path is:
@@ -329,8 +347,9 @@ status intentionally did not change.
 
 - Dispatch the committed exact source: `make build`.
 - The `Test explicit project scope and memory Markdown` Actions job runs the
-  registry, bounded discovery, snapshot, undo-scope, background-review, alias,
-  and generated-memory-Markdown regressions.
+  registry, native Memories, bounded discovery, changed-path snapshot,
+  Projects settings, root CLI project-selection, undo-scope, background-review,
+  alias, and generated-memory-Markdown regressions.
 - The remaining workflow jobs run packaging checks, Rustwright tests, the APE build,
   Linux browser acceptance, and Windows runtime checks.
 - Local build and test targets intentionally refuse to run.

@@ -582,6 +582,7 @@
         SettingsSection::Interface,
         SettingsSection::Shell,
         SettingsSection::Ssh,
+        SettingsSection::Projects,
         SettingsSection::ShellEscalation,
         SettingsSection::ShellProfiles,
         SettingsSection::ExecLimits,

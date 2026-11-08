@@ -719,6 +719,11 @@
                         }
                     }
                 }
+                AppEvent::ProjectRegistryChanged(result) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_project_command_result(result);
+                    }
+                }
                 AppEvent::SwitchCwd(new_cwd, initial_prompt) => {
                     let target = new_cwd.clone();
                     self.config.cwd.clone_from(&target);

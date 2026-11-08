@@ -1105,8 +1105,9 @@ When the observer reports `status = "failing"`, the TUI banner highlights the in
 ## Project Registry and Snapshot Scope
 
 The runtime project registry is separate from the `[projects]` configuration
-table below. Use `/project` when Code may be started from a convenience
-directory rather than the intended repository root:
+table below. Manage it with `/project`, `code project ...`, or
+**Settings → Projects** when Code may be started from a convenience directory
+rather than the intended repository root:
 
 - `/project add single /path/to/repo code 0` registers one exact repository.
 - `/project add group /path/to/projects games 2` registers a bounded collection
@@ -1115,6 +1116,11 @@ directory rather than the intended repository root:
   master fallback scope.
 - `/project use code`, `/project code`, and `/code` select the same registered
   project.
+- `code project list` and `code project add single /path/to/repo code 0` expose
+  the same registry operations to scripts and shell sessions.
+- `code --project code` starts the TUI in that registered directory. The same
+  global option works with `exec`, `auto`, and `review`, and cannot be combined
+  with `--cd`/`-C`.
 
 The registry is persisted at `CODE_HOME/projects.json` with atomic, locked
 writes. Registered names must be valid slash-command names and cannot collide
@@ -1122,6 +1128,12 @@ with built-in commands, custom prompts, subagent commands, or configured
 project commands. Deleted or inaccessible paths remain listed and produce a
 specific selection/snapshot error so the operator can repair or remove the
 entry.
+
+A `master` entry is a fallback, not a preferred active scope. Adding a master
+does not replace an existing group or single selection, and adding the first
+non-master project replaces an active master fallback. This keeps broad master
+discovery out of the normal snapshot path; select the master explicitly only
+when its bounded multi-repository scan is intended.
 
 The active registry entry controls Git snapshot, undo-preview, and automatic
 review repository discovery. `single` never scans sibling or child

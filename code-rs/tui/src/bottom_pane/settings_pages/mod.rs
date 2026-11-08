@@ -21,6 +21,7 @@ pub(crate) mod overview;
 pub(crate) mod personality;
 pub(crate) mod planning;
 pub(crate) mod plugins;
+pub(crate) mod projects;
 pub(crate) mod prompts;
 pub(crate) mod review;
 pub(crate) mod secrets;

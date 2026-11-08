@@ -405,6 +405,7 @@ pub(crate) enum AppEvent {
     /// the same configuration but a different `cwd`. Optionally submits an
     /// initial prompt once the new session is ready.
     SwitchCwd(std::path::PathBuf, Option<String>),
+    ProjectRegistryChanged(code_core::project_registry::ProjectCommandResult),
 
     /// Resume picker data finished loading
     SessionPickerLoaded {

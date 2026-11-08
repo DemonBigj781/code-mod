@@ -47,11 +47,15 @@ fn run(settings: &Settings, value: Value) -> Value {
     execute(settings.clone(), request(value)).expect("test operation succeeds")
 }
 fn rollout(root: &Path, id: &str) -> std::path::PathBuf {
+    rollout_with_cwd(root, id, "/workspace")
+}
+
+fn rollout_with_cwd(root: &Path, id: &str, cwd: &str) -> std::path::PathBuf {
     let path = root.join("sessions").join(format!("rollout-{id}.jsonl"));
     std::fs::create_dir_all(path.parent().expect("test operation succeeds"))
         .expect("test operation succeeds");
     let records = vec![
-        json!({"type":"session_meta","payload":{"id":id,"cwd":"/workspace","timestamp":"2026-08-20T00:00:00Z"}}),
+        json!({"type":"session_meta","payload":{"id":id,"cwd":cwd,"timestamp":"2026-08-20T00:00:00Z"}}),
         json!({"type":"turn_context","payload":{"turn_id":"turn-1"}}),
         json!({"type":"response_item","payload":{"type":"message","role":"system","content":"PRIVATE SYSTEM"}}),
         json!({"type":"response_item","payload":{"type":"message","role":"assistant","channel":"analysis","content":"PRIVATE THOUGHT"}}),
@@ -63,6 +67,37 @@ fn rollout(root: &Path, id: &str) -> std::path::PathBuf {
     let text = records.iter().map(|v| format!("{v}\n")).collect::<String>();
     std::fs::write(&path, text).expect("test operation succeeds");
     path
+}
+
+#[test]
+fn search_messages_is_not_scoped_to_the_current_working_directory() {
+    let dir = tempfile::tempdir().expect("temporary root");
+    let settings = settings(dir.path());
+    rollout_with_cwd(
+        &settings.stores[0].root,
+        "project-a",
+        "/workspace/project-a",
+    );
+    rollout_with_cwd(
+        &settings.stores[0].root,
+        "project-b",
+        "/another/directory/project-b",
+    );
+
+    let result = run(
+        &settings,
+        json!({"action":"search_messages","query":"Needle answer","role":"assistant"}),
+    );
+
+    assert_eq!(result["count"], 2);
+    let refs = result["matches"]
+        .as_array()
+        .expect("matches")
+        .iter()
+        .filter_map(|item| item["session"]["ref"].as_str())
+        .collect::<Vec<_>>();
+    assert!(refs.contains(&"code:project-a"));
+    assert!(refs.contains(&"code:project-b"));
 }
 
 #[test]

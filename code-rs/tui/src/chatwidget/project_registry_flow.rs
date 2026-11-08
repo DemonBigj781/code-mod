@@ -1,5 +1,8 @@
 use super::*;
-use code_core::project_registry::{HELP, ProjectCommand, ProjectDefinition, ProjectKind, Registry};
+use code_core::project_registry::{
+    HELP, ProjectCommand, ProjectCommandResult, ProjectDefinition, ProjectKind, Registry,
+    execute_project_command,
+};
 
 fn scope_error(key: String, label: String, root: PathBuf, error: impl ToString) -> RepositoryScope {
     RepositoryScope {
@@ -19,11 +22,6 @@ fn project_scope_key(project: &ProjectDefinition) -> String {
         project.path.display(),
         project.git_search_depth
     )
-}
-
-fn project_alias_conflicts_with_builtin(name: &str) -> bool {
-    name.to_ascii_lowercase().parse::<SlashCommand>().is_ok()
-        || name.eq_ignore_ascii_case("exit")
 }
 
 fn is_branch_worktree_override(cwd: &Path, project: &ProjectDefinition) -> bool {
@@ -105,19 +103,6 @@ fn resolve_repository_scope(code_home: &Path, cwd: &Path) -> RepositoryScope {
     }
 }
 
-fn project_directory_from_command(cwd: &Path, directory: &Path) -> PathBuf {
-    if directory.is_absolute() {
-        return directory.to_path_buf();
-    }
-    if let Some(text) = directory.to_str()
-        && let Some(suffix) = text.strip_prefix("~/")
-        && let Some(home) = dirs::home_dir()
-    {
-        return home.join(suffix);
-    }
-    cwd.join(directory)
-}
-
 fn clear_in_flight_snapshot_state<T>(
     queue: &mut VecDeque<(u64, T)>,
     active: &mut Option<(u64, T)>,
@@ -131,11 +116,8 @@ impl ChatWidget<'_> {
         resolve_repository_scope(&self.config.code_home, &self.config.cwd)
     }
 
-    fn project_reserved_aliases(&self) -> Vec<String> {
-        let mut aliases = crate::slash_command::built_in_slash_commands()
-            .into_iter()
-            .map(|(name, _)| name.to_owned())
-            .collect::<Vec<_>>();
+    pub(in crate::chatwidget) fn project_reserved_aliases(&self) -> Vec<String> {
+        let mut aliases = crate::project_reserved_aliases();
         aliases.extend(
             self.config
                 .subagent_commands
@@ -175,6 +157,25 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_project_aliases(names);
     }
 
+    pub(in crate::chatwidget) fn apply_project_command_result(
+        &mut self,
+        result: ProjectCommandResult,
+    ) {
+        if result.scope_changed {
+            self.invalidate_ghost_snapshots_for_scope_change();
+        }
+        if result.registry_changed {
+            self.refresh_project_aliases();
+        }
+        if !result.lines.is_empty() {
+            self.history_push_plain_paragraphs(PlainMessageKind::Notice, result.lines);
+        }
+        if let Some(path) = result.switch_cwd.filter(|path| path != &self.config.cwd) {
+            self.app_event_tx.send(AppEvent::SwitchCwd(path, None));
+        }
+        self.request_redraw();
+    }
+
     pub(in crate::chatwidget) fn handle_project_alias(&mut self, name: &str) -> bool {
         let registry = Registry::new(&self.config.code_home);
         let project = match registry.resolve_alias(name) {
@@ -185,19 +186,13 @@ impl ChatWidget<'_> {
                 return true;
             }
         };
-        self.invalidate_ghost_snapshots_for_scope_change();
-        match registry.activate(&project.name) {
-            Ok(project) => {
-                self.debug_notice(format!(
-                    "Selected {} project `{}` at {} (Git search depth {}).",
-                    project.kind.label(),
-                    project.name,
-                    project.path.display(),
-                    project.git_search_depth
-                ));
-                self.app_event_tx
-                    .send(AppEvent::SwitchCwd(project.path, None));
-            }
+        match execute_project_command(
+            &registry,
+            &self.config.cwd,
+            ProjectCommand::Use(project.name),
+            std::iter::empty::<&str>(),
+        ) {
+            Ok(result) => self.apply_project_command_result(result),
             Err(error) => self.debug_notice(format!("Project registry: {error}")),
         }
         true
@@ -216,127 +211,15 @@ impl ChatWidget<'_> {
             }
         };
         let registry = Registry::new(&self.config.code_home);
-        let result = match command {
-            ProjectCommand::List => registry.list().and_then(|projects| {
-                let active = registry.active()?.map(|project| project.alias());
-                let mut lines = vec![format!(
-                    "Project registry: {} project(s).",
-                    projects.len()
-                )];
-                if projects.is_empty() {
-                    lines.push("No project is registered; broad startup directories are not scanned recursively.".to_owned());
-                }
-                lines.extend(projects.into_iter().map(|project| {
-                    let marker = if active.as_deref() == Some(project.alias().as_str()) {
-                        "*"
-                    } else {
-                        " "
-                    };
-                    format!(
-                        "{marker} /{} [{} depth={}] {}",
-                        project.name,
-                        project.kind.label(),
-                        project.git_search_depth,
-                        project.path.display()
-                    )
-                }));
-                lines.push(HELP.to_owned());
-                Ok(lines)
-            }),
-            ProjectCommand::Show(name) => registry.get(&name).map(|project| {
-                vec![format!(
-                    "/{} [{} depth={}] {}",
-                    project.name,
-                    project.kind.label(),
-                    project.git_search_depth,
-                    project.path.display()
-                )]
-            }),
-            ProjectCommand::Use(name) => {
-                self.handle_project_alias(&name);
-                return;
-            }
-            ProjectCommand::Add {
-                kind,
-                directory,
-                name,
-                git_search_depth,
-            } => {
-                let directory = project_directory_from_command(&self.config.cwd, &directory);
-                let active_before = registry.active().ok().flatten().map(|project| project.alias());
-                let mut reserved_aliases = self.project_reserved_aliases();
-                if project_alias_conflicts_with_builtin(&name) {
-                    reserved_aliases.push(name.clone());
-                }
-                registry
-                    .add(
-                        kind,
-                        &directory,
-                        &name,
-                        git_search_depth,
-                        reserved_aliases,
-                    )
-                    .map(|project| {
-                        let active_after = registry.active().ok().flatten().map(|entry| entry.alias());
-                        if active_before != active_after {
-                            self.invalidate_ghost_snapshots_for_scope_change();
-                            self.app_event_tx
-                                .send(AppEvent::SwitchCwd(project.path.clone(), None));
-                        }
-                        vec![format!(
-                            "Registered /{} as a {} project at {} with Git search depth {}.",
-                            project.name,
-                            project.kind.label(),
-                            project.path.display(),
-                            project.git_search_depth
-                        )]
-                    })
-            }
-            ProjectCommand::Remove(name) => {
-                let active_before = registry.active().ok().flatten().map(|project| project.alias());
-                registry.remove(&name).and_then(|selection| {
-                    let active_after = selection.active.clone();
-                    if active_before != active_after {
-                        self.invalidate_ghost_snapshots_for_scope_change();
-                        if let Some(active) = active_after.as_deref() {
-                            let fallback = registry.get(active)?;
-                            self.app_event_tx
-                                .send(AppEvent::SwitchCwd(fallback.path, None));
-                        }
-                    }
-                    Ok(vec![format!("Removed project `{name}`.")])
-                })
-            }
-            ProjectCommand::RemoveExact {
-                kind,
-                directory,
-                name,
-                git_search_depth,
-            } => {
-                let directory = project_directory_from_command(&self.config.cwd, &directory);
-                let active_before = registry.active().ok().flatten().map(|project| project.alias());
-                registry
-                    .remove_exact(kind, &directory, &name, git_search_depth)
-                    .and_then(|selection| {
-                        let active_after = selection.active.clone();
-                        if active_before != active_after {
-                            self.invalidate_ghost_snapshots_for_scope_change();
-                            if let Some(active) = active_after.as_deref() {
-                                let fallback = registry.get(active)?;
-                                self.app_event_tx
-                                    .send(AppEvent::SwitchCwd(fallback.path, None));
-                            }
-                        }
-                        Ok(vec![format!("Removed project `{name}`.")])
-                    })
-            }
-        };
-        self.refresh_project_aliases();
-        match result {
-            Ok(lines) => self.history_push_plain_paragraphs(PlainMessageKind::Notice, lines),
+        match execute_project_command(
+            &registry,
+            &self.config.cwd,
+            command,
+            self.project_reserved_aliases(),
+        ) {
+            Ok(result) => self.apply_project_command_result(result),
             Err(error) => self.debug_notice(format!("Project registry: {error}")),
         }
-        self.request_redraw();
     }
 }
 

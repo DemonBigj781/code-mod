@@ -20,6 +20,7 @@ use crate::operations::resolve_repository_root;
 use crate::operations::resolve_repository_root_with_timeout;
 use crate::operations::run_git_for_status;
 use crate::operations::run_git_for_status_with_timeout;
+use crate::operations::run_git_for_stdout_bytes_with_timeout;
 use crate::operations::run_git_for_stdout_with_timeout;
 
 /// Default commit message used for ghost commits when none is provided.
@@ -214,7 +215,9 @@ fn create_index_tempdir(home_dir: Option<&Path>) -> std::io::Result<tempfile::Te
 pub fn create_ghost_commit(
     options: &CreateGhostCommitOptions<'_>,
 ) -> Result<GhostCommit, GitToolingError> {
-    let deadline = options.command_timeout.map(|timeout| Instant::now() + timeout);
+    let deadline = options
+        .command_timeout
+        .map(|timeout| Instant::now() + timeout);
     ensure_git_repository_with_timeout(options.repo_path, remaining_timeout(deadline)?)?;
 
     let repo_root =
@@ -243,16 +246,28 @@ pub fn create_ghost_commit(
         OsString::from(index_path.as_os_str()),
     )];
 
-    let mut add_args = vec![OsString::from("add"), OsString::from("--all")];
-    if let Some(prefix) = repo_prefix.as_deref() {
-        add_args.extend([OsString::from("--"), prefix.as_os_str().to_os_string()]);
+    // Start from the parent tree and update only paths reported by Git status.
+    // An empty temporary index followed by `git add --all` re-hashes every
+    // tracked file, which makes snapshots fail their deadline in very large
+    // repositories even when only one file changed.
+    if let Some(parent) = parent_ref.as_deref() {
+        run_git_for_status_with_timeout(
+            repo_root.as_path(),
+            vec![OsString::from("read-tree"), OsString::from(parent)],
+            Some(base_env.as_slice()),
+            remaining_timeout(deadline)?,
+        )?;
     }
-
-    run_git_for_status_with_timeout(
+    let changed_paths = capture_changed_paths(
         repo_root.as_path(),
-        add_args,
-        Some(base_env.as_slice()),
+        repo_prefix.as_deref(),
         remaining_timeout(deadline)?,
+    )?;
+    add_paths_to_index(
+        repo_root.as_path(),
+        base_env.as_slice(),
+        &changed_paths,
+        deadline,
     )?;
     if !force_include.is_empty() {
         let mut args = Vec::with_capacity(force_include.len() + 2);
@@ -303,6 +318,86 @@ pub fn create_ghost_commit(
     }
 
     Ok(GhostCommit::new(commit_id, parent_ref))
+}
+
+fn capture_changed_paths(
+    repo_root: &Path,
+    repo_prefix: Option<&Path>,
+    timeout: Option<Duration>,
+) -> Result<Vec<PathBuf>, GitToolingError> {
+    let mut args = vec![
+        OsString::from("status"),
+        OsString::from("--porcelain=1"),
+        OsString::from("-z"),
+        OsString::from("--untracked-files=all"),
+    ];
+    if let Some(prefix) = repo_prefix {
+        args.extend([OsString::from("--"), prefix.as_os_str().to_os_string()]);
+    }
+    let (command, output) = run_git_for_stdout_bytes_with_timeout(repo_root, args, None, timeout)?;
+    let records = output.split(|byte| *byte == 0).collect::<Vec<_>>();
+    let mut paths = BTreeSet::new();
+    let mut index = 0usize;
+    while index < records.len() {
+        let record = records[index];
+        index += 1;
+        if record.is_empty() {
+            continue;
+        }
+        if record.len() < 4 || record[2] != b' ' {
+            return Err(GitToolingError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unexpected output from `{command}`"),
+            )));
+        }
+        paths.insert(path_from_git_bytes(&record[3..], &command)?);
+        if matches!(record[0], b'R' | b'C') || matches!(record[1], b'R' | b'C') {
+            let source = records.get(index).copied().unwrap_or_default();
+            index += 1;
+            if source.is_empty() {
+                return Err(GitToolingError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("missing rename source from `{command}`"),
+                )));
+            }
+            paths.insert(path_from_git_bytes(source, &command)?);
+        }
+    }
+    Ok(paths.into_iter().collect())
+}
+
+#[cfg(unix)]
+fn path_from_git_bytes(bytes: &[u8], _command: &str) -> Result<PathBuf, GitToolingError> {
+    use std::os::unix::ffi::OsStringExt;
+    Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))
+}
+
+#[cfg(not(unix))]
+fn path_from_git_bytes(bytes: &[u8], command: &str) -> Result<PathBuf, GitToolingError> {
+    String::from_utf8(bytes.to_vec())
+        .map(PathBuf::from)
+        .map_err(|source| GitToolingError::GitOutputUtf8 {
+            command: command.to_owned(),
+            source,
+        })
+}
+
+fn add_paths_to_index(
+    repo_root: &Path,
+    env: &[(OsString, OsString)],
+    paths: &[PathBuf],
+    deadline: Option<Instant>,
+) -> Result<(), GitToolingError> {
+    for chunk in paths.chunks(64) {
+        let mut args = vec![
+            OsString::from("add"),
+            OsString::from("--all"),
+            OsString::from("--"),
+        ];
+        args.extend(chunk.iter().map(|path| path.as_os_str().to_os_string()));
+        run_git_for_status_with_timeout(repo_root, args, Some(env), remaining_timeout(deadline)?)?;
+    }
+    Ok(())
 }
 
 fn remaining_timeout(deadline: Option<Instant>) -> Result<Option<Duration>, GitToolingError> {
@@ -584,6 +679,39 @@ mod tests {
         assert_eq!(repo.join("delete-me.txt").exists(), false);
         assert!(repo.join("ephemeral.txt").exists());
 
+        Ok(())
+    }
+
+    #[test]
+    fn large_repository_snapshot_only_stages_changed_paths() -> Result<(), GitToolingError> {
+        let temp = tempfile::tempdir()?;
+        let repo = temp.path();
+        init_test_repo(repo);
+        for index in 0..1_500 {
+            std::fs::write(repo.join(format!("tracked-{index:04}.txt")), "unchanged\n")?;
+        }
+        run_git_in(repo, &["add", "."]);
+        run_git_in(
+            repo,
+            &[
+                "-c",
+                "user.name=Tester",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "large baseline",
+            ],
+        );
+        std::fs::write(repo.join("tracked-1499.txt"), "changed\n")?;
+
+        let paths = capture_changed_paths(repo, None, Some(Duration::from_secs(10)))?;
+
+        assert_eq!(paths, vec![PathBuf::from("tracked-1499.txt")]);
+        let ghost = create_ghost_commit(
+            &CreateGhostCommitOptions::new(repo).command_timeout(Duration::from_secs(10)),
+        )?;
+        assert!(!ghost.id().is_empty());
         Ok(())
     }
 

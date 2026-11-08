@@ -20,6 +20,7 @@ impl ChatWidget<'_> {
                     SettingsSection::Interface     => self.settings_summary_interface(),
                     SettingsSection::Shell         => self.settings_summary_shell(),
                     SettingsSection::Ssh           => Some("Manage saved PCs".to_owned()),
+                    SettingsSection::Projects      => self.settings_summary_projects(),
                     SettingsSection::ShellEscalation => self.settings_summary_shell_escalation(),
                     SettingsSection::ShellProfiles => self.settings_summary_shell_profiles(),
                     SettingsSection::ExecLimits    => self.settings_summary_exec_limits(),
@@ -198,6 +199,16 @@ impl ChatWidget<'_> {
             }
             None => Some("Shell: auto".to_owned()),
         }
+    }
+
+    pub(super) fn settings_summary_projects(&self) -> Option<String> {
+        let registry = code_core::project_registry::Registry::new(&self.config.code_home);
+        let projects = registry.list().ok()?;
+        let active = registry.active().ok().flatten();
+        Some(match active {
+            Some(project) => format!("{} registered · Active: /{}", projects.len(), project.name),
+            None => format!("{} registered · No active project", projects.len()),
+        })
     }
 
     pub(super) fn settings_summary_shell_profiles(&self) -> Option<String> {

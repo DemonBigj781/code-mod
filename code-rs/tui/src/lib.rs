@@ -158,6 +158,15 @@ mod updates;
 pub mod test_backend;
 
 pub use cli::Cli;
+
+pub fn project_reserved_aliases() -> Vec<String> {
+    let mut aliases = slash_command::built_in_slash_commands()
+        .into_iter()
+        .map(|(name, _)| name.to_owned())
+        .collect::<Vec<_>>();
+    aliases.push("exit".to_owned());
+    aliases
+}
 pub use self::markdown_render::render_markdown_text;
 pub use public_widgets::composer_input::{ComposerAction, ComposerInput};
 

@@ -33,6 +33,7 @@ pub(crate) use self::contents::{
     NotificationsSettingsContent,
     PlanningSettingsContent,
     PluginsSettingsContent,
+    ProjectsSettingsContent,
     PromptsSettingsContent,
     PersonalitySettingsContent,
     ReviewSettingsContent,
@@ -72,6 +73,7 @@ pub(crate) struct SettingsOverlayView {
     interface_content: Option<InterfaceSettingsContent>,
     shell_content: Option<ShellSettingsContent>,
     ssh_content: Option<SshSettingsContent>,
+    projects_content: Option<ProjectsSettingsContent>,
     shell_escalation_content: Option<ShellEscalationSettingsContent>,
     shell_profiles_content: Option<ShellProfilesSettingsContent>,
     exec_limits_content: Option<ExecLimitsSettingsContent>,
@@ -149,6 +151,7 @@ impl SettingsOverlayView {
             interface_content: None,
             shell_content: None,
             ssh_content: None,
+            projects_content: None,
             shell_escalation_content: None,
             shell_profiles_content: None,
             exec_limits_content: None,
@@ -347,6 +350,10 @@ impl SettingsOverlayView {
 
     pub(crate) fn set_ssh_content(&mut self, content: SshSettingsContent) {
         self.ssh_content = Some(content);
+    }
+
+    pub(crate) fn set_projects_content(&mut self, content: ProjectsSettingsContent) {
+        self.projects_content = Some(content);
     }
 
     pub(crate) fn apply_ssh_registry_result(&mut self, result: &Result<Vec<String>, String>) {
@@ -568,6 +575,10 @@ impl SettingsOverlayView {
                 .ssh_content
                 .as_ref()
                 .map(|content| content as &dyn SettingsContent),
+            SettingsSection::Projects => self
+                .projects_content
+                .as_ref()
+                .map(|content| content as &dyn SettingsContent),
             SettingsSection::ShellEscalation => self
                 .shell_escalation_content
                 .as_ref()
@@ -689,6 +700,10 @@ impl SettingsOverlayView {
                 .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::Ssh => self
                 .ssh_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::Projects => self
+                .projects_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::ShellEscalation => self

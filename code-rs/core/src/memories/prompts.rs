@@ -21,7 +21,6 @@ const MAX_MEMORY_PROMPT_BYTES: usize = 12_000;
 #[derive(Template)]
 #[template(path = "memories/read_path.md", escape = "none")]
 pub(crate) struct MemoryToolDeveloperInstructionsTemplateSyncView<'a> {
-    pub base_path: &'a str,
     pub memory_summary: &'a str,
 }
 
@@ -67,9 +66,7 @@ pub(crate) async fn build_memory_tool_developer_instructions(
         };
         let selection =
             select_prompt_entries(&manifest, current_context, MAX_MEMORY_PROMPT_BYTES)?;
-        let base_path = paths.base_dir.display().to_string();
         let template = MemoryToolDeveloperInstructionsTemplateSyncView {
-            base_path: &base_path,
             memory_summary: &selection.summary_text,
         };
         return Some(MemoryPromptInstructions {
@@ -98,9 +95,7 @@ pub(crate) async fn build_memory_tool_developer_instructions(
         (truncate_middle(summary, MAX_MEMORY_PROMPT_BYTES).0, Vec::new(), true)
     };
 
-    let base_path = paths.base_dir.display().to_string();
     let template = MemoryToolDeveloperInstructionsTemplateSyncView {
-        base_path: &base_path,
         memory_summary: &summary,
     };
     Some(MemoryPromptInstructions {
@@ -147,7 +142,8 @@ mod tests {
             .expect("prompt should be generated");
 
         assert!(prompt.instructions.contains("Recent summary"));
-        assert!(prompt.instructions.contains(&root.display().to_string()));
+        assert!(prompt.instructions.contains("native `memories` tool"));
+        assert!(!prompt.instructions.contains(&root.display().to_string()));
         assert!(prompt.selected_epoch_ids.is_empty());
         assert!(prompt.used_fallback_summary);
     }

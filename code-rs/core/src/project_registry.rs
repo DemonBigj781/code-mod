@@ -100,9 +100,21 @@ pub enum ProjectCommand {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectCommandResult {
+    pub lines: Vec<String>,
+    pub switch_cwd: Option<PathBuf>,
+    pub scope_changed: bool,
+    pub registry_changed: bool,
+}
+
 impl ProjectCommand {
     pub fn parse(input: &str) -> Result<Self> {
         let args = shlex::split(input).context("invalid quoting in /project command")?;
+        Self::parse_args(&args)
+    }
+
+    pub fn parse_args(args: &[String]) -> Result<Self> {
         let args = args.iter().map(String::as_str).collect::<Vec<_>>();
         match args.as_slice() {
             [] | ["list"] => Ok(Self::List),
@@ -125,6 +137,160 @@ impl ProjectCommand {
             _ => bail!(HELP),
         }
     }
+}
+
+pub fn resolve_project_directory(cwd: &Path, directory: &Path) -> PathBuf {
+    if directory.is_absolute() {
+        return directory.to_path_buf();
+    }
+    if let Some(text) = directory.to_str()
+        && let Some(suffix) = text.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(suffix);
+    }
+    cwd.join(directory)
+}
+
+pub fn execute_project_command<I, S>(
+    registry: &Registry,
+    cwd: &Path,
+    command: ProjectCommand,
+    reserved_aliases: I,
+) -> Result<ProjectCommandResult>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    match command {
+        ProjectCommand::List => {
+            let projects = registry.list()?;
+            let active = registry.active()?.map(|project| project.alias());
+            let mut lines = vec![format!("Project registry: {} project(s).", projects.len())];
+            if projects.is_empty() {
+                lines.push(
+                    "No project is registered; broad startup directories are not scanned recursively."
+                        .to_owned(),
+                );
+            }
+            lines.extend(projects.into_iter().map(|project| {
+                let marker = if active.as_deref() == Some(project.alias().as_str()) {
+                    "*"
+                } else {
+                    " "
+                };
+                format!(
+                    "{marker} /{} [{} depth={}] {}",
+                    project.name,
+                    project.kind.label(),
+                    project.git_search_depth,
+                    project.path.display()
+                )
+            }));
+            lines.push(HELP.to_owned());
+            Ok(ProjectCommandResult {
+                lines,
+                switch_cwd: None,
+                scope_changed: false,
+                registry_changed: false,
+            })
+        }
+        ProjectCommand::Show(name) => {
+            let project = registry.get(&name)?;
+            Ok(ProjectCommandResult {
+                lines: vec![format!(
+                    "/{} [{} depth={}] {}",
+                    project.name,
+                    project.kind.label(),
+                    project.git_search_depth,
+                    project.path.display()
+                )],
+                switch_cwd: None,
+                scope_changed: false,
+                registry_changed: false,
+            })
+        }
+        ProjectCommand::Use(name) => {
+            let (project, scope_changed) = registry.activate_with_change(&name)?;
+            Ok(ProjectCommandResult {
+                lines: vec![format!(
+                    "Selected {} project `{}` at {} (Git search depth {}).",
+                    project.kind.label(),
+                    project.name,
+                    project.path.display(),
+                    project.git_search_depth
+                )],
+                switch_cwd: Some(project.path),
+                scope_changed,
+                registry_changed: scope_changed,
+            })
+        }
+        ProjectCommand::Add {
+            kind,
+            directory,
+            name,
+            git_search_depth,
+        } => {
+            let directory = resolve_project_directory(cwd, &directory);
+            let active_before = registry.active()?.map(|project| project.alias());
+            let project =
+                registry.add(kind, &directory, &name, git_search_depth, reserved_aliases)?;
+            let active_after = registry.active()?;
+            let scope_changed =
+                active_before != active_after.as_ref().map(ProjectDefinition::alias);
+            Ok(ProjectCommandResult {
+                lines: vec![format!(
+                    "Registered /{} as a {} project at {} with Git search depth {}.",
+                    project.name,
+                    project.kind.label(),
+                    project.path.display(),
+                    project.git_search_depth
+                )],
+                switch_cwd: scope_changed
+                    .then(|| active_after.map(|active| active.path))
+                    .flatten(),
+                scope_changed,
+                registry_changed: true,
+            })
+        }
+        ProjectCommand::Remove(name) => remove_project(registry, &name, || registry.remove(&name)),
+        ProjectCommand::RemoveExact {
+            kind,
+            directory,
+            name,
+            git_search_depth,
+        } => {
+            let directory = resolve_project_directory(cwd, &directory);
+            remove_project(registry, &name, || {
+                registry.remove_exact(kind, &directory, &name, git_search_depth)
+            })
+        }
+    }
+}
+
+fn remove_project(
+    registry: &Registry,
+    name: &str,
+    remove: impl FnOnce() -> Result<RegistrySelection>,
+) -> Result<ProjectCommandResult> {
+    let active_before = registry.active()?.map(|project| project.alias());
+    let selection = remove()?;
+    let scope_changed = active_before != selection.active;
+    let switch_cwd = if scope_changed {
+        selection
+            .active
+            .as_deref()
+            .map(|active| registry.get(active).map(|project| project.path))
+            .transpose()?
+    } else {
+        None
+    };
+    Ok(ProjectCommandResult {
+        lines: vec![format!("Removed project `{name}`.")],
+        switch_cwd,
+        scope_changed,
+        registry_changed: true,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -233,8 +399,16 @@ impl Registry {
             git_search_depth,
         };
         project.validate_structure()?;
+        let should_activate = match registry
+            .active
+            .as_ref()
+            .and_then(|active| registry.projects.get(active))
+        {
+            None => true,
+            Some(active) => active.kind == ProjectKind::Master && kind != ProjectKind::Master,
+        };
         registry.projects.insert(key.clone(), project.clone());
-        if registry.active.is_none() || kind == ProjectKind::Master {
+        if should_activate {
             registry.active = Some(key);
         }
         self.write(&registry)?;
@@ -242,6 +416,10 @@ impl Registry {
     }
 
     pub fn activate(&self, name: &str) -> Result<ProjectDefinition> {
+        self.activate_with_change(name).map(|(project, _)| project)
+    }
+
+    fn activate_with_change(&self, name: &str) -> Result<(ProjectDefinition, bool)> {
         let key = project_name_key(name)?;
         let (_lock, mut registry) = self.locked()?;
         let project = registry
@@ -250,9 +428,12 @@ impl Registry {
             .cloned()
             .context("project is not registered")?;
         project.validate_path()?;
-        registry.active = Some(key);
-        self.write(&registry)?;
-        Ok(project)
+        let changed = registry.active.as_deref() != Some(key.as_str());
+        if changed {
+            registry.active = Some(key);
+            self.write(&registry)?;
+        }
+        Ok((project, changed))
     }
 
     pub fn remove(&self, name: &str) -> Result<RegistrySelection> {
@@ -335,9 +516,12 @@ impl Registry {
             bytes.len() as u64 <= MAX_REGISTRY_BYTES,
             "project registry exceeds its 1 MiB storage budget"
         );
-        let registry: RegistryFile = serde_json::from_slice(&bytes).map_err(|_| {
+        let mut registry: RegistryFile = serde_json::from_slice(&bytes).map_err(|_| {
             anyhow::anyhow!("project registry is malformed; it has not been replaced")
         })?;
+        if registry.active.as_deref() == Some("") {
+            registry.active = None;
+        }
         self.validate_registry(&registry)?;
         Ok(registry)
     }
@@ -523,6 +707,57 @@ mod tests {
             ProjectCommand::parse("code").unwrap(),
             ProjectCommand::Use("code".to_owned())
         );
+        assert_eq!(
+            ProjectCommand::parse_args(&["show".to_owned(), "code".to_owned()]).unwrap(),
+            ProjectCommand::Show("code".to_owned())
+        );
+    }
+
+    #[test]
+    fn shared_command_execution_reports_scope_changes_for_all_entry_points() {
+        let home = tempfile::tempdir().unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let project = cwd.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let registry = Registry::new(home.path());
+
+        let added = execute_project_command(
+            &registry,
+            cwd.path(),
+            ProjectCommand::Add {
+                kind: ProjectKind::Single,
+                directory: PathBuf::from("project"),
+                name: "demo".to_owned(),
+                git_search_depth: 0,
+            },
+            ["help"],
+        )
+        .unwrap();
+        assert!(added.registry_changed);
+        assert!(added.scope_changed);
+        assert_eq!(added.switch_cwd, Some(project.canonicalize().unwrap()));
+
+        let selected = execute_project_command(
+            &registry,
+            cwd.path(),
+            ProjectCommand::Use("demo".to_owned()),
+            std::iter::empty::<&str>(),
+        )
+        .unwrap();
+        assert!(!selected.scope_changed);
+        assert!(!selected.registry_changed);
+        assert_eq!(selected.switch_cwd, added.switch_cwd);
+
+        let removed = execute_project_command(
+            &registry,
+            cwd.path(),
+            ProjectCommand::Remove("demo".to_owned()),
+            std::iter::empty::<&str>(),
+        )
+        .unwrap();
+        assert!(removed.scope_changed);
+        assert_eq!(removed.switch_cwd, None);
+        assert!(registry.list().unwrap().is_empty());
     }
 
     #[test]
@@ -646,6 +881,60 @@ mod tests {
     }
 
     #[test]
+    fn master_is_a_fallback_and_never_steals_a_narrower_active_scope() {
+        let home = tempfile::tempdir().unwrap();
+        let master = tempfile::tempdir().unwrap();
+        let single = tempfile::tempdir().unwrap();
+        let registry = Registry::new(home.path());
+
+        registry
+            .add(
+                ProjectKind::Master,
+                master.path(),
+                "master",
+                1,
+                std::iter::empty::<&str>(),
+            )
+            .unwrap();
+        assert_eq!(registry.active().unwrap().unwrap().name, "master");
+
+        registry
+            .add(
+                ProjectKind::Single,
+                single.path(),
+                "yata",
+                0,
+                std::iter::empty::<&str>(),
+            )
+            .unwrap();
+        assert_eq!(registry.active().unwrap().unwrap().name, "yata");
+
+        let second_home = tempfile::tempdir().unwrap();
+        let second_master = tempfile::tempdir().unwrap();
+        let second_single = tempfile::tempdir().unwrap();
+        let second = Registry::new(second_home.path());
+        second
+            .add(
+                ProjectKind::Single,
+                second_single.path(),
+                "yata",
+                0,
+                std::iter::empty::<&str>(),
+            )
+            .unwrap();
+        second
+            .add(
+                ProjectKind::Master,
+                second_master.path(),
+                "master",
+                1,
+                std::iter::empty::<&str>(),
+            )
+            .unwrap();
+        assert_eq!(second.active().unwrap().unwrap().name, "yata");
+    }
+
+    #[test]
     fn deleted_project_path_is_reported_without_destroying_the_registry() {
         let home = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
@@ -684,6 +973,29 @@ mod tests {
         let error = Registry::new(home.path()).list().unwrap_err().to_string();
 
         assert!(error.contains("malformed"));
+        assert_eq!(std::fs::read(path).unwrap(), original);
+    }
+
+    #[test]
+    fn empty_legacy_active_value_is_treated_as_no_selection() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join(FILENAME);
+        std::fs::write(
+            &path,
+            br#"{
+  "version": 1,
+  "active": "",
+  "projects": {}
+}
+"#,
+        )
+        .unwrap();
+        let original = std::fs::read(&path).unwrap();
+
+        let registry = Registry::new(home.path());
+
+        assert!(registry.active().unwrap().is_none());
+        assert!(registry.list().unwrap().is_empty());
         assert_eq!(std::fs::read(path).unwrap(), original);
     }
 }
