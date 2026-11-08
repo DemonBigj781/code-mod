@@ -9,6 +9,7 @@ on:
       - "codex-rs/models-manager/models.json"
       - "announcement_tip.toml"
       - "scripts/build-cosmopolitan-code.sh"
+      - "scripts/smoke-test cosmopolitan-code.sh"
       - "scripts/build-cosmopolitan-runtime.sh"
       - "scripts/cosmopolitan-code/**"
       - ".github/workflows/cosmopolitan-code-ape.yml"
@@ -171,16 +172,31 @@ jobs:
           path: o/cosmopolitan-source
       - name: Enable APE for source-built fork helpers
         run: sh scripts/cosmopolitan-code/enable-ape-ci.sh
-      - name: Build and smoke-test the x86-64 APE on Linux
+      - name: Build and package the x86-64 APE on Linux
         run: sh scripts/build-cosmopolitan-code.sh
-      - name: Smoke-test embedded Camoufox through Rustwright MCP
-        run: python3 scripts/cosmopolitan-code/check-rustwright-mcp.py o/cosmopolitan-code/code.com --exercise-browser
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cosmopolitan-code-ape
           path: o/cosmopolitan-code/*
           if-no-files-found: error
           retention-days: 14
+
+  linux-smoke:
+    name: Run APE on Linux
+    if: github.ref == 'refs/heads/Main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cosmopolitan-code-ape
+          path: o/cosmopolitan-code
+      - name: Smoke-test the x86-64 APE on Linux
+        run: sh 'scripts/smoke-test cosmopolitan-code.sh' o/cosmopolitan-code
+      - name: Smoke-test embedded Camoufox through Rustwright MCP
+        run: python3 scripts/cosmopolitan-code/check-rustwright-mcp.py o/cosmopolitan-code/code.com --exercise-browser
 
   windows-smoke:
     name: Run same APE on Windows

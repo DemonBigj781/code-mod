@@ -155,12 +155,6 @@ write_artifact_manifest(
 )
 PY
 
-if [ "$source_clean" = true ]; then
-    sh "$support_dir/test-artifact.sh" "$artifact" "$manifest"
-else
-    sh "$support_dir/test-development-artifact.sh" "$artifact" "$manifest"
-fi
-python3 "$support_dir/check-history-worker.py" "$artifact"
 mkdir -p "$(dirname "$output_dir")"
 mv "$package_dir" "$output_dir"
 printf 'APE artifact: %s/%s\nManifest: %s/%s.json\n' \

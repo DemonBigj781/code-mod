@@ -53,10 +53,13 @@ class RuntimeProbeTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[3]
         workflow = (root / ".github/workflows/cosmopolitan-code-ape.yml").read_text()
         build_job = workflow.split("\n  build:\n", 1)[1].split(
+            "\n  linux-smoke:\n", 1
+        )[0]
+        linux_smoke_job = workflow.split("\n  linux-smoke:\n", 1)[1].split(
             "\n  windows-smoke:\n", 1
         )[0]
         self.assertIn("needs:\n      - project-scope\n      - runtime-windows", build_job)
-        self.assertEqual(workflow.count("if: github.ref == 'refs/heads/Main'"), 5)
+        self.assertEqual(workflow.count("if: github.ref == 'refs/heads/Main'"), 6)
         self.assertEqual(
             workflow.count(
                 "-p code-tui --lib --no-default-features --features code-fork"
@@ -64,6 +67,13 @@ class RuntimeProbeTests(unittest.TestCase):
             3,
         )
         self.assertIn("ref: ${{ steps.fork-pin.outputs.sha }}", workflow)
+        self.assertIn('      - "scripts/smoke-test cosmopolitan-code.sh"', workflow)
+        self.assertIn("actions/upload-artifact@", build_job)
+        self.assertNotIn("check-rustwright-mcp.py", build_job)
+        self.assertIn("needs: build", linux_smoke_job)
+        self.assertIn("actions/download-artifact@", linux_smoke_job)
+        self.assertIn("sh 'scripts/smoke-test cosmopolitan-code.sh'", linux_smoke_job)
+        self.assertIn("check-rustwright-mcp.py", linux_smoke_job)
 
 
 if __name__ == "__main__":
