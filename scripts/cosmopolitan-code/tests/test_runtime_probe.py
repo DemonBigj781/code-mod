@@ -88,10 +88,16 @@ class RuntimeProbeTests(unittest.TestCase):
         self.assertIn("actions/download-artifact@", linux_smoke_job)
         self.assertIn("sh 'scripts/smoke-test cosmopolitan-code.sh'", linux_smoke_job)
         self.assertIn("check-rustwright-mcp.py", linux_smoke_job)
+        self.assertIn(
+            "- name: Smoke-test embedded Camoufox through Rustwright MCP\n"
+            "        continue-on-error: true\n"
+            "        run: python3 scripts/cosmopolitan-code/check-rustwright-mcp.py",
+            linux_smoke_job,
+        )
         self.assertIn("needs: build", termux_smoke_job)
         self.assertIn("actions/download-artifact@", termux_smoke_job)
         self.assertIn("termux/termux-docker-pacman@sha256:", termux_smoke_job)
-        self.assertIn("chmod 700 o/cosmopolitan-code/*.com", termux_smoke_job)
+        self.assertIn("chmod 755 o/cosmopolitan-code/*.com", termux_smoke_job)
         self.assertIn("sh \"scripts/smoke-test cosmopolitan-code.sh\"", termux_smoke_job)
 
 

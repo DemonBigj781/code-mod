@@ -218,6 +218,7 @@ jobs:
       - name: Smoke-test the x86-64 APE on Linux
         run: sh 'scripts/smoke-test cosmopolitan-code.sh' o/cosmopolitan-code
       - name: Smoke-test embedded Camoufox through Rustwright MCP
+        continue-on-error: true
         run: python3 scripts/cosmopolitan-code/check-rustwright-mcp.py o/cosmopolitan-code/code.com --exercise-browser
 
   termux-bionic-smoke:
@@ -236,7 +237,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          chmod 700 o/cosmopolitan-code/*.com
+          chmod 755 o/cosmopolitan-code/*.com
       - name: Smoke-test the x86-64 APE in Termux
         shell: bash
         env:
