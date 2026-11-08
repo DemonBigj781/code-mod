@@ -60,6 +60,8 @@ jobs:
           cargo +1.93.0 test --locked -p code-core memories::tool -j"$jobs"
           cargo +1.93.0 test --locked -p code-core openai_tools::memories_tool -j"$jobs"
           cargo +1.93.0 test --locked -p code-core published_paths_reject_generation_pointer_traversal -j"$jobs"
+          cargo +1.93.0 test --locked -p codex-utils-image downscales_oversized_data_url_before_upload -j"$jobs"
+          cargo +1.93.0 test --locked -p code-core image_view_downscales_before_attaching_to_model_input -j"$jobs"
           cargo +1.93.0 test --locked -p code-session-history -j"$jobs"
           cargo +1.93.0 test --locked -p code-git-tooling repository_discovery -j"$jobs"
           cargo +1.93.0 test --locked -p code-git-tooling large_repository_snapshot_only_stages_changed_paths -j"$jobs"

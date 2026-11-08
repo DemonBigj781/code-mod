@@ -5,13 +5,13 @@ use crate::protocol::ViewImageToolCallEvent;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::events::execute_custom_tool;
+use crate::tools::handlers::{tool_error, tool_output};
 use crate::tools::registry::ToolHandler;
 use crate::turn_diff_tracker::TurnDiffTracker;
-use crate::tools::handlers::{tool_error, tool_output};
 use async_trait::async_trait;
-use base64::Engine;
 use code_protocol::models::ContentItem;
 use code_protocol::models::ResponseInputItem;
+use std::path::Path;
 
 pub(crate) struct ImageViewToolHandler;
 
@@ -89,24 +89,15 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
                 );
             }
 
-            let bytes = match std::fs::read(&resolved) {
-                Ok(bytes) => bytes,
+            let image = match prepare_image_for_model(&resolved) {
+                Ok(image) => image,
                 Err(err) => {
                     return tool_error(
                         call_id,
-                        format!("image_view could not read {}: {err}", resolved.display()),
+                        format!("image_view could not process {}: {err}", resolved.display()),
                     );
                 }
             };
-            let mime = mime_guess::from_path(&resolved)
-                .first().map_or_else(|| crate::util::MIME_OCTET_STREAM.to_owned(), |m| m.essence_str().to_owned());
-            if !mime.starts_with("image/") {
-                return tool_error(
-                    call_id,
-                    format!("image_view only supports image files (got {mime})"),
-                );
-            }
-            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
             let filename = resolved
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -123,7 +114,7 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
                 content: vec![
                     ContentItem::InputText { text: marker },
                     ContentItem::InputImage {
-                        image_url: format!("data:{mime};base64,{encoded}"),
+                        image_url: image.into_data_url(),
                     },
                 ],
             };
@@ -142,4 +133,36 @@ async fn handle_image_view(sess: &Session, ctx: &ToolCallCtx, arguments: String)
         },
     )
     .await
+}
+
+fn prepare_image_for_model(
+    path: &Path,
+) -> Result<code_utils_image::EncodedImage, code_utils_image::error::ImageProcessingError> {
+    code_utils_image::load_and_resize_to_fit(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::ColorType;
+    use image::ImageEncoder;
+    use image::codecs::png::PngEncoder;
+
+    #[test]
+    fn image_view_downscales_before_attaching_to_model_input() {
+        let temp = tempfile::NamedTempFile::new().expect("temp image");
+        let source = image::GrayImage::from_pixel(8_000, 4_000, image::Luma([144u8]));
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(source.as_raw(), 8_000, 4_000, ColorType::L8.into())
+            .expect("encode oversized fixture");
+        std::fs::write(temp.path(), png).expect("write oversized fixture");
+
+        let processed = prepare_image_for_model(temp.path()).expect("prepare image");
+        let patches = code_utils_image::provider_patch_count(processed.width, processed.height);
+
+        assert!(patches < code_utils_image::MAX_PROVIDER_PATCHES);
+        assert!(processed.width < 8_000);
+        assert!(processed.height < 4_000);
+    }
 }

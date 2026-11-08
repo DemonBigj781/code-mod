@@ -19,6 +19,19 @@ use image::imageops::FilterType;
 pub const MAX_WIDTH: u32 = 2048;
 /// Maximum height used when resizing images before uploading.
 pub const MAX_HEIGHT: u32 = 768;
+/// OpenAI rejects image inputs at or above this many 32-by-32 patches.
+pub const MAX_PROVIDER_PATCHES: u64 = 30_000;
+/// Edge length of one provider image patch in pixels.
+pub const PROVIDER_PATCH_SIZE: u32 = 32;
+
+pub const fn provider_patch_count(width: u32, height: u32) -> u64 {
+    let patch_size = PROVIDER_PATCH_SIZE as u64;
+    let width_patches = (width as u64).div_ceil(patch_size);
+    let height_patches = (height as u64).div_ceil(patch_size);
+    width_patches * height_patches
+}
+
+const _: () = assert!(provider_patch_count(MAX_WIDTH, MAX_HEIGHT) < MAX_PROVIDER_PATCHES);
 
 pub mod error;
 
@@ -94,7 +107,10 @@ fn process_image_bytes(
 
         let (width, height) = dynamic.dimensions();
 
-        let encoded = if width <= MAX_WIDTH && height <= MAX_HEIGHT {
+        let encoded = if width <= MAX_WIDTH
+            && height <= MAX_HEIGHT
+            && provider_patch_count(width, height) < MAX_PROVIDER_PATCHES
+        {
             if let Some(format) = format {
                 let mime = format_to_mime(format);
                 EncodedImage {
@@ -125,6 +141,8 @@ fn process_image_bytes(
                 height: resized.height(),
             }
         };
+
+        debug_assert!(provider_patch_count(encoded.width, encoded.height) < MAX_PROVIDER_PATCHES);
 
         Ok(encoded)
     })
@@ -252,15 +270,17 @@ mod tests {
             "data:image/png;base64,{}",
             BASE64_STANDARD.encode(png)
         );
-        let source_patches = 8000_u64.div_ceil(32) * 4000_u64.div_ceil(32);
-        assert!(source_patches >= 30_000, "fixture must exceed provider limit");
+        let source_patches = provider_patch_count(8000, 4000);
+        assert!(
+            source_patches >= MAX_PROVIDER_PATCHES,
+            "fixture must exceed provider limit"
+        );
 
         let processed = load_data_url_and_resize_to_fit(&data_url)
             .expect("process oversized data URL");
-        let processed_patches =
-            u64::from(processed.width).div_ceil(32) * u64::from(processed.height).div_ceil(32);
+        let processed_patches = provider_patch_count(processed.width, processed.height);
 
-        assert!(processed_patches < 30_000);
+        assert!(processed_patches < MAX_PROVIDER_PATCHES);
         assert!(processed.width <= MAX_WIDTH);
         assert!(processed.height <= MAX_HEIGHT);
     }
