@@ -202,7 +202,7 @@ impl BrowserManager {
         })
     }
 
-    async fn should_retry_after_goto_error(&self, err: &BrowserError) -> bool {
+    pub(super) async fn should_retry_after_goto_error(&self, err: &BrowserError) -> bool {
         let is_internal = {
             let cfg = self.config.read().await;
             cfg.connect_port.is_none() && cfg.connect_ws.is_none()
@@ -222,7 +222,7 @@ impl BrowserManager {
                     | std::io::ErrorKind::ConnectionAborted
                     | std::io::ErrorKind::BrokenPipe
             ),
-            BrowserError::CdpError(msg) => {
+            BrowserError::CdpError(msg) | BrowserError::JugglerError(msg) => {
                 let msg_lower = msg.to_ascii_lowercase();
                 const RECOVERABLE_SUBSTRINGS: &[&str] = &[
                     "connection closed",

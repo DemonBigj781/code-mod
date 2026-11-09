@@ -14,6 +14,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::BrowserConfig;
+use crate::BrowserError;
 use crate::BrowserManager;
 
 #[derive(Debug)]
@@ -70,6 +71,26 @@ async fn internal_browser_rejects_chrome_cdp_commands() {
     let message = error.to_string();
     assert!(message.contains("only available for an external Chrome connection"));
     assert!(message.contains("Firefox/Camoufox"));
+}
+
+#[tokio::test]
+async fn internal_browser_retries_recoverable_juggler_transport_errors() {
+    let manager = BrowserManager::new(BrowserConfig::default());
+
+    assert!(
+        manager
+            .should_retry_after_goto_error(&BrowserError::JugglerError(
+                "connection closed".to_owned(),
+            ))
+            .await
+    );
+    assert!(
+        !manager
+            .should_retry_after_goto_error(&BrowserError::JugglerError(
+                "invalid selector".to_owned(),
+            ))
+            .await
+    );
 }
 
 const TEST_PROXY_WS_URL: &str = "ws://proxy.invalid/devtools/browser/proxy";

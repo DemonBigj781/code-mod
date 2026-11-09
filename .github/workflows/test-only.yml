@@ -91,6 +91,7 @@ jobs:
           set -euo pipefail
           jobs=$(getconf _NPROCESSORS_ONLN)
           cargo +1.93.0 test --locked -p code-rustwright-mcp -j"$jobs"
+          cargo +1.93.0 test --locked -p code-browser --lib -j"$jobs"
           cargo +1.93.0 test --locked -p code-core --features browser-automation rustwright_mcp::tests:: -j"$jobs"
       - name: Check agent tool schema contracts
         shell: bash

@@ -34,6 +34,9 @@ pub enum BrowserError {
     #[error("CDP error: {0}")]
     CdpError(String),
 
+    #[error("Camoufox/Juggler error: {0}")]
+    JugglerError(String),
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
@@ -55,8 +58,34 @@ impl From<chromiumoxide::error::CdpError> for BrowserError {
 
 impl From<code_rustwright_mcp::BrowserError> for BrowserError {
     fn from(error: code_rustwright_mcp::BrowserError) -> Self {
-        BrowserError::CdpError(format!("Camoufox/Juggler error: {error}"))
+        BrowserError::JugglerError(error.to_string())
     }
 }
 
 pub type Result<T> = std::result::Result<T, BrowserError>;
+
+#[cfg(test)]
+mod tests {
+    use super::BrowserError;
+
+    #[test]
+    fn rustwright_errors_are_classified_as_juggler_errors() {
+        let error = BrowserError::from(code_rustwright_mcp::BrowserError::Message(
+            "renderer unavailable".to_owned(),
+        ));
+
+        assert!(matches!(&error, BrowserError::JugglerError(_)));
+        assert_eq!(
+            error.to_string(),
+            "Camoufox/Juggler error: renderer unavailable"
+        );
+        assert!(!error.to_string().contains("CDP error"));
+    }
+
+    #[test]
+    fn cdp_errors_keep_the_cdp_backend_label() {
+        let error = BrowserError::CdpError("connection closed".to_owned());
+
+        assert_eq!(error.to_string(), "CDP error: connection closed");
+    }
+}

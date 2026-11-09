@@ -110,16 +110,41 @@ enum RuntimeFileKind {
     Symlink,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BrowserRuntimeErrorKind {
+    Other,
+    UniformDarkFrame,
+}
+
 #[derive(Debug)]
 pub(crate) struct BrowserRuntimeError {
+    kind: BrowserRuntimeErrorKind,
     message: String,
 }
 
 impl BrowserRuntimeError {
-    fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
+            kind: BrowserRuntimeErrorKind::Other,
             message: message.into(),
         }
+    }
+
+    pub(crate) fn uniform_dark_frame(dominance: f64, color: [u8; 3]) -> Self {
+        Self {
+            kind: BrowserRuntimeErrorKind::UniformDarkFrame,
+            message: format!(
+                "browser screenshot is an overwhelmingly uniform dark frame ({:.2}% rgb({}, {}, {})); the Camoufox/Mesa renderer did not produce page content",
+                dominance * 100.0,
+                color[0],
+                color[1],
+                color[2]
+            ),
+        }
+    }
+
+    pub(crate) fn is_uniform_dark_frame(&self) -> bool {
+        self.kind == BrowserRuntimeErrorKind::UniformDarkFrame
     }
 }
 
@@ -1029,13 +1054,7 @@ pub(crate) fn validate_screenshot(bytes: &[u8]) -> Result<(), BrowserRuntimeErro
         let dominance = dominant_count as f64 / pixel_count as f64;
         let luminance = (u16::from(color[0]) + u16::from(color[1]) + u16::from(color[2])) / 3;
         if dominance >= 0.98 && luminance <= 32 {
-            return Err(BrowserRuntimeError::new(format!(
-                "browser screenshot is an overwhelmingly uniform dark frame ({:.2}% rgb({}, {}, {})); the Camoufox/Mesa renderer did not produce page content",
-                dominance * 100.0,
-                color[0],
-                color[1],
-                color[2]
-            )));
+            return Err(BrowserRuntimeError::uniform_dark_frame(dominance, color));
         }
     }
     Ok(())
@@ -1345,8 +1364,17 @@ mod tests {
             .write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png)
             .unwrap();
 
-        let error = validate_screenshot(&bytes).unwrap_err().to_string();
-        assert!(error.contains("uniform dark frame"), "{error}");
+        let error = validate_screenshot(&bytes).unwrap_err();
+        assert!(error.is_uniform_dark_frame());
+        assert!(error.to_string().contains("uniform dark frame"), "{error}");
+    }
+
+    #[test]
+    fn corrupt_screenshot_is_not_classified_as_a_dark_compositor_frame() {
+        let error = validate_screenshot(b"truncated PNG").unwrap_err();
+
+        assert!(!error.is_uniform_dark_frame());
+        assert!(error.to_string().contains("invalid browser screenshot"));
     }
 
     #[test]

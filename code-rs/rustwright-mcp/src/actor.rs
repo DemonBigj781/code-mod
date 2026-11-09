@@ -20,7 +20,8 @@ use serde_json::{Value, json};
 use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::camoufox_runtime::{
-    BrowserRuntime, browser_profile_dir, prepare_browser_launch, validate_screenshot,
+    BrowserRuntime, BrowserRuntimeError, browser_profile_dir, prepare_browser_launch,
+    validate_screenshot,
 };
 
 pub(crate) use rustwright_agent::{
@@ -41,7 +42,13 @@ const COMMAND_QUEUE_CAPACITY: usize = 64;
 const MAX_FILE_INPUTS: usize = 50;
 const MAX_FILE_INPUT_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_FILE_INPUT_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_SCREENSHOT_VALIDATION_RETRIES: usize = 2;
+const SCREENSHOT_RETRY_DELAY: Duration = Duration::from_millis(120);
 const SNAPSHOT_SCRIPT: &str = include_str!("snapshot.js");
+
+fn should_retry_screenshot_validation(error: &BrowserRuntimeError, attempt: usize) -> bool {
+    error.is_uniform_dark_frame() && attempt < MAX_SCREENSHOT_VALIDATION_RETRIES
+}
 
 pub(crate) struct BrowserActor {
     sender: mpsc::UnboundedSender<ActorCommand>,
@@ -1593,7 +1600,31 @@ impl BrowserState {
             NEXT_SCREENSHOT.fetch_add(1, Ordering::Relaxed),
             extension
         ));
-        let screenshot_result = page.screenshot_with_mime(&path, mime).await;
+        let mut attempt = 0;
+        let screenshot_result = loop {
+            if let Err(error) = page.screenshot_with_mime(&path, mime).await {
+                let _ = fs::remove_file(&path);
+                break Err(browser_error("screenshot failed", error));
+            }
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    let _ = fs::remove_file(&path);
+                    break Err(BrowserError::Message(format!(
+                        "screenshot read failed: {error}"
+                    )));
+                }
+            };
+            let _ = fs::remove_file(&path);
+            match validate_screenshot(&bytes) {
+                Ok(()) => break Ok(bytes),
+                Err(error) if should_retry_screenshot_validation(&error, attempt) => {
+                    attempt += 1;
+                    tokio::time::sleep(SCREENSHOT_RETRY_DELAY).await;
+                }
+                Err(error) => break Err(BrowserError::Message(error.to_string())),
+            }
+        };
         if full_page {
             let width = old_size
                 .get("width")
@@ -1605,11 +1636,7 @@ impl BrowserState {
                 .unwrap_or(720) as u32;
             let _ = page.set_viewport(width.max(1), height.max(1)).await;
         }
-        screenshot_result.map_err(|error| browser_error("screenshot failed", error))?;
-        let bytes = fs::read(&path)
-            .map_err(|error| BrowserError::Message(format!("screenshot read failed: {error}")))?;
-        let _ = fs::remove_file(&path);
-        validate_screenshot(&bytes).map_err(|error| BrowserError::Message(error.to_string()))?;
+        let bytes = screenshot_result?;
         Ok(BrowserOutput::Image {
             bytes,
             mime,
@@ -2218,5 +2245,19 @@ mod tests {
         assert_eq!(attachment.session_id, "session-popup");
         assert_eq!(attachment.target_id, "target-popup");
         assert_eq!(attachment.browser_context_id.as_deref(), Some("context-1"));
+    }
+
+    #[test]
+    fn screenshot_retry_is_limited_to_transient_dark_compositor_frames() {
+        let transient =
+            crate::camoufox_runtime::BrowserRuntimeError::uniform_dark_frame(1.0, [28, 27, 34]);
+        let corrupt = crate::camoufox_runtime::BrowserRuntimeError::new(
+            "invalid browser screenshot: truncated PNG",
+        );
+
+        assert!(should_retry_screenshot_validation(&transient, 0));
+        assert!(should_retry_screenshot_validation(&transient, 1));
+        assert!(!should_retry_screenshot_validation(&transient, 2));
+        assert!(!should_retry_screenshot_validation(&corrupt, 0));
     }
 }
