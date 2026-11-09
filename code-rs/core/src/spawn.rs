@@ -205,3 +205,121 @@ pub(crate) async fn spawn_child_async_with_limits(
 
     spawn_tokio_command_with_retry(&mut cmd).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    const TTY_HELPER_ENV: &str = "CODE_TEST_SHELL_TOOL_TTY_HELPER";
+    #[cfg(unix)]
+    const TTY_LEAK_MARKER: &str = "code-shell-tool-parent-tty-leak-7f84d52b";
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_tool_tty_helper() {
+        if std::env::var_os(TTY_HELPER_ENV).is_none() {
+            return;
+        }
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("create helper runtime");
+        runtime.block_on(async {
+            let shell_script = format!(
+                "printf '%s\\n' '{}' >/dev/tty 2>/dev/null || true",
+                TTY_LEAK_MARKER
+            );
+            let child = spawn_child_async(
+                PathBuf::from("/bin/sh"),
+                vec!["-c".to_owned(), shell_script],
+                None,
+                std::env::current_dir().expect("resolve helper cwd"),
+                &SandboxPolicy::DangerFullAccess,
+                StdioPolicy::RedirectForShellTool,
+                std::env::vars().collect(),
+            )
+            .await
+            .expect("spawn shell-tool child");
+            let output = child
+                .wait_with_output()
+                .await
+                .expect("wait for shell-tool child");
+            assert!(
+                output.status.success(),
+                "shell-tool child failed: {:?}",
+                output.status
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_tool_child_cannot_write_to_parent_controlling_tty() {
+        use std::io::Read as _;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("open disposable PTY");
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .expect("clone disposable PTY reader");
+        let reader_thread = thread::spawn(move || {
+            let mut output = Vec::new();
+            match reader.read_to_end(&mut output) {
+                Ok(_) => output,
+                Err(err) if err.raw_os_error() == Some(libc::EIO) => output,
+                Err(err) => panic!("read disposable PTY output: {err}"),
+            }
+        });
+
+        let mut command =
+            CommandBuilder::new(std::env::current_exe().expect("resolve current test executable"));
+        command.arg("--exact");
+        command.arg("spawn::tests::shell_tool_tty_helper");
+        command.arg("--nocapture");
+        command.arg("--test-threads=1");
+        command.env(TTY_HELPER_ENV, "1");
+
+        let mut child = pair
+            .slave
+            .spawn_command(command)
+            .expect("spawn helper in disposable PTY");
+        drop(pair.slave);
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("poll helper status") {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().expect("kill timed-out helper");
+                panic!("timed out waiting for disposable PTY helper");
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        drop(child);
+
+        let output = reader_thread.join().expect("join disposable PTY reader");
+        let output = String::from_utf8_lossy(&output);
+        assert!(
+            status.success(),
+            "PTY helper failed: {status}; output: {output:?}"
+        );
+        assert!(
+            !output.contains(TTY_LEAK_MARKER),
+            "shell-tool child wrote through the parent controlling TTY: {output:?}"
+        );
+    }
+}
