@@ -67,6 +67,7 @@ jobs:
           set -euo pipefail
           jobs=$(getconf _NPROCESSORS_ONLN)
           cargo +1.93.0 test --locked -p code-version -j"$jobs"
+          cargo +1.93.0 test --locked -p codex-shell-escalation handle_escalate_session_executes_escalated_command -j"$jobs"
           cargo +1.93.0 test --locked -p code-core session_manager_pipe_fallback_works_when_pty_is_forced_to_fail -j"$jobs"
           cargo +1.93.0 test --locked -p code-core shell_tool_child_cannot_write_to_parent_controlling_tty -j"$jobs"
           cargo +1.93.0 test --locked -p code-core project_registry -j"$jobs"

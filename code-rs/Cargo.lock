@@ -2680,6 +2680,7 @@ dependencies = [
  "clap",
  "code-protocol",
  "codex-utils-absolute-path",
+ "codex-utils-pty",
  "libc",
  "pretty_assertions",
  "serde",

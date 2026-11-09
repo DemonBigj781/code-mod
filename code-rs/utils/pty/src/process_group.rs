@@ -49,11 +49,7 @@ pub fn set_parent_death_signal(_parent_pid: i32) -> io::Result<()> {
 pub fn detach_from_tty() -> io::Result<()> {
     let result = unsafe { libc::setsid() };
     if result == -1 {
-        let err = io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::EPERM) {
-            return set_process_group();
-        }
-        return Err(err);
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }

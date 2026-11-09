@@ -14,6 +14,7 @@ async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 code-protocol = { workspace = true }
 code-utils-absolute-path = { workspace = true }
+code-utils-pty = { workspace = true }
 libc = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

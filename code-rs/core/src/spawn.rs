@@ -151,7 +151,9 @@ pub(crate) async fn spawn_child_async_with_limits(
     // any child processes that were spawned as part of a `"shell"` tool call
     // to also be terminated.
 
-    // Ensure children form their own process group; on timeout we can kill the group.
+    // Ensure shell-tool children start a new session so they cannot reopen the
+    // TUI's controlling terminal through /dev/tty. Inherited-stdio children keep
+    // their terminal access but still form a separate process group for cleanup.
     // Also, on Linux, set PDEATHSIG so children die if parent dies.
     #[cfg(unix)]
     unsafe {
@@ -161,8 +163,14 @@ pub(crate) async fn spawn_child_async_with_limits(
             StdioPolicy::Inherit => crate::cgroup::ExecCgroupLimits::default(),
         };
         cmd.pre_exec(move || {
-            // Start a new process group
-            let _ = libc::setpgid(0, 0);
+            match stdio_policy {
+                StdioPolicy::RedirectForShellTool => {
+                    code_utils_pty::process_group::detach_from_tty()?;
+                }
+                StdioPolicy::Inherit => {
+                    let _ = code_utils_pty::process_group::set_process_group();
+                }
+            }
             #[cfg(target_os = "linux")]
             {
                 if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {

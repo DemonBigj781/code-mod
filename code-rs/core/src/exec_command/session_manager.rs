@@ -908,17 +908,12 @@ async fn spawn_pipe_exec_command_session(
         command.env(key, value);
     }
 
-    // Put the child in its own process group so we can best-effort kill
-    // descendants on drop.
+    // Start a new session so the pipe fallback cannot reopen the parent TUI's
+    // controlling terminal through /dev/tty. A session leader is also its own
+    // process-group leader, preserving descendant cleanup on drop.
     {
         unsafe {
-            command.pre_exec(|| {
-                let result = libc::setpgid(0, 0);
-                if result == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
+            command.pre_exec(code_utils_pty::process_group::detach_from_tty);
         }
     }
 

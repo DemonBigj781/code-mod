@@ -339,6 +339,7 @@ async fn handle_escalate_session_with_policy(
                 .kill_on_drop(true);
             unsafe {
                 command.pre_exec(move || {
+                    code_utils_pty::process_group::detach_from_tty()?;
                     for (dst_fd, src_fd) in msg.fds.iter().zip(&fds) {
                         libc::dup2(src_fd.as_raw_fd(), *dst_fd);
                     }
@@ -768,7 +769,7 @@ mod tests {
                 argv: vec![
                     "sh".to_string(),
                     "-c".to_string(),
-                    r#"if [ "$KEY" = VALUE ]; then exit 42; else exit 1; fi"#.to_string(),
+                    r#"sid=$(ps -o sid= -p "$$" | tr -d ' '); if [ "$KEY" = VALUE ] && [ "$$" = "$sid" ]; then exit 42; else exit 1; fi"#.to_string(),
                 ],
                 workdir: AbsolutePathBuf::current_dir()?,
                 env: HashMap::from([("KEY".to_string(), "VALUE".to_string())]),
