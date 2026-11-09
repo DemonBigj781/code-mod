@@ -76,6 +76,10 @@ class CommandTests(unittest.TestCase):
             packages["code-tui"]["dependencies"],
             source_packages["code-tui"]["dependencies"],
         )
+        self.assertEqual(
+            packages["codex-shell-escalation"]["dependencies"],
+            source_packages["codex-shell-escalation"]["dependencies"],
+        )
 
     def setUp(self):
         fixture = test_artifact_contract.ArtifactContractTests()
