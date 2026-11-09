@@ -1,7 +1,7 @@
 # Tasks
 
-Catch-all task list for work not tracked in a specific [change document](changes/).
+Standalone work is tracked in the repository's canonical [`TODO.md`](../TODO.md).
+Feature-specific work remains in [`docs/changes/`](changes/) so tasks are not
+duplicated across files.
 
-## Backlog
-
-## Completed
+Do not add task checkboxes here.
