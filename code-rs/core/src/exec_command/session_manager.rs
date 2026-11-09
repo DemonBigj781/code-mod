@@ -1198,7 +1198,7 @@ PY"#
 
         let session_manager = SessionManager::default();
         let params = ExecCommandParams {
-            cmd: "echo hello-from-pipe".to_string(),
+            cmd: "echo hello-from-pipe; sid=$(ps -o sid= -p \"$$\" | tr -d ' '); printf 'session=%s:%s\\n' \"$$\" \"$sid\"".to_string(),
             yield_time_ms: 1_000,
             max_output_tokens: 256,
             workdir: None,
@@ -1229,6 +1229,18 @@ PY"#
             output.output.matches("hello-from-pipe").count(),
             1,
             "fast output must be delivered exactly once: {output:?}"
+        );
+        let session = output
+            .output
+            .lines()
+            .find_map(|line| line.strip_prefix("session="))
+            .expect("pipe fallback should report its process and session IDs");
+        let (pid, sid) = session
+            .split_once(':')
+            .expect("pipe fallback session output should contain PID:SID");
+        assert_eq!(
+            pid, sid,
+            "pipe fallback must start a new session before running the command: {output:?}"
         );
     }
 
