@@ -20,8 +20,8 @@ use serde_json::{Value, json};
 use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::camoufox_runtime::{
-    BrowserRuntime, BrowserRuntimeError, browser_profile_dir, prepare_browser_launch,
-    validate_screenshot,
+    BrowserProfileLease, BrowserRuntime, BrowserRuntimeError, acquire_browser_profile,
+    prepare_browser_launch, validate_screenshot,
 };
 
 pub(crate) use rustwright_agent::{
@@ -406,6 +406,7 @@ struct StoredNetworkRecord {
 
 struct BrowserState {
     runtime: Option<BrowserRuntime>,
+    profile_lease: Option<BrowserProfileLease>,
     browser: Option<JugglerBrowser>,
     attached_targets: Option<mpsc::UnboundedReceiver<camoufox_juggler::protocol::Event>>,
     pages: Vec<PageSlot>,
@@ -421,6 +422,7 @@ impl BrowserState {
     fn new(workspace: Option<PathBuf>) -> Self {
         Self {
             runtime: None,
+            profile_lease: None,
             browser: None,
             attached_targets: None,
             pages: Vec::new(),
@@ -794,13 +796,16 @@ impl BrowserState {
                 );
             }
             let runtime = self.runtime.as_ref().ok_or(BrowserError::Stopped)?;
-            let launch = prepare_browser_launch(runtime, Some(browser_profile_dir()))
+            let profile_lease = acquire_browser_profile()
+                .map_err(|error| BrowserError::Message(error.to_string()))?;
+            let launch = prepare_browser_launch(runtime, Some(profile_lease.path().to_path_buf()))
                 .await
                 .map_err(|error| BrowserError::Message(error.to_string()))?;
             let browser = launch_prepared_with_juggler(&launch.options, launch.prepared)
                 .await
                 .map_err(|error| browser_error("Camoufox Juggler launch failed", error))?;
             self.attached_targets = Some(browser.attached_targets());
+            self.profile_lease = Some(profile_lease);
             self.browser = Some(browser);
         }
         self.browser.as_mut().ok_or(BrowserError::Stopped)
@@ -1777,6 +1782,7 @@ impl BrowserState {
         if let Some(mut browser) = self.browser.take() {
             let _ = browser.close().await;
         }
+        self.profile_lease = None;
     }
 }
 

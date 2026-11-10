@@ -13,8 +13,10 @@ use camoufox::prepare;
 use camoufox_core::config::WINDOW_DIM_KEYS;
 use camoufox_core::os::SupportedOs;
 use camoufox_pkgman::DefaultAddon;
+use fs2::FileExt;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use tempfile::TempDir;
 use zip::ZipArchive;
 
 const REQUIRED_RUNTIME_FILES: &[&str] = &[
@@ -43,6 +45,8 @@ const CAMOUFOX_RUST_REVISION: &str = "933ae2e8ba7a00e254b4d4075eb0e85a527289fc";
 const EXTRACTION_LOCK_WAIT: Duration = Duration::from_secs(120);
 const EXTRACTION_LOCK_STALE: Duration = Duration::from_secs(10 * 60);
 const RUNTIME_IO_BUFFER_SIZE: usize = 1024 * 1024;
+const PROFILE_LEASE_FILE: &str = "profile.mcp.lock";
+const FIREFOX_PROFILE_LOCKS: &[&str] = &["lock", ".parentlock", "parent.lock"];
 
 #[derive(Debug)]
 pub(crate) struct BrowserRuntime {
@@ -920,8 +924,113 @@ fn replace_runtime_directory(root: &Path, temporary: &Path) -> Result<(), Browse
     Ok(())
 }
 
-pub(crate) fn browser_profile_dir() -> PathBuf {
-    code_home().join("browser/profile")
+#[derive(Debug)]
+pub(crate) struct BrowserProfileLease {
+    path: PathBuf,
+    _shared_lock: Option<fs::File>,
+    _isolated_dir: Option<TempDir>,
+}
+
+impl BrowserProfileLease {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[cfg(test)]
+    fn is_isolated(&self) -> bool {
+        self._isolated_dir.is_some()
+    }
+}
+
+pub(crate) fn acquire_browser_profile() -> Result<BrowserProfileLease, BrowserRuntimeError> {
+    acquire_browser_profile_at(&code_home().join("browser"))
+}
+
+fn acquire_browser_profile_at(
+    browser_root: &Path,
+) -> Result<BrowserProfileLease, BrowserRuntimeError> {
+    fs::create_dir_all(browser_root).map_err(|error| {
+        BrowserRuntimeError::new(format!(
+            "could not create browser data directory {}: {error}",
+            browser_root.display()
+        ))
+    })?;
+
+    let shared_profile = browser_root.join("profile");
+    let lock_path = browser_root.join(PROFILE_LEASE_FILE);
+    let lock_file = match fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!(
+                "rustwright_profile_lease_warning path={} error={error}",
+                lock_path.display()
+            );
+            return isolated_browser_profile(browser_root);
+        }
+    };
+
+    match lock_file.try_lock_exclusive() {
+        Ok(()) if !firefox_profile_has_lock(&shared_profile) => {
+            fs::create_dir_all(&shared_profile).map_err(|error| {
+                BrowserRuntimeError::new(format!(
+                    "could not create browser profile {}: {error}",
+                    shared_profile.display()
+                ))
+            })?;
+            Ok(BrowserProfileLease {
+                path: shared_profile,
+                _shared_lock: Some(lock_file),
+                _isolated_dir: None,
+            })
+        }
+        Ok(()) => {
+            let _ = FileExt::unlock(&lock_file);
+            isolated_browser_profile(browser_root)
+        }
+        Err(error) => {
+            eprintln!(
+                "rustwright_profile_lease_warning path={} error={error}",
+                lock_path.display()
+            );
+            isolated_browser_profile(browser_root)
+        }
+    }
+}
+
+fn firefox_profile_has_lock(profile: &Path) -> bool {
+    FIREFOX_PROFILE_LOCKS
+        .iter()
+        .any(|name| profile.join(name).symlink_metadata().is_ok())
+}
+
+fn isolated_browser_profile(
+    browser_root: &Path,
+) -> Result<BrowserProfileLease, BrowserRuntimeError> {
+    let isolated_dir = tempfile::Builder::new()
+        .prefix("profile-isolated-")
+        .tempdir_in(browser_root)
+        .map_err(|error| {
+            BrowserRuntimeError::new(format!(
+                "could not create isolated browser profile in {}: {error}",
+                browser_root.display()
+            ))
+        })?;
+    let path = isolated_dir.path().to_path_buf();
+    eprintln!(
+        "rustwright_profile_isolated shared_profile_busy=true path={}",
+        path.display()
+    );
+    Ok(BrowserProfileLease {
+        path,
+        _shared_lock: None,
+        _isolated_dir: Some(isolated_dir),
+    })
 }
 
 fn code_home() -> PathBuf {
@@ -1082,9 +1191,45 @@ mod tests {
     use camoufox_pkgman::DefaultAddon;
 
     use super::{
-        BrowserRuntime, RuntimeFile, RuntimeFileKind, base_launch_options, extract_runtime_file,
-        resizable_camoufox_environment, resizable_prepared_launch, validate_screenshot,
+        BrowserRuntime, RuntimeFile, RuntimeFileKind, acquire_browser_profile_at,
+        base_launch_options, extract_runtime_file, resizable_camoufox_environment,
+        resizable_prepared_launch, validate_screenshot,
     };
+
+    #[test]
+    fn concurrent_browser_clients_receive_distinct_profiles() {
+        let root = tempdir().unwrap();
+
+        let shared = acquire_browser_profile_at(root.path()).unwrap();
+        assert_eq!(shared.path(), root.path().join("profile"));
+        assert!(!shared.is_isolated());
+
+        let isolated = acquire_browser_profile_at(root.path()).unwrap();
+        let isolated_path = isolated.path().to_path_buf();
+        assert_ne!(isolated.path(), shared.path());
+        assert!(isolated.is_isolated());
+        assert!(isolated_path.is_dir());
+
+        drop(isolated);
+        assert!(!isolated_path.exists());
+
+        drop(shared);
+        let next = acquire_browser_profile_at(root.path()).unwrap();
+        assert_eq!(next.path(), root.path().join("profile"));
+        assert!(!next.is_isolated());
+    }
+
+    #[test]
+    fn legacy_firefox_profile_lock_forces_an_isolated_profile() {
+        let root = tempdir().unwrap();
+        let shared_profile = root.path().join("profile");
+        fs::create_dir_all(&shared_profile).unwrap();
+        fs::write(shared_profile.join("lock"), b"legacy owner").unwrap();
+
+        let lease = acquire_browser_profile_at(root.path()).unwrap();
+        assert_ne!(lease.path(), shared_profile);
+        assert!(lease.is_isolated());
+    }
 
     #[test]
     fn runtime_tree_digest_matches_the_packager_contract() {
