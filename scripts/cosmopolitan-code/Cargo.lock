@@ -2322,6 +2322,7 @@ dependencies = [
  "camoufox-core",
  "camoufox-juggler",
  "camoufox-pkgman",
+ "fs2",
  "image 0.25.8",
  "rmcp 2.2.0",
  "rustwright",
