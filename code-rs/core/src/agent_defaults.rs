@@ -744,8 +744,8 @@ mod tests {
         let mid = agent_model_spec("gpt-5.1").expect("mid alias present");
         assert_eq!(mid.slug, "code-gpt-5.4");
 
-        let mid_exact = agent_model_spec("code-gpt-5.2").expect("exact model binding present");
-        assert_eq!(mid_exact.slug, "code-gpt-5.2");
+        let mid_upgrade = agent_model_spec("code-gpt-5.2").expect("upgrade alias present");
+        assert_eq!(mid_upgrade.slug, "code-gpt-5.4");
     }
 
     #[test]
@@ -804,13 +804,22 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_agent_specs_include_gpt_6_astra() {
-        let spec = agent_model_spec("gpt-6-astra").expect("GPT-6-Astra spec should be present");
+    fn dynamic_agent_specs_include_current_gpt_6_models() {
+        for model in [
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+        ] {
+            let spec = agent_model_spec(model)
+                .unwrap_or_else(|| panic!("dynamic agent spec should exist for {model}"));
 
-        assert_eq!(spec.slug, "code-gpt-6-astra");
-        assert_eq!(spec.cli, "coder");
-        assert_eq!(spec.model_args, &["--model", "gpt-6-astra"]);
-        assert!(!spec.enabled_by_default);
+            assert_eq!(spec.slug, format!("code-{model}"));
+            assert_eq!(spec.cli, "coder");
+            assert_eq!(spec.model_args, &["--model", model]);
+            assert!(!spec.enabled_by_default);
+        }
     }
 
     #[test]
@@ -829,15 +838,15 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_agent_specs_skip_older_manifest_models() {
+    fn removed_manifest_models_keep_static_upgrade_aliases() {
         let gpt_5_2 = agent_model_spec("code-gpt-5.2")
-            .expect("every listed manifest model should have its own agent binding");
-        assert_eq!(gpt_5_2.model_args, &["--model", "gpt-5.2"]);
-        assert!(!gpt_5_2.enabled_by_default);
+            .expect("retired model alias should remain available");
+        assert_eq!(gpt_5_2.slug, "code-gpt-5.4");
+        assert_eq!(gpt_5_2.model_args, &["--model", "gpt-5.4"]);
         assert!(
             agent_model_specs()
                 .iter()
-                .any(|spec| spec.slug == "code-gpt-5.2")
+                .all(|spec| spec.slug != "code-gpt-5.2")
         );
     }
 
@@ -846,7 +855,7 @@ mod tests {
         let configs = default_agent_configs();
         let generated = configs
             .iter()
-            .find(|config| config.name == "code-gpt-5.2")
+            .find(|config| config.name == "code-gpt-6.1-sol")
             .expect("generated model agent should be configurable");
         assert!(!generated.enabled);
         assert_eq!(configs.len(), agent_model_specs().len());

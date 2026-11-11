@@ -4,19 +4,24 @@
 /// favorites or pinned models above this baseline without changing view code.
 const MODEL_PICKER_RANKS: &[(&str, u16)] = &[
     ("openrouter/free-max", 0),
-    ("gpt-5.6-sol", 1),
-    ("gpt-5.6-terra", 2),
-    ("gpt-5.6-luna", 3),
-    ("gpt-5.5", 4),
-    ("gpt-5.4", 5),
-    ("gpt-5.3-codex", 6),
-    ("gpt-5.3-codex-spark", 7),
-    ("gpt-5.2-codex", 8),
-    ("gpt-5.2", 9),
-    ("gpt-5.1-codex-max", 10),
-    ("gpt-5.1-codex", 11),
-    ("gpt-5.1-codex-mini", 12),
-    ("gpt-5.1", 13),
+    ("gpt-6.1-sol", 1),
+    ("gpt-6-astra", 2),
+    ("gpt-6-sol", 3),
+    ("gpt-6-luna", 4),
+    ("gpt-5.6-sol", 5),
+    ("gpt-6.1-terra", 6),
+    ("gpt-5.6-terra", 7),
+    ("gpt-5.6-luna", 8),
+    ("gpt-5.5", 9),
+    ("gpt-5.4", 10),
+    ("gpt-5.3-codex", 11),
+    ("gpt-5.3-codex-spark", 12),
+    ("gpt-5.2-codex", 13),
+    ("gpt-5.2", 14),
+    ("gpt-5.1-codex-max", 15),
+    ("gpt-5.1-codex", 16),
+    ("gpt-5.1-codex-mini", 17),
+    ("gpt-5.1", 18),
 ];
 
 pub fn picker_rank_for_model(model: &str) -> u16 {
@@ -36,13 +41,26 @@ mod tests {
     }
 
     #[test]
-    fn gpt_5_6_variants_lead_the_picker_in_variant_order() {
-        let sol = picker_rank_for_model("gpt-5.6-sol");
-        let terra = picker_rank_for_model("gpt-5.6-terra");
-        let luna = picker_rank_for_model("gpt-5.6-luna");
+    fn current_openai_models_follow_catalog_priority() {
+        let models = [
+            "gpt-6.1-sol",
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-sol",
+            "gpt-6.1-terra",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+        ];
 
-        assert!(sol < terra);
-        assert!(terra < luna);
-        assert!(luna < picker_rank_for_model("gpt-5.5"));
+        for pair in models.windows(2) {
+            assert!(
+                picker_rank_for_model(pair[0]) < picker_rank_for_model(pair[1]),
+                "{} should rank before {}",
+                pair[0],
+                pair[1]
+            );
+        }
     }
 }

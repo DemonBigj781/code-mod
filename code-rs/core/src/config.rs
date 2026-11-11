@@ -152,9 +152,9 @@ pub(crate) use crate::config_constraint::ConstraintError;
 pub(crate) use defaults::merge_with_default_agents;
 pub(crate) use validation::upgrade_legacy_model_slugs;
 
-pub(crate) const OPENAI_DEFAULT_MODEL: &str = "gpt-5.4";
-const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5.4";
-pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5.4";
+pub(crate) const OPENAI_DEFAULT_MODEL: &str = "gpt-6.1-sol";
+const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-6.1-sol";
+pub const CHATGPT_DEFAULT_MODEL: &str = "gpt-6.1-sol";
 pub(crate) const DEFAULT_SUBAGENT_MAX_DEPTH: i32 = 1;
 
 /// Maximum number of bytes of the documentation that will be embedded. Larger
@@ -2367,7 +2367,7 @@ impl Config {
             .unwrap_or(false);
 
         let default_model_slug = if using_chatgpt_auth {
-            GPT_5_CODEX_MEDIUM_MODEL
+            CHATGPT_DEFAULT_MODEL
         } else {
             OPENAI_DEFAULT_MODEL
         };
@@ -2637,7 +2637,7 @@ impl Config {
             .unwrap_or_else(|| {
                 let mut defaults = AutoDriveSettings::default();
                 if using_chatgpt_auth {
-                    GPT_5_CODEX_MEDIUM_MODEL.clone_into(&mut defaults.model);
+                    CHATGPT_DEFAULT_MODEL.clone_into(&mut defaults.model);
                     defaults.model_reasoning_effort = ReasoningEffort::XHigh;
                 }
                 defaults

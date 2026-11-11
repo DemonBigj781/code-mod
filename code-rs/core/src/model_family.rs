@@ -56,7 +56,6 @@ const CONTEXT_WINDOW_128K: u64 = 128_000;
 const CONTEXT_WINDOW_96K: u64 = 96_000;
 const CONTEXT_WINDOW_16K: u64 = 16_385;
 const CONTEXT_WINDOW_1M: u64 = 1_047_576;
-const GPT_6_EXTENDED_CONTEXT_WINDOW: u64 = 872_000;
 const MAX_OUTPUT_DEFAULT: u64 = 128_000;
 
 static UPSTREAM_MODELS: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
@@ -383,8 +382,21 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             context_window: Some(CONTEXT_WINDOW_16K),
             max_output_tokens: Some(4_096))
     } else if slug.starts_with("gpt-6") {
+        let family = if slug.starts_with("gpt-6.1-sol") {
+            "gpt-6.1-sol"
+        } else if slug.starts_with("gpt-6.1-terra") {
+            "gpt-6.1-terra"
+        } else if slug.starts_with("gpt-6-astra") {
+            "gpt-6-astra"
+        } else if slug.starts_with("gpt-6-sol") {
+            "gpt-6-sol"
+        } else if slug.starts_with("gpt-6-luna") {
+            "gpt-6-luna"
+        } else {
+            "gpt-6"
+        };
         model_family!(
-            slug, "gpt-6-astra",
+            slug, family,
             supports_reasoning_summaries: true,
             base_instructions: BASE_INSTRUCTIONS.to_owned(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
@@ -646,24 +658,29 @@ fn model_capability_slug(model: &str) -> &str {
 
 pub fn supports_service_tier(model: &str) -> bool {
     let normalized = model_capability_slug(model);
-    normalized.eq_ignore_ascii_case("gpt-6-astra")
-        || normalized.eq_ignore_ascii_case("gpt-5.5")
+    UPSTREAM_MODELS
+        .iter()
+        .find(|info| info.slug.eq_ignore_ascii_case(normalized))
+        .is_some_and(|info| !info.additional_speed_tiers.is_empty())
         || normalized.eq_ignore_ascii_case("gpt-5.4")
 }
 
 fn extended_context_window(model: &str) -> Option<u64> {
-    match model_capability_slug(model) {
-        model if model.eq_ignore_ascii_case("gpt-6-astra") => {
-            Some(GPT_6_EXTENDED_CONTEXT_WINDOW)
-        }
-        model
-            if model.eq_ignore_ascii_case("gpt-5.5")
-                || model.eq_ignore_ascii_case("gpt-5.4") =>
-        {
-            Some(EXTENDED_CONTEXT_WINDOW_1M)
-        }
-        _ => None,
+    let normalized = model_capability_slug(model);
+    if normalized.eq_ignore_ascii_case("gpt-5.4") {
+        return Some(EXTENDED_CONTEXT_WINDOW_1M);
     }
+
+    UPSTREAM_MODELS
+        .iter()
+        .find(|info| info.slug.eq_ignore_ascii_case(normalized))
+        .and_then(|info| {
+            let context_window = info.context_window?;
+            let max_context_window = info.max_context_window?;
+            (max_context_window > context_window)
+                .then(|| u64::try_from(max_context_window).ok())
+                .flatten()
+        })
 }
 
 pub fn supports_extended_context(model: &str) -> bool {
@@ -761,9 +778,24 @@ mod tests {
     }
 
     #[test]
-    fn service_tier_is_supported_for_gpt_5_4_and_gpt_5_5_variants() {
-        assert!(supports_service_tier("gpt-6-astra"));
-        assert!(supports_service_tier("openai/gpt-6-astra"));
+    fn service_tier_is_supported_for_current_catalog_models() {
+        for model in [
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+        ] {
+            assert!(supports_service_tier(model), "service tier for {model}");
+            assert!(
+                supports_service_tier(&format!("openai/{model}")),
+                "namespaced service tier for {model}"
+            );
+        }
         assert!(supports_service_tier("gpt-5.5"));
         assert!(supports_service_tier("code-gpt-5.5"));
         assert!(supports_service_tier("test-gpt-5.5"));
@@ -775,9 +807,20 @@ mod tests {
     }
 
     #[test]
-    fn extended_context_matches_service_tier_support() {
-        assert!(supports_extended_context("gpt-6-astra"));
-        assert!(supports_extended_context("gpt-5.5"));
+    fn extended_context_uses_catalog_maximums() {
+        for model in [
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ] {
+            assert!(supports_extended_context(model), "extended context for {model}");
+        }
+        assert!(!supports_extended_context("gpt-5.5"));
         assert!(supports_extended_context("gpt-5.4"));
         assert!(!supports_extended_context("gpt-5.4-mini"));
     }
@@ -799,6 +842,18 @@ mod tests {
                 &family,
             )
             .0,
+            Some(872_000)
+        );
+    }
+
+    #[test]
+    fn gpt_6_1_terra_uses_catalog_context_windows() {
+        let family = find_family_for_model("gpt-6.1-terra").expect("known upstream model");
+
+        assert_eq!(family.family, "gpt-6.1-terra");
+        assert_eq!(family.context_window, Some(500_000));
+        assert_eq!(
+            max_supported_context_window("gpt-6.1-terra", &family),
             Some(872_000)
         );
     }
@@ -826,11 +881,11 @@ mod tests {
 
     #[test]
     fn namespaced_gpt_6_uses_catalog_family_defaults() {
-        let family = find_family_for_model("openai/gpt-6-astra")
+        let family = find_family_for_model("openai/gpt-6.1-sol")
             .expect("known namespaced upstream model");
 
-        assert_eq!(family.slug, "openai/gpt-6-astra");
-        assert_eq!(family.family, "gpt-6-astra");
+        assert_eq!(family.slug, "openai/gpt-6.1-sol");
+        assert_eq!(family.family, "gpt-6.1-sol");
         assert_eq!(family.default_reasoning_effort, Some(ReasoningEffort::Low));
     }
 

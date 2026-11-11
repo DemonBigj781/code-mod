@@ -280,6 +280,9 @@ pub struct ModelInfo {
     pub supports_image_detail_original: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<i64>,
+    /// Maximum context window accepted by the backend when extended context is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_context_window: Option<i64>,
     /// Token threshold for automatic compaction. When omitted, core derives it
     /// from `context_window` (90%). When provided, core clamps it to 90% of the
     /// context window when available.
@@ -567,6 +570,7 @@ mod tests {
             supports_parallel_tool_calls: false,
             supports_image_detail_original: false,
             context_window: None,
+            max_context_window: None,
             auto_compact_token_limit: None,
             effective_context_window_percent: 95,
             experimental_supported_tools: vec![],
@@ -601,6 +605,24 @@ mod tests {
         model.auto_compact_token_limit = Some(250_000);
 
         assert_eq!(model.auto_compact_token_limit(), Some(180_000));
+    }
+
+    #[test]
+    fn model_info_deserializes_max_context_window() {
+        let model: ModelInfo = serde_json::from_str(include_str!(
+            "../../../codex-rs/models-manager/models.json"
+        ))
+        .map(|response: ModelsResponse| {
+            response
+                .models
+                .into_iter()
+                .find(|model| model.slug == "gpt-6.1-terra")
+                .expect("GPT-6.1 Terra in embedded catalog")
+        })
+        .expect("embedded models catalog parses");
+
+        assert_eq!(model.context_window, Some(500_000));
+        assert_eq!(model.max_context_window, Some(872_000));
     }
 
     #[test]

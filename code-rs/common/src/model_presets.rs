@@ -50,7 +50,7 @@ const ALL_TEXT_VERBOSITY: &[TextVerbosityConfig] = &[
     TextVerbosityConfig::High,
 ];
 
-fn gpt_5_6_reasoning_efforts() -> Vec<ReasoningEffortPreset> {
+fn reasoning_efforts_through_max() -> Vec<ReasoningEffortPreset> {
     vec![
         ReasoningEffortPreset {
             effort: ReasoningEffort::Low,
@@ -75,8 +75,8 @@ fn gpt_5_6_reasoning_efforts() -> Vec<ReasoningEffortPreset> {
     ]
 }
 
-fn gpt_6_reasoning_efforts() -> Vec<ReasoningEffortPreset> {
-    let mut efforts = gpt_5_6_reasoning_efforts();
+fn reasoning_efforts_with_ultra() -> Vec<ReasoningEffortPreset> {
+    let mut efforts = reasoning_efforts_through_max();
     efforts.push(ReasoningEffortPreset {
         effort: ReasoningEffort::Ultra,
         description: "Maximum reasoning with automatic task delegation".to_owned(),
@@ -114,12 +114,51 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     vec![
         openrouter_free_profile_preset(),
         ModelPreset {
+            id: "gpt-6.1-sol".to_owned(),
+            model: "gpt-6.1-sol".to_owned(),
+            display_name: "GPT-6.1-Sol".to_owned(),
+            description: "Latest workhorse model for coding and everyday work.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Low,
+            supported_reasoning_efforts: reasoning_efforts_with_ultra(),
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: true,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
+        ModelPreset {
             id: "gpt-6-astra".to_owned(),
             model: "gpt-6-astra".to_owned(),
             display_name: "GPT-6-Astra".to_owned(),
-            description: "Our most capable model for complex, demanding work.".to_owned(),
+            description: "Frontier intelligence for the most demanding work.".to_owned(),
             default_reasoning_effort: ReasoningEffort::Low,
-            supported_reasoning_efforts: gpt_6_reasoning_efforts(),
+            supported_reasoning_efforts: reasoning_efforts_with_ultra(),
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-6-sol".to_owned(),
+            model: "gpt-6-sol".to_owned(),
+            display_name: "GPT-6-Sol".to_owned(),
+            description: "Previous generation workhorse model.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: reasoning_efforts_with_ultra(),
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-6-luna".to_owned(),
+            model: "gpt-6-luna".to_owned(),
+            display_name: "GPT-6-Luna".to_owned(),
+            description: "Fast and affordable model for easier tasks.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: reasoning_efforts_through_max(),
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
@@ -129,10 +168,23 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
         ModelPreset {
             id: "gpt-5.6-sol".to_owned(),
             model: "gpt-5.6-sol".to_owned(),
-            display_name: "GPT-5.6 Sol".to_owned(),
-            description: "GPT-5.6 Sol model.".to_owned(),
-            default_reasoning_effort: ReasoningEffort::Medium,
-            supported_reasoning_efforts: gpt_5_6_reasoning_efforts(),
+            display_name: "GPT-5.6-Sol".to_owned(),
+            description: "Older generation workhorse model.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Low,
+            supported_reasoning_efforts: reasoning_efforts_with_ultra(),
+            supported_text_verbosity: ALL_TEXT_VERBOSITY,
+            is_default: false,
+            upgrade: None,
+            pro_only: false,
+            show_in_picker: true,
+        },
+        ModelPreset {
+            id: "gpt-6.1-terra".to_owned(),
+            model: "gpt-6.1-terra".to_owned(),
+            display_name: "GPT-6.1 Terra".to_owned(),
+            description: "GPT-6.1 Terra Codex model.".to_owned(),
+            default_reasoning_effort: ReasoningEffort::Low,
+            supported_reasoning_efforts: reasoning_efforts_with_ultra(),
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
@@ -142,10 +194,10 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
         ModelPreset {
             id: "gpt-5.6-terra".to_owned(),
             model: "gpt-5.6-terra".to_owned(),
-            display_name: "GPT-5.6 Terra".to_owned(),
-            description: "GPT-5.6 Terra model.".to_owned(),
+            display_name: "GPT-5.6-Terra".to_owned(),
+            description: "Older balanced model for straightforward work.".to_owned(),
             default_reasoning_effort: ReasoningEffort::Medium,
-            supported_reasoning_efforts: gpt_5_6_reasoning_efforts(),
+            supported_reasoning_efforts: reasoning_efforts_with_ultra(),
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
@@ -155,10 +207,10 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
         ModelPreset {
             id: "gpt-5.6-luna".to_owned(),
             model: "gpt-5.6-luna".to_owned(),
-            display_name: "GPT-5.6 Luna".to_owned(),
-            description: "GPT-5.6 Luna model.".to_owned(),
+            display_name: "GPT-5.6-Luna".to_owned(),
+            description: "Older fast and efficient model.".to_owned(),
             default_reasoning_effort: ReasoningEffort::Medium,
-            supported_reasoning_efforts: gpt_5_6_reasoning_efforts(),
+            supported_reasoning_efforts: reasoning_efforts_through_max(),
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
             is_default: false,
             upgrade: None,
@@ -341,7 +393,7 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
                 },
             ],
             supported_text_verbosity: &[TextVerbosityConfig::Medium],
-            is_default: true,
+            is_default: false,
             upgrade: Some(ModelUpgrade {
                 id: "gpt-5.3-codex".to_owned(),
                 reasoning_effort_mapping: None,
@@ -817,11 +869,15 @@ mod tests {
         let ids: Vec<&str> = presets.iter().map(|preset| preset.id.as_str()).collect();
 
         assert_eq!(
-            &ids[..6],
+            &ids[..10],
             &[
                 "openrouter/free-max",
+                "gpt-6.1-sol",
                 "gpt-6-astra",
+                "gpt-6-sol",
+                "gpt-6-luna",
                 "gpt-5.6-sol",
+                "gpt-6.1-terra",
                 "gpt-5.6-terra",
                 "gpt-5.6-luna",
                 "gpt-5.5",
@@ -830,34 +886,41 @@ mod tests {
     }
 
     #[test]
-    fn gpt_6_astra_includes_all_reasoning_modes() {
+    fn frontier_gpt_6_models_include_all_reasoning_modes() {
         let presets = builtin_model_presets(Some(AuthMode::Chatgpt), true);
-        let preset = presets
-            .iter()
-            .find(|preset| preset.id == "gpt-6-astra")
-            .expect("missing GPT-6-Astra preset");
-        let efforts: Vec<_> = preset
-            .supported_reasoning_efforts
-            .iter()
-            .map(|preset| preset.effort)
-            .collect();
+        let expected_efforts = [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
+            ReasoningEffort::Ultra,
+        ];
 
-        assert_eq!(preset.default_reasoning_effort, ReasoningEffort::Low);
-        assert_eq!(
-            efforts,
-            [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-                ReasoningEffort::XHigh,
-                ReasoningEffort::Max,
-                ReasoningEffort::Ultra,
-            ]
-        );
+        for model in [
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+        ] {
+            let preset = presets
+                .iter()
+                .find(|preset| preset.id == model)
+                .unwrap_or_else(|| panic!("missing preset for {model}"));
+            let efforts: Vec<_> = preset
+                .supported_reasoning_efforts
+                .iter()
+                .map(|preset| preset.effort)
+                .collect();
+
+            assert_eq!(efforts, expected_efforts, "reasoning modes for {model}");
+        }
     }
 
     #[test]
-    fn gpt_5_6_variants_include_all_reasoning_modes() {
+    fn luna_variants_stop_at_max_reasoning() {
         let presets = builtin_model_presets(Some(AuthMode::Chatgpt), true);
         let expected_efforts = [
             ReasoningEffort::Low,
@@ -867,7 +930,7 @@ mod tests {
             ReasoningEffort::Max,
         ];
 
-        for model in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+        for model in ["gpt-6-luna", "gpt-5.6-luna"] {
             let preset = presets
                 .iter()
                 .find(|preset| preset.id == model)

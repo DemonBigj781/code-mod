@@ -323,15 +323,31 @@ mod tests {
     }
 
     #[test]
-    fn gpt_6_uses_its_catalog_minimum_client_version() {
-        assert_eq!(
-            MODEL_MINIMUM_CLIENT_VERSIONS.get("gpt-6-astra"),
-            Some(&"0.153.0".to_string())
-        );
-        assert_eq!(
-            wire_compatible_version_for_model("gpt-6-astra"),
-            "0.153.4"
-        );
+    fn gpt_6_models_use_their_catalog_minimum_client_versions() {
+        for model in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra"] {
+            assert_eq!(
+                MODEL_MINIMUM_CLIENT_VERSIONS.get(model),
+                Some(&"0.153.0".to_string()),
+                "minimum client version for {model}"
+            );
+            assert_eq!(
+                wire_compatible_version_for_model(model),
+                "0.153.4",
+                "wire version for {model}"
+            );
+        }
+        for model in ["gpt-6-sol", "gpt-6-luna"] {
+            assert_eq!(
+                MODEL_MINIMUM_CLIENT_VERSIONS.get(model),
+                Some(&"0.155.0".to_string()),
+                "minimum client version for {model}"
+            );
+            assert_eq!(
+                wire_compatible_version_for_model(model),
+                "0.155.0",
+                "wire version for {model}"
+            );
+        }
     }
 
     #[test]
