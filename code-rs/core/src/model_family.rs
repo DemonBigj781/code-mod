@@ -667,7 +667,9 @@ pub fn supports_service_tier(model: &str) -> bool {
 
 fn extended_context_window(model: &str) -> Option<u64> {
     let normalized = model_capability_slug(model);
-    if normalized.eq_ignore_ascii_case("gpt-5.4") {
+    if normalized.eq_ignore_ascii_case("gpt-5.4")
+        || normalized.eq_ignore_ascii_case("gpt-5.5")
+    {
         return Some(EXTENDED_CONTEXT_WINDOW_1M);
     }
 
@@ -820,7 +822,7 @@ mod tests {
         ] {
             assert!(supports_extended_context(model), "extended context for {model}");
         }
-        assert!(!supports_extended_context("gpt-5.5"));
+        assert!(supports_extended_context("gpt-5.5"));
         assert!(supports_extended_context("gpt-5.4"));
         assert!(!supports_extended_context("gpt-5.4-mini"));
     }
