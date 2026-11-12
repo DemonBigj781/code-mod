@@ -2,7 +2,27 @@ name: Compile Only
 
 on:
   workflow_dispatch:
+    inputs:
+      mod_version:
+        description: Code-mod version to embed (X.Y.Zb, newer than 0.6.196)
+        required: false
+        type: string
+      build_attempt_count:
+        description: Positive attempt count to expose in prerelease version output
+        required: false
+        type: string
   workflow_call:
+    inputs:
+      mod_version:
+        description: Code-mod version to embed (X.Y.Zb, newer than 0.6.196)
+        required: false
+        default: ""
+        type: string
+      build_attempt_count:
+        description: Positive attempt count to expose in prerelease version output
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: compile-only-${{ github.ref }}
@@ -20,6 +40,9 @@ jobs:
       image: ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b
       options: --privileged
     timeout-minutes: 180
+    env:
+      CODE_MOD_VERSION: ${{ inputs.mod_version || '' }}
+      CODE_BUILD_ATTEMPT_COUNT: ${{ inputs.build_attempt_count || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Trust container worktrees
@@ -62,5 +85,6 @@ jobs:
           path: |
             o/cosmopolitan-code/code.com
             o/cosmopolitan-code/code.com.json
+            o/cosmopolitan-code/runtime-smoke.com
           if-no-files-found: error
           retention-days: 14

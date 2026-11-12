@@ -93,8 +93,13 @@ class ForkRuntimeTests(unittest.TestCase):
 
     def test_fork_is_built_before_code_compilation(self):
         script = (Path(__file__).resolve().parents[2] / "build-cosmopolitan-code.sh").read_text()
+        tests = (Path(__file__).resolve().parents[2] / "test-cosmopolitan-code.sh").read_text()
+        workspace = (Path(__file__).resolve().parents[1] / "prepare-code-workspace.sh").read_text()
         contract = (Path(__file__).resolve().parents[1] / "artifact_contract.py").read_text()
-        self.assertLess(script.index('. "$support_dir/prepare-runtime.sh"'), script.index('bash "$run_script" cargo'))
+        self.assertIn('. "$support_dir/prepare-code-workspace.sh"', script)
+        self.assertIn('. "$support_dir/prepare-runtime.sh"', workspace)
+        self.assertIn('bash "$run_script" cargo --config "$patch_config" test', tests)
+        self.assertNotIn('cargo --config "$patch_config" test', script)
         self.assertIn("package-browser-runtime.py", script)
         self.assertIn('cat "$browser_runtime_archive" >>"$artifact"', script)
         self.assertLess(script.index('"$sdk_bin/apelink"'), script.index('cat "$browser_runtime_archive"'))

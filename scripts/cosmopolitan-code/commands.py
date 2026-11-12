@@ -24,10 +24,15 @@ from artifact_contract import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = "cosmopolitan-code-ape.yml"
-ARTIFACT = "cosmopolitan-code-ape"
+WORKFLOW = "complete-artifact-creation.yml"
+ARTIFACT = "code.com"
 ProcessResult = TypeVar("ProcessResult")
 DEFAULT_BRANCH = "Main"
+REQUIRED_SMOKE_JOBS = (
+    "Run APE on Linux",
+    "Run same APE in Termux Bionic userland",
+    "Run same APE on Windows",
+)
 ORIGINAL_CODE_MOD_VERSION = (0, 6, 196)
 MOD_VERSION_RE = re.compile(
     r"(?P<major>0|[1-9][0-9]*)\."
@@ -187,41 +192,68 @@ def workflow_runs(commit: str) -> list[dict]:
     ], capture=True))
 
 
+def workflow_run(run_id: int) -> dict:
+    return json.loads(command([
+        "gh", "run", "view", str(run_id), "--json",
+        "databaseId,headSha,status,conclusion,url,event,jobs",
+    ], capture=True))
+
+
+def job_name_matches(actual: str, expected: str) -> bool:
+    return actual == expected or actual.endswith(f" / {expected}")
+
+
 def require_cross_platform_build(
     commit: str,
     expected_artifact_sha256: str | None = None,
+    *,
+    validated_run_id: int | None = None,
 ) -> dict:
-    for run in workflow_runs(commit):
-        if run["headSha"] == commit and run["conclusion"] == "success":
-            jobs = json.loads(command(["gh", "run", "view", str(run["databaseId"]),
-                                       "--json", "jobs"], capture=True))["jobs"]
-            completed = {job["name"] for job in jobs if job["conclusion"] == "success"}
-            if {"Build APE on Linux", "Run same APE on Windows"} <= completed:
-                if expected_artifact_sha256 is None:
-                    return run
-                with tempfile.TemporaryDirectory(prefix="cosmopolitan-tested-") as temp:
-                    tested = Path(temp) / "tested"
-                    try:
-                        command([
-                            "gh", "run", "download", str(run["databaseId"]),
-                            "--name", ARTIFACT, "--dir", str(tested),
-                        ])
-                        tested_artifact, tested_manifest = artifact_files(tested)
-                        metadata = validate_artifact(
-                            tested_artifact,
-                            tested_manifest,
-                            expected_source_commit=commit,
-                        )
-                    except (ArtifactContractError, OSError, subprocess.CalledProcessError):
-                        continue
-                    if metadata["artifact_sha256"] == expected_artifact_sha256:
-                        return run
+    runs = [workflow_run(validated_run_id)] if validated_run_id is not None else workflow_runs(commit)
+    for listed_run in runs:
+        run = listed_run if "jobs" in listed_run else workflow_run(listed_run["databaseId"])
+        if run["headSha"] != commit:
+            continue
+        if validated_run_id is None and run["conclusion"] != "success":
+            continue
+        completed = {
+            job["name"]
+            for job in run["jobs"]
+            if job["conclusion"] == "success"
+        }
+        if not all(
+            any(job_name_matches(actual, required) for actual in completed)
+            for required in REQUIRED_SMOKE_JOBS
+        ):
+            continue
+        if expected_artifact_sha256 is None:
+            return run
+        with tempfile.TemporaryDirectory(prefix="cosmopolitan-tested-") as temp:
+            tested = Path(temp) / "tested"
+            try:
+                command([
+                    "gh", "run", "download", str(run["databaseId"]),
+                    "--name", ARTIFACT, "--dir", str(tested),
+                ])
+                tested_artifact, tested_manifest = artifact_files(tested)
+                metadata = validate_artifact(
+                    tested_artifact,
+                    tested_manifest,
+                    expected_source_commit=commit,
+                )
+            except (ArtifactContractError, OSError, subprocess.CalledProcessError):
+                continue
+            if metadata["artifact_sha256"] == expected_artifact_sha256:
+                return run
     if expected_artifact_sha256 is not None:
         raise ValueError(
-            "Publishing requires a successful Linux and Windows Actions run for "
+            "Publishing requires successful Linux, Termux, and Windows Actions jobs for "
             "these exact artifact bytes."
         )
-    raise ValueError("Publishing requires a successful APE Linux and Windows Actions run for this commit.")
+    raise ValueError(
+        "Publishing requires successful APE Linux, Termux, and Windows Actions jobs "
+        "for this commit."
+    )
 
 
 def build_action(
@@ -247,7 +279,14 @@ def build_action(
         raise ValueError(f"Refusing to overwrite artifact directory: {output}")
     workflow_args = ["gh", "workflow", "run", WORKFLOW, "--ref", DEFAULT_BRANCH]
     if mod_version is not None:
-        workflow_args.extend(["-f", f"mod_version={normalize_mod_version(mod_version)}"])
+        workflow_args.extend([
+            "-f",
+            f"tag={normalize_mod_version(mod_version)}",
+            "-f",
+            f"release_type={'prerelease' if build_attempt_count is not None else 'release'}",
+        ])
+    elif build_attempt_count is not None:
+        raise ValueError("Build attempt count requires an explicit mod version.")
     if build_attempt_count is not None:
         workflow_args.extend([
             "-f",
@@ -318,14 +357,25 @@ def publish(output: Path, commit: str, tag: str, *, prerelease: bool) -> None:
         raise ValueError("Prerelease artifacts must report their build attempt count.")
     if not prerelease and version["attempt"] is not None:
         raise ValueError("Stable release artifacts must not report a build attempt count.")
-    run = require_cross_platform_build(commit, manifest["artifact_sha256"])
+    validated_run_id_value = os.environ.get("COSMOPOLITAN_VALIDATED_RUN_ID", "").strip()
+    validated_run_id = None
+    if validated_run_id_value:
+        if not validated_run_id_value.isascii() or not validated_run_id_value.isdigit() \
+                or validated_run_id_value.startswith("0"):
+            raise ValueError("Validated Actions run ID must be a positive integer.")
+        validated_run_id = int(validated_run_id_value)
+    run = require_cross_platform_build(
+        commit,
+        manifest["artifact_sha256"],
+        validated_run_id=validated_run_id,
+    )
     with tempfile.TemporaryDirectory(prefix="cosmopolitan-release-") as temp:
         if prerelease:
             notes = Path(temp) / "notes.md"
             summary = command(["git", "log", "-1", "--format=%s"], capture=True)
             notes.write_text(
                 "One x86-64 Cosmopolitan APE executable (`code.com`) for Windows and Linux.\n\n"
-                f"Source: `{commit}`. Linux and Windows startup checks: {run['url']}\n\n"
+                f"Source: `{commit}`. Linux, Termux, and Windows startup checks: {run['url']}\n\n"
                 f"{summary}\n\n"
                 "The adjacent manifest records the source and SDK pins and executable SHA-256.\n"
                 "This experimental APE build supports the normal command execution paths. "
@@ -363,11 +413,14 @@ def parser() -> argparse.ArgumentParser:
     commands = result.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("build-auto", "Build through GitHub Actions for the exact committed revision."),
-        ("build-action", "Build on GitHub and test the same executable on Linux and Windows."),
+        ("build-action", "Build on GitHub and test the same executable on Linux, Termux, and Windows."),
         ("build-local", "Explain that local builds are disabled for this repository."),
         ("test", "Check the manifest, source commit, hash, and executable startup."),
         ("run", "Run the validated executable with CLI arguments."),
-        ("publish-prerelease", "Publish the artifact tested on Linux and Windows as a prerelease."),
+        (
+            "publish-prerelease",
+            "Publish the artifact tested on Linux, Termux, and Windows as a prerelease.",
+        ),
         ("publish-release", "Promote an existing matching prerelease to the latest stable release."),
     ):
         item = commands.add_parser(name, help=help_text)

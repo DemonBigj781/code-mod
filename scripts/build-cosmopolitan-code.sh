@@ -13,13 +13,8 @@ if [ -e "$output_dir" ]; then
     exit 1
 fi
 # shellcheck source-path=SCRIPTDIR
-# shellcheck source=cosmopolitan-code/prepare-runtime.sh
-. "$support_dir/prepare-runtime.sh"
-
-tmp_dir=$(mktemp -d "$repo_root/o/cosmopolitan-code-build.XXXXXX")
-trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
-workspace="$tmp_dir/source"
-mkdir -p "$workspace"
+# shellcheck source=cosmopolitan-code/prepare-code-workspace.sh
+. "$support_dir/prepare-code-workspace.sh"
 
 browser_runtime_source=${COSMOPOLITAN_BROWSER_RUNTIME_SOURCE:-"$repo_root/o/camoufox-runtime-prototype"}
 browser_runtime_archive=${COSMOPOLITAN_BROWSER_RUNTIME_ARCHIVE:-}
@@ -41,80 +36,9 @@ else
         "$support_dir/pins.json" "$browser_runtime_cache")
 fi
 
-source_snapshot_sha256=
-if [ "$source_mode" = working-tree ]; then
-    source_snapshot_sha256=$(python3 "$support_dir/snapshot_worktree.py" "$repo_root" "$workspace")
-else
-    git -C "$repo_root" archive --format=tar "$source_commit" \
-        code-rs codex-rs/models-manager/models.json announcement_tip.toml >"$tmp_dir/source.tar"
-    tar -xf "$tmp_dir/source.tar" -C "$workspace"
-fi
-
-patch --batch -d "$workspace/code-rs" -p1 \
-    <"$support_dir/overrides/cosmopolitan-musl.patch"
-cp "$support_dir/Cargo.lock" "$workspace/code-rs/Cargo.lock"
-
-patch_config="patch.crates-io.rama-tls-rustls.path=\"$workspace/code-rs/vendor/rama-tls-rustls-cosmo\""
-core_features=code-core/cosmopolitan-ape,code-core/browser-automation,code-core/managed-network-proxy
-tui_features="$core_features,code-tui/cosmopolitan-ape,code-tui/code-fork,code-tui/browser-automation,code-tui/managed-network-proxy"
 (
     cd "$workspace/code-rs"
     sh "$support_dir/check-tls-backends.sh" "$PWD"
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-keyring-store \
-        --features code-keyring-store/cosmopolitan-ape --release -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core \
-        --test conversation_identity --test session_history_native --test agent_tool_contract --test operator_tools \
-        --test session_background_isolation --test agent_completion_wake --no-default-features \
-        --features "$core_features" --release -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \
-        --no-default-features --features "$core_features" --release \
-        tab_isolation -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \
-        --no-default-features --features "$core_features" --release \
-        session_history_worker -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \
-        --no-default-features --features "$core_features" --release \
-        fallback_memory_watchdog -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \
-        --no-default-features --features "$core_features" --release \
-        ssh_registry -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \
-        --no-default-features --features "$core_features" --release \
-        operator_tool -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-session-history --lib \
-        --features code-session-history/cosmopolitan-ape --release -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
-        --no-default-features --features "$tui_features" --release \
-        tab_isolation -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
-        --no-default-features --features "$tui_features" --release \
-        ssh_ -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
-        --no-default-features --features "$tui_features" --release \
-        operator_tool -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
-        --no-default-features --features "$tui_features" --release \
-        agent_shortlist -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-tui --lib \
-        --no-default-features --features "$tui_features" --release \
-        settings -- --test-threads=1
-    bash "$run_script" cargo --config "$patch_config" test \
-        --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-core --lib \
-        --no-default-features --features "$core_features" --release \
-        agent_ -- --test-threads=1
     bash "$run_script" cargo --config "$patch_config" build \
         --manifest-path "$PWD/Cargo.toml" --locked -j"$build_jobs" -p code-cli --bin code \
         --no-default-features --features code-cli/cosmopolitan-ape --release

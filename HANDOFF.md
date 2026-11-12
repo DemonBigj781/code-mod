@@ -6,8 +6,7 @@
 > `code.com` artifact on 2026-11-04. Explicit project scopes, bounded Git
 > snapshots/reviews, native memories, and guarded image attachments are committed
 > to `Main`. Compilation and test evidence for the current revision is provided by
-> the `Cosmopolitan Code APE` and `Provider Integration Tests` GitHub Actions
-> workflows.
+> `Complete Artifact Creation` and the focused GitHub Actions workflows.
 
 ## Requested Outcome
 
@@ -35,12 +34,9 @@ product. The deliverable is Code's built-in browser tool.
   `/run/media/jack/5e90bafb-087a-4fbc-8e81-0a09dee62978/projects/AI_Project/code`
 - Branch: `Main`
 - Current revision: inspect `git rev-parse HEAD` and the corresponding
-  `Cosmopolitan Code APE` workflow run rather than relying on a copied SHA.
-- Current state: inspect `git status --short`; the unrelated pre-existing deletion
-  of `build-fast.zsh.backup` remains intentionally uncommitted.
+  `Complete Artifact Creation` workflow run rather than relying on a copied SHA.
+- Current state: inspect `git status --short` before changing files.
 - Nested repositories: none found by the handoff inventory.
-- `build-fast.zsh.backup` was already deleted before this work; do not restore or
-  otherwise alter it implicitly.
 - `o/servo-ape-probe` is unrelated retained work; do not modify or delete it.
 - Do not create a branch, push, or open a PR unless the operator explicitly requests
   it.
@@ -95,9 +91,12 @@ The canonical product path is:
 root makefile
   -> scripts/cosmopolitan-code/commands.py
   -> require a clean Main checkout matching origin/Main
-  -> dispatch .github/workflows/cosmopolitan-code-ape.yml
-  -> GitHub-hosted runner checks out the exact committed revision
-  -> scripts/build-cosmopolitan-code.sh
+  -> dispatch .github/workflows/complete-artifact-creation.yml
+  -> Check Only + Test Only
+       -> source/runtime/APE-feature contracts
+       -> identical runtime probe on Windows
+  -> Compile Only checks out the exact committed revision
+  -> scripts/build-cosmopolitan-code.sh (compile/package only)
   -> Rust/Cosmopolitan build
        -> Code Rust workspace
        -> native rustwright-mcp
@@ -106,7 +105,8 @@ root makefile
             -> embedded Mesa/LLVM software-rendering runtime
        -> embedded keyring and TUI Halfblocks rendering
   -> Cosmopolitan link/package
-  -> code.com + code.com.json
+   -> code.com + code.com.json + runtime-smoke.com
+   -> identical artifact smoke tests on Linux, Termux, and Windows
   -> first-run runtime extraction under CODE_HOME
   -> Camoufox child controlled through Juggler pipes
 ```
@@ -121,11 +121,10 @@ Important paths:
 | `code-rs/tui/` | Colored text-cell terminal image rendering. |
 | `code-rs/keyring-store/` | Embedded credentials and keyring migration. |
 | `scripts/cosmopolitan-code/` | Build, packaging, manifest, and runtime validators. |
-| `.github/workflows/cosmopolitan-code-ape.yml` | Clean-revision scope tests, APE build, and smoke workflow. |
-| `.github/workflows/test-only.yml` | Manual `Main`-only source and contract test helper without APE packaging. |
+| `.github/workflows/test-only.yml` | Manual or reusable `Main`-only source, runtime, APE-feature, and Windows runtime-probe test gate without final APE packaging. |
 | `.github/workflows/check-only.yml` | Manual `Main`-only product/test-target `cargo check` helper. |
-| `.github/workflows/compile-only.yml` | Manual `Main`-only APE compile/package helper that uploads the `code.com` artifact without running test gates. |
-| `.github/workflows/complete-artifact-creation.yml` | Reusable check/test/cross-platform artifact pipeline that stops before publishing; defaults to prerelease metadata and accepts `release` for stable metadata. |
+| `.github/workflows/compile-only.yml` | Manual or reusable `Main`-only APE compile/package helper that uploads `code.com`, its manifest, and `runtime-smoke.com` without repeating test commands. |
+| `.github/workflows/complete-artifact-creation.yml` | Reusable check/test/build pipeline that validates the exact artifact on Linux, Termux, and Windows, then stops before publishing. |
 | `.github/workflows/pre-release-only.yml` | Manual or reusable prerelease publisher for the exact validated `code.com` artifact. |
 | `.github/workflows/release-only.yml` | Manual or reusable stable promotion of an existing matching prerelease. |
 | `.github/workflows/code-comeplete-pipeline.yml` | Complete check/test/cross-platform build pipeline; prerelease is the default release type and `release` is the secondary switch. |
@@ -141,7 +140,7 @@ Stable builds print `codex version: X Mod version: Y`; prerelease builds append
 `build attempts: N`. The mod line begins at `0.6.197b`, which is newer than the
 original Code-mod `0.6.196` baseline and retains the required trailing `b` fork
 marker. Release tags must use the same `X.Y.Zb` value. Stable promotion rebuilds
-without the attempt count, verifies those exact bytes on Linux and Windows, then
+without the attempt count, verifies those exact bytes on Linux, Termux, and Windows, then
 replaces the prerelease assets before removing the prerelease marker.
 
 Linux compilation jobs run in the digest-pinned GHCR builder image published by
@@ -149,11 +148,11 @@ Linux compilation jobs run in the digest-pinned GHCR builder image published by
 and Rust toolchain, while the GitHub Actions-backed `sccache` layer reuses both Rust
 and C/C++ compilation outputs across clean hosted runners.
 
-The APE workflow uploads the packaged artifact before running downloaded-artifact
-smoke jobs. Linux and Windows therefore validate the same uploaded bytes, and a late
-embedded-browser failure cannot prevent retrieval of the build artifact and manifest.
-An x86-64 Termux Docker image also runs those uploaded bytes in the Termux Bionic
-userland. The container does not include Android runtime components, so this
+Complete Artifact Creation uploads the packaged artifact before running
+downloaded-artifact smoke jobs. Linux, Termux, and Windows therefore validate the
+same uploaded bytes, and a late embedded-browser failure cannot prevent retrieval
+of the build artifact and manifest. The Termux container does not include Android
+runtime components, so this
 portability smoke does not replace the separate native `target_os = "android"` build
 described under `code-rs/docs/`.
 
@@ -352,7 +351,7 @@ The completed implementation includes:
 - updated Camoufox tasks in
   `docs/changes/0002-code-feature-parity-roadmap.md`;
 - embedded-browser CI smoke coverage in
-  `.github/workflows/cosmopolitan-code-ape.yml`.
+  `.github/workflows/complete-artifact-creation.yml`.
 - persistent project registry and bounded repository scopes in
   `code-rs/core/src/project_registry.rs` and `code-rs/tui/src/chatwidget/`;
 - CommonMark blockquote rendering for generated memory summaries in
@@ -366,12 +365,13 @@ status intentionally did not change.
 ## Validation Commands
 
 - Dispatch the committed exact source: `make build`.
-- The `Test explicit project scope and memory Markdown` Actions job runs the
+- The Test Only Actions jobs run the
   registry, native Memories, bounded discovery, changed-path snapshot,
   Projects settings, root CLI project-selection, undo-scope, background-review,
-  alias, and generated-memory-Markdown regressions.
-- The remaining workflow jobs run packaging checks, Rustwright tests, the APE build,
-  Linux browser acceptance, and Windows runtime checks.
+  alias, generated-memory-Markdown, source-runtime, and APE-feature regressions.
+- Compile Only packages one artifact after those gates. The remaining workflow
+  jobs run Linux browser acceptance plus Termux and Windows runtime checks on
+  those exact uploaded bytes.
 - Local build and test targets intentionally refuse to run.
 
 ## Requirement Coverage

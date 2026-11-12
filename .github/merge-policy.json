@@ -28,6 +28,7 @@
     ".github/workflows/preview-build.yml",
     ".github/workflows/release.yml",
     ".github/workflows/rust-ci.yml",
-    ".github/workflows/rust-ci-full.yml"
+    ".github/workflows/rust-ci-full.yml",
+    ".github/workflows/cosmopolitan-code-ape.yml"
   ]
 }

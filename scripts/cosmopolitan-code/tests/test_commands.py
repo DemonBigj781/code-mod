@@ -55,6 +55,7 @@ class CommandTests(unittest.TestCase):
     def test_ape_build_uses_a_current_lock_with_patched_runtime_dependencies(self):
         support = Path(__file__).resolve().parents[1]
         script = (support.parent / "build-cosmopolitan-code.sh").read_text()
+        workspace = (support / "prepare-code-workspace.sh").read_text()
         lock = tomllib.loads((support / "Cargo.lock").read_text())
         packages = {package["name"]: package for package in lock["package"]}
         source_lock = tomllib.loads(
@@ -63,7 +64,11 @@ class CommandTests(unittest.TestCase):
         source_packages = {
             package["name"]: package for package in source_lock["package"]
         }
-        self.assertIn('cp "$support_dir/Cargo.lock"', script)
+        self.assertIn('. "$support_dir/prepare-code-workspace.sh"', script)
+        self.assertIn(
+            'cp "$support_dir/Cargo.lock" "$workspace/code-rs/Cargo.lock"',
+            workspace,
+        )
         self.assertIn("--locked", script)
         self.assertEqual(packages["libc"]["version"], "0.2.189")
         self.assertNotIn("source", packages["libc"])
@@ -165,8 +170,11 @@ class CommandTests(unittest.TestCase):
             )
 
         dispatch = next(args for args in calls if args[:3] == ["gh", "workflow", "run"])
-        self.assertIn("mod_version=0.6.197b", dispatch)
+        self.assertIn("tag=0.6.197b", dispatch)
+        self.assertIn("release_type=prerelease", dispatch)
         self.assertIn("build_attempt_count=2", dispatch)
+        self.assertEqual(commands.WORKFLOW, "complete-artifact-creation.yml")
+        self.assertEqual(commands.ARTIFACT, "code.com")
         self.assertTrue((output / "code.com").is_file())
 
     def test_dispatch_run_url_is_used_without_guessing_between_concurrent_runs(self):
@@ -246,13 +254,15 @@ class CommandTests(unittest.TestCase):
         pipeline = (workflows / "code-comeplete-pipeline.yml").read_text()
         prerelease = (workflows / "pre-release-only.yml").read_text()
         release = (workflows / "release-only.yml").read_text()
-        ape = (workflows / "cosmopolitan-code-ape.yml").read_text()
+        compile_only = (workflows / "compile-only.yml").read_text()
+        test_only = (workflows / "test-only.yml").read_text()
 
         self.assertIn("default: prerelease", artifact)
         self.assertIn("uses: ./.github/workflows/check-only.yml", artifact)
         self.assertIn("uses: ./.github/workflows/test-only.yml", artifact)
-        self.assertIn("--mod-version \"${{ inputs.tag }}\"", artifact)
-        self.assertIn("--build-attempt-count \"$GITHUB_RUN_ATTEMPT\"", artifact)
+        self.assertIn("uses: ./.github/workflows/compile-only.yml", artifact)
+        self.assertIn("needs.validate-inputs.outputs.build_attempt_count", artifact)
+        self.assertNotIn("commands.py build-action", artifact)
         self.assertNotIn("gh release", artifact)
         self.assertNotIn("publish-prerelease", artifact)
         self.assertNotIn("publish-release", artifact)
@@ -262,11 +272,16 @@ class CommandTests(unittest.TestCase):
         self.assertIn("if: inputs.release_type == 'release'", pipeline)
         self.assertIn("--build-attempt-count \"$GITHUB_RUN_ATTEMPT\"", prerelease)
         self.assertNotIn("--build-attempt-count", release)
-        self.assertIn("CODE_MOD_VERSION: ${{ inputs.mod_version || '' }}", ape)
+        self.assertIn("COSMOPOLITAN_VALIDATED_RUN_ID", prerelease)
+        self.assertIn("COSMOPOLITAN_VALIDATED_RUN_ID", release)
+        self.assertIn("CODE_MOD_VERSION: ${{ inputs.mod_version || '' }}", compile_only)
         self.assertIn(
             "CODE_BUILD_ATTEMPT_COUNT: ${{ inputs.build_attempt_count || '' }}",
-            ape,
+            compile_only,
         )
+        self.assertIn("o/cosmopolitan-code/runtime-smoke.com", compile_only)
+        self.assertIn("sh scripts/test-cosmopolitan-code.sh", test_only)
+        self.assertFalse((workflows / "cosmopolitan-code-ape.yml").exists())
 
     def test_installers_extract_codex_version_from_dual_version_output(self):
         root = Path(__file__).resolve().parents[3]
@@ -303,24 +318,46 @@ class CommandTests(unittest.TestCase):
 
     def test_successful_workflow_with_skipped_windows_job_cannot_publish(self):
         run = {"headSha": self.commit, "conclusion": "success", "databaseId": 42}
-        jobs = {"jobs": [
-            {"name": "Build APE on Linux", "conclusion": "success"},
+        inspected = dict(run, jobs=[
+            {"name": "Run APE on Linux", "conclusion": "success"},
+            {"name": "Run same APE in Termux Bionic userland", "conclusion": "success"},
             {"name": "Run same APE on Windows", "conclusion": "skipped"},
-        ]}
+        ])
         with patch.object(commands, "workflow_runs", return_value=[run]), \
-             patch.object(commands, "command", return_value=json.dumps(jobs)):
-            with self.assertRaisesRegex(ValueError, "Linux and Windows"):
+             patch.object(commands, "workflow_run", return_value=inspected):
+            with self.assertRaisesRegex(ValueError, "Linux, Termux, and Windows"):
                 commands.require_cross_platform_build(self.commit)
 
     def test_both_successful_platform_jobs_allow_publication(self):
         run = {"headSha": self.commit, "conclusion": "success", "databaseId": 42}
-        jobs = {"jobs": [
-            {"name": "Build APE on Linux", "conclusion": "success"},
-            {"name": "Run same APE on Windows", "conclusion": "success"},
-        ]}
+        inspected = dict(run, jobs=[
+            {"name": "artifact / Run APE on Linux", "conclusion": "success"},
+            {"name": "artifact / Run same APE in Termux Bionic userland", "conclusion": "success"},
+            {"name": "artifact / Run same APE on Windows", "conclusion": "success"},
+        ])
         with patch.object(commands, "workflow_runs", return_value=[run]), \
-             patch.object(commands, "command", return_value=json.dumps(jobs)):
-            self.assertEqual(commands.require_cross_platform_build(self.commit), run)
+             patch.object(commands, "workflow_run", return_value=inspected):
+            self.assertEqual(commands.require_cross_platform_build(self.commit), inspected)
+
+    def test_in_progress_pipeline_run_can_validate_completed_smoke_jobs(self):
+        run = {
+            "headSha": self.commit,
+            "conclusion": "",
+            "databaseId": 42,
+            "jobs": [
+                {"name": name, "conclusion": "success"}
+                for name in commands.REQUIRED_SMOKE_JOBS
+            ],
+        }
+        with patch.object(commands, "workflow_run", return_value=run) as inspect:
+            self.assertEqual(
+                commands.require_cross_platform_build(
+                    self.commit,
+                    validated_run_id=42,
+                ),
+                run,
+            )
+        inspect.assert_called_once_with(42)
 
     def test_run_forwards_arguments_and_preserves_exit_status(self):
         with patch.object(commands, "source_commit", return_value=self.commit), \
@@ -359,14 +396,12 @@ class CommandTests(unittest.TestCase):
     def test_cross_platform_build_must_match_exact_artifact_bytes(self):
         manifest = commands.validate_artifact(*commands.artifact_files(self.output), expected_source_commit=self.commit)
         run = {"headSha": self.commit, "conclusion": "success", "databaseId": 42}
-        jobs = {"jobs": [
-            {"name": "Build APE on Linux", "conclusion": "success"},
-            {"name": "Run same APE on Windows", "conclusion": "success"},
-        ]}
+        inspected = dict(run, jobs=[
+            {"name": name, "conclusion": "success"}
+            for name in commands.REQUIRED_SMOKE_JOBS
+        ])
 
         def download(args, **kwargs):
-            if args[:3] == ["gh", "run", "view"]:
-                return json.dumps(jobs)
             destination = Path(args[args.index("--dir") + 1])
             destination.mkdir()
             archive_size = manifest["browser_runtime"]["archive_size_bytes"]
@@ -382,6 +417,7 @@ class CommandTests(unittest.TestCase):
             return ""
 
         with patch.object(commands, "workflow_runs", return_value=[run]), \
+             patch.object(commands, "workflow_run", return_value=inspected), \
              patch.object(commands, "command", side_effect=download):
             with self.assertRaisesRegex(ValueError, "exact artifact bytes"):
                 commands.require_cross_platform_build(
@@ -421,11 +457,25 @@ class CommandTests(unittest.TestCase):
                         {"codex": "0.153.4", "mod": "0.6.197b", "attempt": "1"},
                     ]
                 )
-                with patch.object(commands, "test_artifact", return_value=manifest), \
+                with patch.dict(
+                         commands.os.environ,
+                         {"COSMOPOLITAN_VALIDATED_RUN_ID": "42"},
+                         clear=False,
+                     ), \
+                     patch.object(commands, "test_artifact", return_value=manifest), \
                      patch.object(commands, "artifact_version", side_effect=versions), \
-                     patch.object(commands, "require_cross_platform_build", return_value={"databaseId": 42, "url": "https://example.invalid/run/42"}), \
+                     patch.object(
+                         commands,
+                         "require_cross_platform_build",
+                         return_value={"databaseId": 42, "url": "https://example.invalid/run/42"},
+                     ) as cross_platform, \
                      patch.object(commands, "command", side_effect=github):
                     commands.publish(self.output, self.commit, "v0.6.197b", prerelease=prerelease)
+                cross_platform.assert_called_once_with(
+                    self.commit,
+                    manifest["artifact_sha256"],
+                    validated_run_id=42,
+                )
                 if prerelease:
                     create = next(args for args in calls if args[:3] == ["gh", "release", "create"])
                     self.assertIn("--prerelease", create)

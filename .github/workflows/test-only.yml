@@ -19,7 +19,7 @@ jobs:
     container:
       image: ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b
       options: --privileged
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Trust container worktrees
@@ -102,3 +102,33 @@ jobs:
           set -euo pipefail
           jobs=$(getconf _NPROCESSORS_ONLN)
           CARGO_TARGET_DIR="$RUNNER_TEMP/code-agent-contract-target" CARGO_BUILD_JOBS="$jobs" cargo +1.93.0 test --locked --manifest-path scripts/agent-contract-check/Cargo.toml -j"$jobs" -- --test-threads=1
+      - name: Build and test the source runtime
+        run: sh scripts/build-cosmopolitan-runtime.sh
+      - name: Test Cosmopolitan APE feature contracts
+        run: sh scripts/test-cosmopolitan-code.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cosmopolitan-runtime-probe
+          path: o/cosmopolitan-runtime/*
+          if-no-files-found: error
+          retention-days: 14
+
+  runtime-windows:
+    name: Test source runtime probe on Windows
+    if: github.ref == 'refs/heads/Main'
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cosmopolitan-runtime-probe
+          path: o/cosmopolitan-runtime
+      - name: Verify and run the identical runtime probe
+        shell: pwsh
+        run: |
+          python scripts/cosmopolitan-code/verify_runtime_probe.py o/cosmopolitan-runtime $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Resolve-Path 'o/cosmopolitan-runtime/runtime-smoke.com').Path --native-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

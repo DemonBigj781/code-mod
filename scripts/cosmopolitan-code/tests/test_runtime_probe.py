@@ -49,50 +49,38 @@ class RuntimeProbeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "built from the pinned fork"):
             verify_probe(self.directory, self.commit)
 
-    def test_windows_runtime_gate_precedes_full_build(self):
+    def test_split_workflows_gate_one_cross_platform_build(self):
         root = Path(__file__).resolve().parents[3]
-        workflow = (root / ".github/workflows/cosmopolitan-code-ape.yml").read_text()
-        project_scope_job = workflow.split("\n  project-scope:\n", 1)[1].split(
-            "\n  runtime:\n", 1
-        )[0]
-        build_job = workflow.split("\n  build:\n", 1)[1].split(
-            "\n  linux-smoke:\n", 1
-        )[0]
-        linux_smoke_job = workflow.split("\n  linux-smoke:\n", 1)[1].split(
+        workflows = root / ".github/workflows"
+        test_workflow = (workflows / "test-only.yml").read_text()
+        compile_workflow = (workflows / "compile-only.yml").read_text()
+        artifact_workflow = (workflows / "complete-artifact-creation.yml").read_text()
+        linux_smoke_job = artifact_workflow.split("\n  linux-smoke:\n", 1)[1].split(
             "\n  termux-bionic-smoke:\n", 1
         )[0]
-        termux_smoke_job = workflow.split("\n  termux-bionic-smoke:\n", 1)[1].split(
+        termux_smoke_job = artifact_workflow.split("\n  termux-bionic-smoke:\n", 1)[1].split(
             "\n  windows-smoke:\n", 1
         )[0]
-        self.assertIn("needs:\n      - project-scope\n      - runtime-windows", build_job)
-        self.assertEqual(workflow.count("if: github.ref == 'refs/heads/Main'"), 7)
+        self.assertFalse((workflows / "cosmopolitan-code-ape.yml").exists())
+        self.assertIn("uses: ./.github/workflows/test-only.yml", artifact_workflow)
+        self.assertIn("uses: ./.github/workflows/compile-only.yml", artifact_workflow)
+        self.assertIn(
+            "needs:\n      - validate-inputs\n      - check\n      - test",
+            artifact_workflow,
+        )
         builder_image = (
             "ghcr.io/demonbigj781/cosmopolitan-code-builder@sha256:"
             "a76d2a7b9ace2a1ec3d874dd8e0751d0ddb677245459a6e1e864a9940fd66f9b"
         )
-        self.assertEqual(workflow.count(f"image: {builder_image}"), 3)
-        self.assertEqual(workflow.count("options: --privileged"), 2)
-        self.assertEqual(workflow.count("name: Trust container worktrees"), 3)
-        self.assertNotIn("safe.directory '*'", workflow)
-        self.assertEqual(workflow.count("mozilla-actions/sccache-action@"), 3)
-        self.assertNotIn("rustup toolchain install 1.93.0", workflow)
-        self.assertNotIn("sudo apt-get update", workflow)
-        for test_filter in (
-            "project_registry",
-            "projects_settings",
-            "workspace_snapshot_tests",
-            "repository_mode_tests",
-        ):
-            command = (
-                "cargo +1.93.0 test --locked -p code-tui --lib "
-                "--no-default-features --features code-fork "
-                f'{test_filter} -j"$jobs"'
-            )
-            self.assertEqual(project_scope_job.count(command), 1)
-        self.assertIn("ref: ${{ steps.fork-pin.outputs.sha }}", workflow)
-        self.assertIn('      - "scripts/smoke-test cosmopolitan-code.sh"', workflow)
-        self.assertIn("actions/upload-artifact@", build_job)
-        self.assertNotIn("check-rustwright-mcp.py", build_job)
+        self.assertEqual(test_workflow.count(f"image: {builder_image}"), 1)
+        self.assertEqual(compile_workflow.count(f"image: {builder_image}"), 1)
+        self.assertEqual(test_workflow.count("mozilla-actions/sccache-action@"), 1)
+        self.assertEqual(compile_workflow.count("mozilla-actions/sccache-action@"), 1)
+        self.assertIn("sh scripts/build-cosmopolitan-runtime.sh", test_workflow)
+        self.assertIn("sh scripts/test-cosmopolitan-code.sh", test_workflow)
+        self.assertIn("needs: test", test_workflow)
+        self.assertIn("sh scripts/build-cosmopolitan-code.sh", compile_workflow)
+        self.assertIn("o/cosmopolitan-code/runtime-smoke.com", compile_workflow)
         self.assertIn("needs: build", linux_smoke_job)
         self.assertIn("actions/download-artifact@", linux_smoke_job)
         self.assertIn("sh 'scripts/smoke-test cosmopolitan-code.sh'", linux_smoke_job)

@@ -1,4 +1,4 @@
-# Cosmopolitan Code APE (experimental)
+# Cosmopolitan Code portable APE (experimental)
 
 This adds a separate x86-64 Cosmopolitan APE build of the existing `code` CLI.
 It does not replace or alter the native Linux and Windows build outputs.
@@ -12,19 +12,19 @@ targets fail closed instead of falling back to this machine or another host.
 
 - `build-auto`: Dispatch the active `Main` GitHub workflow for the exact
   committed revision.
-- `build-action`: Dispatch the `Main` workflow, wait for Linux and Windows
-  startup checks, and download the single executable and manifest. Optional
-  `--mod-version X.Y.Zb` and `--build-attempt-count N` arguments produce the
-  release-specific version string. Push the commit first.
+- `build-action`: Dispatch `Complete Artifact Creation`, wait for Linux, Termux,
+  and Windows startup checks, and download the single executable and manifest.
+  Optional `--mod-version X.Y.Zb` and `--build-attempt-count N` arguments produce
+  the release-specific version string. Push the commit first.
 - `build-local`: Refuse with an explanation that local compilation is disabled.
 - `test`: Verify the source commit, SDK pins, size, hash, and executable startup
   on the current host.
 - `run`: Verify the manifest and forward CLI arguments to the executable.
 - `publish-prerelease`: Publish a fork-marked artifact with a visible build
-  attempt count after those exact bytes pass Linux and Windows.
+  attempt count after those exact bytes pass Linux, Termux, and Windows.
 - `publish-release`: Require a matching prerelease, verify a stable artifact
-  without the attempt count on Linux and Windows, replace the prerelease assets,
-  and promote the tag to latest.
+  without the attempt count through all three runtime gates, replace the
+  prerelease assets, and promote the tag to latest.
 
 make build
 
@@ -116,15 +116,20 @@ The output is placed in `o/cosmopolitan-code/`:
   identifying the source-built runtime, headers, loader, and linker. The
   manifest also records the embedded browser archive size and SHA-256, runtime
   tree SHA-256, file count, and Camoufox, Mesa, and LLVM pins.
+- `runtime-smoke.com` — the source-runtime executable used by the Linux, Termux,
+  and Windows artifact smoke jobs.
 
 The build refuses to overwrite an existing output directory. Set
 `COSMOPOLITAN_CODE_OUTPUT` to a new directory to create another artifact.
 
 ## Validation
 
-The `Test explicit project scope and memory Markdown` and existing APE workflow
-jobs run the Python and Rust validation on GitHub Actions. Local `make check`,
-`make test`, and focused Rust test targets intentionally refuse to run.
+`Test Only` owns the Python, Rust, source-runtime, and APE-feature validation.
+`Compile Only` builds and packages the final executable without repeating those
+test commands. `Complete Artifact Creation` calls Check Only, Test Only, and
+Compile Only once, then downloads the exact Compile Only artifact for Linux,
+Termux, and Windows smoke validation. Local `make check`, `make test`, and
+focused Rust test targets intentionally refuse to run.
 
 The build runs `file`, Cosmopolitan `pecheck`, `code.com --version`, and
 `code.com --help` before publishing its output directory. To repeat those
@@ -141,12 +146,12 @@ and SHA-256 is validated before reuse; an invalid cache is quarantined and
 replaced atomically. `CODE_BROWSER_RUNTIME_DIR` can point development builds at
 an unpacked runtime with the same manifest contract.
 
-The `Main`-branch or manually dispatched workflow is restricted to `Main`. It
-first builds a small source-runtime probe on Linux, verifies its identity and
-checksum, and runs that identical probe on Windows. Only then does it build and
-test Code and run the identical Code artifact on Windows. A runtime failure
-therefore blocks the expensive full build without bypassing any final
-verification.
+The manually dispatched pipeline is restricted to `Main`. Test Only first builds
+a small source-runtime probe on Linux, verifies its identity and checksum, runs
+that identical probe on Windows, and executes the APE-feature test matrix. Only
+then does Compile Only build and package Code. The same uploaded artifact is run
+on Linux, Termux, and Windows, so a runtime or source-test failure blocks the
+expensive final build without bypassing any final verification.
 
 The runtime stage is also available as `sh scripts/build-cosmopolitan-runtime.sh`
 and writes `o/cosmopolitan-runtime/`. The full build uses the same preparation
