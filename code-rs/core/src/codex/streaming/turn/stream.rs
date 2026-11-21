@@ -1,7 +1,17 @@
 use super::*;
 
+use std::time::Instant;
+
 use super::handle_item::handle_response_item;
 use super::latency::TurnLatencyGuard;
+
+fn log_phase(started: Option<Instant>, request_ordinal: u64, phase: &'static str) {
+    if let Some(started) = started {
+        let elapsed_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        // Opt in using RUST_LOG=code_core::turn_phase_timing=debug.
+        tracing::debug!(target: "code_core::turn_phase_timing", request_ordinal, phase, elapsed_us);
+    }
+}
 
 pub(super) async fn try_run_turn(
     sess: &Session,
@@ -27,6 +37,8 @@ pub(super) async fn try_run_turn(
     };
 
     let mut turn_latency_guard = TurnLatencyGuard::new(sess, attempt_req, prompt.as_ref());
+    let timing_enabled = tracing::enabled!(target: "code_core::turn_phase_timing", tracing::Level::DEBUG);
+    let stream_open_started = timing_enabled.then(Instant::now);
     let opened = tokio::select! {
         biased;
         () = sess.wait_for_operator_input(), if yield_to_operator => {
@@ -34,6 +46,7 @@ pub(super) async fn try_run_turn(
         }
         result = sess.client.stream(&prompt) => result,
     };
+    log_phase(stream_open_started, attempt_req, "stream_open");
     let mut stream = match opened {
         Ok(stream) => stream,
         Err(e) => {
@@ -48,6 +61,9 @@ pub(super) async fn try_run_turn(
         }
     };
 
+    let stream_started = timing_enabled.then(Instant::now);
+    let mut first_event_started = stream_started;
+    let mut first_text_started = stream_started;
     let mut pending_tool_calls: Vec<PendingToolCall> = Vec::new();
     loop {
         // Poll the next item from the model stream. We must inspect *both* Ok and Err
@@ -82,6 +98,7 @@ pub(super) async fn try_run_turn(
             }
         };
 
+        log_phase(first_event_started.take(), attempt_req, "first_stream_event");
         match event {
             ResponseEvent::Created { .. } => {}
             ResponseEvent::ServerReasoningIncluded(_included) => {}
@@ -164,6 +181,7 @@ pub(super) async fn try_run_turn(
                 response_id: _,
                 token_usage,
             } => {
+                log_phase(stream_started, attempt_req, "stream_completed_event");
                 let (new_info, rate_limits, should_emit);
                 {
                     let mut state = crate::codex::lock_or_panic!(sess.state);
@@ -211,6 +229,7 @@ pub(super) async fn try_run_turn(
                     }
 
                 if !pending_tool_calls.is_empty() {
+                    let tool_dispatch_started = timing_enabled.then(Instant::now);
                     let results = crate::tools::scheduler::dispatch_pending_tool_calls(
                         sess,
                         turn_diff_tracker,
@@ -222,6 +241,7 @@ pub(super) async fn try_run_turn(
                     )
                     .await;
 
+                    log_phase(tool_dispatch_started, attempt_req, "tool_dispatch");
                     for (pos, resp) in results {
                         if let Some(cell) = output.get_mut(pos) {
                             cell.response = resp;
@@ -230,10 +250,14 @@ pub(super) async fn try_run_turn(
                     }
                 }
 
+                let diff_started = timing_enabled.then(Instant::now);
                 let unified_diff = turn_diff_tracker.get_unified_diff();
+                log_phase(diff_started, attempt_req, "diff_compute");
                 if let Ok(Some(unified_diff)) = unified_diff {
+                    let diff_send_started = timing_enabled.then(Instant::now);
                     let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
                     let _ = sess.tx_event.send(sess.make_event(sub_id, msg)).await;
+                    log_phase(diff_send_started, attempt_req, "diff_send");
                 }
 
                 turn_latency_guard.mark_completed(output.len(), token_usage.as_ref());
@@ -244,6 +268,7 @@ pub(super) async fn try_run_turn(
                 });
             }
             ResponseEvent::OutputTextDelta { delta, item_id, sequence_number, output_index } => {
+                log_phase(first_text_started.take(), attempt_req, "first_text_delta");
                 // Don't append to history during streaming - only send UI events.
                 // The complete message will be added to history when OutputItemDone arrives.
                 // This ensures items are recorded in the correct chronological order.

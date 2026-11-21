@@ -263,6 +263,16 @@ impl TurnDiffTracker {
 
         let current_mode = file_mode_for_path(&current_external_path).unwrap_or(FileMode::Regular);
         let right_bytes = blob_bytes(&current_external_path, current_mode);
+        let left_present = left_oid.as_str() != ZERO_OID;
+        let left_bytes = self.baseline_file_info
+            .get(internal_file_name)
+            .filter(|_| left_present)
+            .map(|info| info.content.as_slice());
+        // Preserve the existing identical-content behavior without spawning git
+        // (or triggering a clean filter) for a file that will not emit a diff.
+        if left_bytes == right_bytes.as_deref() {
+            return aggregated;
+        }
 
         // Compute displays with &mut self before borrowing any baseline content.
         let left_display = self.relative_to_git_root_str(&baseline_external_path);
@@ -281,7 +291,6 @@ impl TurnDiffTracker {
         };
 
         // Borrow baseline content only after all &mut self uses are done.
-        let left_present = left_oid.as_str() != ZERO_OID;
         let left_bytes: Option<&[u8]> = if left_present {
             self.baseline_file_info
                 .get(internal_file_name)
@@ -289,11 +298,6 @@ impl TurnDiffTracker {
         } else {
             None
         };
-
-        // Fast path: identical bytes or both missing.
-        if left_bytes == right_bytes.as_deref() {
-            return aggregated;
-        }
 
         use std::fmt::Write;
         let _ = writeln!(aggregated, "diff --git a/{left_display} b/{right_display}");
@@ -498,6 +502,43 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_collection_skips_git_hash_for_unchanged_bytes() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("tracked.txt");
+        let marker = root.join("hash-called");
+        assert!(Command::new("git").current_dir(root).args(["init", "-q"])
+            .status().unwrap().success());
+        assert!(Command::new("git").current_dir(root)
+            .args(["config", "filter.count_hash.clean", "touch hash-called; cat"])
+            .status().unwrap().success());
+        fs::write(root.join(".gitattributes"), "tracked.txt filter=count_hash\n").unwrap();
+        fs::write(&file, "before\n").unwrap();
+
+        let mut tracker = TurnDiffTracker::new();
+        tracker.on_patch_begin(&HashMap::from([(
+            file.clone(),
+            FileChange::Update {
+                unified_diff: String::new(),
+                move_path: None,
+                original_content: String::new(),
+                new_content: String::new(),
+            },
+        )]));
+        // A clean filter records each hash-object invocation without touching PATH
+        // or any process-global environment, and leaves the blob bytes unchanged.
+        fs::remove_file(&marker).unwrap();
+        assert_eq!(tracker.get_unified_diff().unwrap(), None);
+        assert!(!marker.exists(), "unchanged diff still invoked git hash-object");
+
+        fs::write(&file, "after\n").unwrap();
+        let diff = tracker.get_unified_diff().unwrap().unwrap();
+        assert!(marker.exists(), "changed file did not use git hash-object");
+        assert!(diff.contains("-before\n+after\n"), "{diff}");
     }
 
     #[test]
