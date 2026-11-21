@@ -244,14 +244,20 @@ fn receive_datagram_bytes(socket: &Socket) -> std::io::Result<(Vec<u8>, Vec<Owne
     Ok((data, fds))
 }
 
+fn register_owned_socket(socket: Socket) -> std::io::Result<AsyncFd<Socket>> {
+    socket.set_nonblocking(true)?;
+    // SAFETY: Socket owns the descriptor, and these wrappers keep it unchanged
+    // until AsyncFd deregisters it on drop or through into_inner.
+    Ok(unsafe { AsyncFd::register(socket) }?)
+}
+
 pub(crate) struct AsyncSocket {
     inner: AsyncFd<Socket>,
 }
 
 impl AsyncSocket {
     fn new(socket: Socket) -> std::io::Result<AsyncSocket> {
-        socket.set_nonblocking(true)?;
-        let async_socket = AsyncFd::new(socket)?;
+        let async_socket = register_owned_socket(socket)?;
         Ok(AsyncSocket {
             inner: async_socket,
         })
@@ -365,9 +371,8 @@ pub(crate) struct AsyncDatagramSocket {
 
 impl AsyncDatagramSocket {
     fn new(socket: Socket) -> std::io::Result<Self> {
-        socket.set_nonblocking(true)?;
         Ok(Self {
-            inner: AsyncFd::new(socket)?,
+            inner: register_owned_socket(socket)?,
         })
     }
 
