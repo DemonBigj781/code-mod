@@ -30,7 +30,7 @@ pub(crate) fn compact_with_endpoint(
     conversation: &[ResponseItem],
     model_slug: &str,
     compact_prompt: &str,
-) -> Result<Vec<ResponseItem>> {
+) -> Result<Option<Vec<ResponseItem>>> {
     let goal_marker = conversation
         .iter()
         .position(|item| matches!(item, ResponseItem::Message { role, .. } if role == "user"))
@@ -39,7 +39,7 @@ pub(crate) fn compact_with_endpoint(
     let sanitized_input = sanitize_items_for_compact(conversation.to_vec());
 
     let prompt_instructions = compact_prompt.trim();
-    let mut compacted = runtime
+    let compacted = runtime
         .block_on(async {
             timeout(Duration::from_secs(SUMMARY_TIMEOUT_SECONDS), async {
                 let mut prompt = Prompt::default();
@@ -63,11 +63,15 @@ pub(crate) fn compact_with_endpoint(
             )
         })??;
 
+    let Some(mut compacted) = compacted else {
+        return Ok(None);
+    };
+
     if let Some((goal_idx, goal_item)) = goal_marker {
         ensure_goal_is_present(&mut compacted, goal_item, goal_idx);
     }
 
-    Ok(compacted)
+    Ok(Some(compacted))
 }
 
 fn ensure_goal_is_present(

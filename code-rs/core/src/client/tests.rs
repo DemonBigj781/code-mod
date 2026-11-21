@@ -1316,3 +1316,150 @@ fn websocket_error_without_status_surfaces_stream_message() {
         other => panic!("unexpected mapped websocket error: {other:?}"),
     }
 }
+
+fn compact_test_client(
+    endpoint: String,
+    provider_key: Option<&str>,
+) -> (tempfile::TempDir, ModelClient) {
+    use crate::config::{ConfigOverrides, ConfigToml};
+
+    let home = tempfile::tempdir().or_panic("isolated compaction test home");
+    let config = Arc::new(
+        Config::load_from_base_config_with_overrides(
+            ConfigToml::default(),
+            ConfigOverrides::default(),
+            home.path().to_path_buf(),
+        )
+        .or_panic("compaction test config"),
+    );
+    let provider = ModelProviderInfo {
+        base_url: Some(endpoint),
+        wire_api: WireApi::Responses,
+        experimental_bearer_token: provider_key.map(str::to_owned),
+        ..crate::model_provider_info::built_in_model_providers(None)["openai"].clone()
+    };
+    let client = ModelClient::new(
+        config,
+        Some(AuthManager::from_auth_for_testing(
+            auth::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        )),
+        None,
+        provider,
+        ReasoningEffortConfig::default(),
+        ReasoningSummaryConfig::default(),
+        TextVerbosityConfig::default(),
+        Uuid::new_v4(),
+        disabled_debug_logger(),
+    );
+    (home, client)
+}
+
+fn compact_test_prompt(model: &str) -> Prompt {
+    Prompt {
+        model_override: Some(model.to_owned()),
+        input: vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_owned(),
+            content: vec![code_protocol::models::ContentItem::InputText {
+                text: "Remember this local compaction fixture".to_owned(),
+            }],
+            end_turn: None,
+            phase: None,
+        }],
+        ..Prompt::default()
+    }
+}
+
+#[tokio::test]
+async fn compact_endpoint_miss_is_reused_until_effective_model_or_credentials_change() {
+    use wiremock::matchers::{body_partial_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    if std::env::var_os(crate::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_some() {
+        return;
+    }
+    let server = MockServer::start().await;
+    let (_home, client) = compact_test_client(server.uri(), Some("compaction-fixture-key"));
+    let clone = client.clone();
+    let mut rotated = client.clone();
+    rotated.provider.experimental_bearer_token = Some("rotated-compaction-fixture-key".to_owned());
+
+    Mock::given(method("POST"))
+        .and(path("/responses/compact"))
+        .and(header("authorization", "Bearer compaction-fixture-key"))
+        .and(body_partial_json(json!({"model": "fixture-model"})))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({"detail": "Not Found"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    for (model, auth) in [
+        ("other-fixture-model", "Bearer compaction-fixture-key"),
+        ("fixture-model", "Bearer rotated-compaction-fixture-key"),
+    ] {
+        Mock::given(method("POST"))
+            .and(path("/responses/compact"))
+            .and(header("authorization", auth))
+            .and(body_partial_json(json!({"model": model})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"output": []})))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let prompt = compact_test_prompt("fixture-model");
+    assert!(client
+        .compact_conversation_history(&Prompt::default())
+        .await
+        .or_panic("empty input should not be treated as unavailability")
+        .is_some_and(|history| history.is_empty()));
+    for client in [&client, &clone] {
+        assert!(client
+            .compact_conversation_history(&prompt)
+            .await
+            .or_panic("exact compact route miss should become unavailability")
+            .is_none());
+    }
+    assert!(clone
+        .compact_conversation_history(&compact_test_prompt("other-fixture-model"))
+        .await
+        .or_panic("model change should probe independently")
+        .is_some());
+    assert!(rotated
+        .compact_conversation_history(&prompt)
+        .await
+        .or_panic("credential change should probe independently")
+        .is_some());
+}
+
+#[tokio::test]
+async fn compact_model_not_found_is_an_error_and_does_not_poison_the_route() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    if std::env::var_os(crate::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_some() {
+        return;
+    }
+    let server = MockServer::start().await;
+    let (_home, client) = compact_test_client(server.uri(), None);
+    let error_body = json!({"error": {"code": "model_not_found", "message": "Model not found"}});
+    Mock::given(method("POST"))
+        .and(path("/responses/compact"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(&error_body))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let prompt = compact_test_prompt("unknown-fixture-model");
+    for _ in 0..2 {
+        match client.compact_conversation_history(&prompt).await {
+            Err(CodexErr::UnexpectedStatus(response)) => {
+                assert_eq!(response.status, StatusCode::NOT_FOUND);
+                assert_eq!(
+                    serde_json::from_str::<Value>(&response.body).or_panic("original API error body"),
+                    error_body,
+                );
+            }
+            other => panic!("expected structured model error, got {other:?}"),
+        }
+    }
+}

@@ -198,6 +198,14 @@ pub(super) async fn run_inline_auto_compact_task(
     turn_context: Arc<TurnContext>,
 ) -> Vec<ResponseItem> {
     let sub_id = sess.next_internal_sub_id();
+    run_inline_auto_compact_task_with_id(sess, turn_context, sub_id).await
+}
+
+pub(super) async fn run_inline_auto_compact_task_with_id(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    sub_id: String,
+) -> Vec<ResponseItem> {
     let prompt_text = resolve_compact_prompt_text(turn_context.compact_prompt_override.as_deref());
     let input = vec![InputItem::Text { text: prompt_text.clone() }];
     run_compact_task_inner_inline(sess, turn_context, sub_id, input).await

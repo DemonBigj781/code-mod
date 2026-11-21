@@ -7,7 +7,7 @@ use super::compact::{
     perform_compaction,
     prune_orphan_tool_outputs,
     response_input_from_core_items,
-    run_inline_auto_compact_task,
+    run_inline_auto_compact_task_with_id,
     sanitize_items_for_compact,
     send_compaction_checkpoint_warning,
 };
@@ -39,7 +39,6 @@ fn should_fallback_to_local_compaction(err: &CodexErr) -> bool {
                 || matches!(
                     response.status,
                     StatusCode::BAD_REQUEST
-                        | StatusCode::NOT_FOUND
                         | StatusCode::METHOD_NOT_ALLOWED
                         | StatusCode::UNPROCESSABLE_ENTITY
                         | StatusCode::NOT_IMPLEMENTED
@@ -86,10 +85,11 @@ pub(super) async fn run_inline_remote_auto_compact_task(
 ) -> Vec<ResponseItem> {
     let sub_id = sess.next_internal_sub_id();
     match run_remote_compact_task_inner(&sess, &turn_context, &sub_id, extra_input).await {
-        Ok(history) => history,
+        Ok(Some(history)) => history,
+        Ok(None) => run_inline_auto_compact_task_with_id(sess, turn_context, sub_id).await,
         Err(err) if should_fallback_to_local_compaction(&err) => {
             report_remote_compaction_fallback(&sess, &sub_id, &err).await;
-            run_inline_auto_compact_task(sess, turn_context).await
+            run_inline_auto_compact_task_with_id(sess, turn_context, sub_id).await
         }
         Err(err) => {
             let event = sess.make_event(
@@ -112,13 +112,14 @@ pub(super) async fn run_remote_compact_task(
 ) -> CodexResult<()> {
     let fallback_input = extra_input.clone();
     match run_remote_compact_task_inner(&sess, &turn_context, &sub_id, extra_input).await {
-        Ok(_history) => {
+        Ok(Some(_history)) => {
             // Mirror local compaction behaviour: clear the running task when the
             // compaction finished successfully so the UI can unblock.
             sess.revoke_deno_turn_permissions().await;
             sess.remove_task(&sub_id);
             Ok(())
         }
+        Ok(None) => perform_compaction(sess, turn_context, sub_id, fallback_input, true).await,
         Err(err) if should_fallback_to_local_compaction(&err) => {
             report_remote_compaction_fallback(&sess, &sub_id, &err).await;
             perform_compaction(sess, turn_context, sub_id, fallback_input, true).await
@@ -141,7 +142,7 @@ async fn run_remote_compact_task_inner(
     turn_context: &Arc<TurnContext>,
     sub_id: &str,
     extra_input: Vec<InputItem>,
-) -> CodexResult<Vec<ResponseItem>> {
+) -> CodexResult<Option<Vec<ResponseItem>>> {
     let mut turn_items = sess.turn_input_with_history({
         if extra_input.is_empty() {
             Vec::new()
@@ -186,13 +187,40 @@ async fn run_remote_compact_task_inner(
             .compact_conversation_history(&prompt)
             .await
         {
-            Ok(history) => {
+            Ok(Some(history)) => {
                 if truncated_count > 0 {
                     tracing::warn!(
                         "Context window exceeded during remote compact; trimmed {truncated_count} item(s) from prompt"
                     );
                 }
                 break history;
+            }
+            Ok(None) => {
+                emit_compaction_telemetry(
+                    sess,
+                    ContextManagementPath::RemoteCompaction,
+                    ContextManagementOutcome::Fallback,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some("Remote compaction endpoint is unavailable".to_owned()),
+                );
+                return Ok(None);
+            }
+            Err(CodexErr::UnexpectedStatus(response)) if response.status == StatusCode::NOT_FOUND => {
+                let err = CodexErr::UnexpectedStatus(response);
+                emit_compaction_telemetry(
+                    sess,
+                    ContextManagementPath::RemoteCompaction,
+                    ContextManagementOutcome::Failed,
+                    Some(telemetry_started),
+                    Some(telemetry_input_count),
+                    None,
+                    Some(truncated_count),
+                    Some(err.to_string()),
+                );
+                return Err(err);
             }
             Err(err) if is_context_overflow_error(&err) => {
                 if turn_items.len() > 1
@@ -223,7 +251,7 @@ async fn run_remote_compact_task_inner(
                         Some(truncated_count),
                         Some(reason.clone()),
                     );
-                    return Ok(
+                    return Ok(Some(
                         apply_emergency_compaction_fallback(
                             sess,
                             turn_context.as_ref(),
@@ -231,7 +259,7 @@ async fn run_remote_compact_task_inner(
                             &reason,
                         )
                         .await,
-                    );
+                    ));
                 }
 
                 let reason = "Remote compact failed: context overflow even with minimal input.";
@@ -245,7 +273,7 @@ async fn run_remote_compact_task_inner(
                     Some(truncated_count),
                     Some(reason.to_owned()),
                 );
-                return Ok(
+                return Ok(Some(
                     apply_emergency_compaction_fallback(
                         sess,
                         turn_context.as_ref(),
@@ -253,7 +281,7 @@ async fn run_remote_compact_task_inner(
                         reason,
                     )
                     .await,
-                );
+                ));
             }
             Err(CodexErr::UsageLimitReached(limit_err)) => {
                 if usage_limit_retries >= MAX_REMOTE_COMPACT_USAGE_LIMIT_RETRIES {
@@ -268,7 +296,7 @@ async fn run_remote_compact_task_inner(
                         Some(truncated_count),
                         Some(reason.to_owned()),
                     );
-                    return Ok(
+                    return Ok(Some(
                         apply_emergency_compaction_fallback(
                             sess,
                             turn_context.as_ref(),
@@ -276,7 +304,7 @@ async fn run_remote_compact_task_inner(
                             reason,
                         )
                         .await,
-                    );
+                    ));
                 }
                 usage_limit_retries = usage_limit_retries.saturating_add(1);
                 let now = chrono::Utc::now();
@@ -365,7 +393,7 @@ async fn run_remote_compact_task_inner(
         None,
     );
 
-    Ok(new_history)
+    Ok(Some(new_history))
 }
 
 #[cfg(test)]
@@ -381,7 +409,7 @@ mod tests {
     fn remote_service_failures_fall_back_locally_but_account_failures_do_not() {
         let not_found = CodexErr::UnexpectedStatus(UnexpectedResponseError {
             status: StatusCode::NOT_FOUND,
-            body: r#"{"detail":"Not Found"}"#.to_string(),
+            body: r#"{"error":{"code":"model_not_found","message":"Unknown model"}}"#.to_string(),
             request_id: None,
         });
         let server_error = CodexErr::UnexpectedStatus(UnexpectedResponseError {
@@ -411,7 +439,7 @@ mod tests {
         });
         let expired_auth = CodexErr::AuthRefreshPermanent("expired".to_owned());
 
-        assert!(should_fallback_to_local_compaction(&not_found));
+        assert!(!should_fallback_to_local_compaction(&not_found));
         assert!(should_fallback_to_local_compaction(&server_error));
         assert!(should_fallback_to_local_compaction(&stream_error));
         assert!(!should_fallback_to_local_compaction(&rate_limited));

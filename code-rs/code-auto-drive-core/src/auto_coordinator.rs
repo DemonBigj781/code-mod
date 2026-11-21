@@ -4674,7 +4674,7 @@ fn maybe_compact(request: CompactionRequest<'_>) -> CompactionResult {
 
     let original_len = conversation.len();
     match compact_with_endpoint(runtime, client, conversation, model_slug, compact_prompt) {
-        Ok(compacted) => {
+        Ok(Some(compacted)) => {
             let removed = original_len.saturating_sub(compacted.len());
             let plural = if removed == 1 { "" } else { "s" };
             *conversation = compacted;
@@ -4693,12 +4693,25 @@ fn maybe_compact(request: CompactionRequest<'_>) -> CompactionResult {
                 summary_text: None,
             };
         }
+        Ok(None) => {}
         Err(err) => {
             warn!("[Auto coordinator] remote compaction failed: {err:#}");
+            let not_found = matches!(
+                err.downcast_ref::<code_core::error::CodexErr>(),
+                Some(code_core::error::CodexErr::UnexpectedStatus(response))
+                    if response.status.as_u16() == 404
+            );
             event_tx.send(AutoCoordinatorEvent::Thinking {
-                delta: "Remote compaction failed; falling back to local summary.".to_owned(),
+                delta: if not_found {
+                    format!("Remote compaction failed: {err:#}")
+                } else {
+                    format!("Remote compaction failed; falling back to local summary. Original error: {err:#}")
+                },
                 summary_index: None,
             });
+            if not_found {
+                return CompactionResult::Skipped;
+            }
         }
     }
 

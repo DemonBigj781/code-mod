@@ -1,4 +1,5 @@
 use std::fmt::Write as _;
+use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -314,6 +315,8 @@ pub struct ModelClient {
     summary: ReasoningSummaryConfig,
     reasoning_summary_disabled: AtomicBool,
     websockets_disabled: AtomicBool,
+    compact_route_hash: RandomState,
+    unavailable_compact_route: Arc<Mutex<Option<u64>>>,
     verbosity: TextVerbosityConfig,
     debug_logger: Arc<Mutex<DebugLogger>>,
     openrouter_free_router: Option<Arc<OpenRouterFreeRouter>>,
@@ -336,6 +339,8 @@ impl Clone for ModelClient {
             websockets_disabled: AtomicBool::new(
                 self.websockets_disabled.load(Ordering::Relaxed),
             ),
+            compact_route_hash: self.compact_route_hash.clone(),
+            unavailable_compact_route: Arc::clone(&self.unavailable_compact_route),
             verbosity: self.verbosity,
             debug_logger: Arc::clone(&self.debug_logger),
             openrouter_free_router: self.openrouter_free_router.clone(),
@@ -375,6 +380,8 @@ impl ModelClient {
             summary,
             reasoning_summary_disabled: AtomicBool::new(false),
             websockets_disabled: AtomicBool::new(false),
+            compact_route_hash: RandomState::new(),
+            unavailable_compact_route: Arc::new(Mutex::new(None)),
             verbosity: effective_verbosity,
             debug_logger,
             openrouter_free_router,
@@ -2061,9 +2068,13 @@ impl ModelClient {
         self.auth_manager.clone()
     }
 
-    pub async fn compact_conversation_history(&self, prompt: &Prompt) -> Result<Vec<ResponseItem>> {
+    /// Returns `None` only when this provider route does not implement remote compaction.
+    pub async fn compact_conversation_history(
+        &self,
+        prompt: &Prompt,
+    ) -> Result<Option<Vec<ResponseItem>>> {
         if prompt.input.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Some(Vec::new()));
         }
 
         let auth_manager = self.auth_manager.clone();
@@ -2093,8 +2104,12 @@ impl ModelClient {
         let mut request_id = String::new();
 
         loop {
-            let base_auth = auth_manager.as_ref().and_then(|m| m.auth());
+            let auth_revision = auth_manager.as_ref().map(|manager| manager.auth_revision());
+            let base_auth = auth_manager.as_ref().and_then(|manager| manager.auth());
             let auth = self.provider.effective_auth(base_auth.as_ref()).await?;
+            if self.provider.get_compact_url(auth.as_ref()).is_none() {
+                return Ok(None);
+            }
             let mut request = self
                 .provider
                 .create_compact_request_builder_with_auth(&self.client, auth.as_ref())
@@ -2131,33 +2146,63 @@ impl ModelClient {
                 request = request.header("chatgpt-account-id", account_id);
             }
 
-            request = request.json(&payload);
+            let request = request.json(&payload).build()?;
+            let route_url = request.url().clone();
 
-            let header_snapshot = request
-                .try_clone()
-                .and_then(|builder| builder.build().ok())
-                .map(|req| header_map_to_json(req.headers()));
+            // Include effective provider credentials (even custom auth headers) in
+            // the identity, but retain only a process-randomized digest. Ignore the
+            // per-window header so changing windows does not re-probe a known route.
+            let mut digest = self.compact_route_hash.build_hasher();
+            route_url.hash(&mut digest);
+            model_slug.hash(&mut digest);
+            auth_revision.hash(&mut digest);
+            auth.as_ref()
+                .map(|a| std::mem::discriminant(&a.mode))
+                .hash(&mut digest);
+            let headers = request.headers();
+            let mut names: Vec<_> = headers
+                .keys()
+                .filter(|name| name.as_str() != X_CODEX_WINDOW_ID_HEADER)
+                .collect();
+            names.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+            for name in names {
+                name.as_str().hash(&mut digest);
+                for value in headers.get_all(name) {
+                    value.as_bytes().hash(&mut digest);
+                }
+            }
+            let route_key = digest.finish();
+
+            if self
+                .unavailable_compact_route
+                .lock()
+                .is_ok_and(|route| *route == Some(route_key))
+            {
+                return Ok(None);
+            }
 
             if request_id.is_empty()
                 && let Ok(logger) = self.debug_logger.lock()
             {
-                let endpoint = self
-                    .provider
-                    .get_compact_url(auth.as_ref())
-                    .unwrap_or_else(|| self.provider.get_full_url(auth.as_ref()));
+                let mut endpoint = route_url.clone();
+                let _ = endpoint.set_username("");
+                let _ = endpoint.set_password(None);
+                endpoint.set_query(None);
+                endpoint.set_fragment(None);
                 request_id = logger
                     .start_request_log(
-                        &endpoint,
+                        endpoint.as_str(),
                         &payload_json,
-                        header_snapshot.as_ref(),
+                        None,
                         Some("compact_remote"),
                     )
                     .unwrap_or_default();
             }
 
-            let response = request.send().await?;
+            let response = self.client.execute(request).await.map_err(reqwest::Error::without_url)?;
+            let same_url = response.url() == &route_url;
             let status = response.status();
-            let body = response.text().await?;
+            let body = response.text().await.map_err(reqwest::Error::without_url)?;
 
             if status == StatusCode::TOO_MANY_REQUESTS
                 && self.config.auto_switch_accounts_on_rate_limit
@@ -2227,6 +2272,13 @@ impl ModelClient {
                 let _ = logger.end_request_log(&request_id);
             }
 
+            if same_url && is_missing_compact_route(status, &body) {
+                if let Ok(mut route) = self.unavailable_compact_route.lock() {
+                    *route = Some(route_key);
+                }
+                return Ok(None);
+            }
+
             if !status.is_success() {
                 return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
                     status,
@@ -2236,9 +2288,21 @@ impl ModelClient {
             }
 
             let CompactHistoryResponse { output } = serde_json::from_str(&body)?;
-            return Ok(output);
+            return Ok(Some(output));
         }
     }
+}
+
+fn is_missing_compact_route(status: StatusCode, body: &str) -> bool {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct RouteNotFound {
+        detail: String,
+    }
+
+    status == StatusCode::NOT_FOUND
+        && serde_json::from_str::<RouteNotFound>(body)
+            .is_ok_and(|error| error.detail == "Not Found")
 }
 
 fn attach_codex_beta_features_header(
