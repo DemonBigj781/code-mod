@@ -152,9 +152,7 @@ impl HistoryCell for ExecCell {
     }
 
     fn is_fold_toggleable(&self) -> bool {
-        // exec_command_lines always emits ≥1 pre-line + ≥1 output line when
-        // output is present, so the expanded view always exceeds the 1-line
-        // collapsed summary. No need to build lines just to confirm > 1.
+        // Completed output can be folded without rendering the expanded view.
         self.output.is_some()
     }
 
